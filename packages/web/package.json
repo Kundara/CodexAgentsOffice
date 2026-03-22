@@ -1,0 +1,14 @@
+{
+  "name": "@codex-agents-office/web",
+  "version": "0.1.0",
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@codex-agents-office/core": "file:../core"
+  }
+}

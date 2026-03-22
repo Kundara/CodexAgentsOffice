@@ -1,0 +1,65 @@
+{
+  "name": "@codex-agents-office/vscode",
+  "displayName": "Codex Agents Office",
+  "description": "Room-based activity view for Codex local sessions and cloud tasks.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:codexAgentsOffice.view",
+    "onCommand:codexAgentsOffice.refresh",
+    "onCommand:codexAgentsOffice.openRoomsXml",
+    "onCommand:codexAgentsOffice.scaffoldRoomsXml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codexAgentsOffice",
+          "title": "Codex Office",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codexAgentsOffice": [
+        {
+          "id": "codexAgentsOffice.view",
+          "name": "Agents Office",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "codexAgentsOffice.refresh",
+        "title": "Codex Agents Office: Refresh"
+      },
+      {
+        "command": "codexAgentsOffice.openRoomsXml",
+        "title": "Codex Agents Office: Open Rooms XML"
+      },
+      {
+        "command": "codexAgentsOffice.scaffoldRoomsXml",
+        "title": "Codex Agents Office: Scaffold Rooms XML"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codex-agents-office/core": "file:../core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/vscode": "^1.97.0"
+  }
+}

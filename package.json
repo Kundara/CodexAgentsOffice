@@ -1,0 +1,17 @@
+{
+  "name": "codex-agents-office",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/core && npm run build -w packages/web && npm run build -w packages/cli && npm run build -w packages/vscode",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "web": "node packages/cli/dist/index.js web"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "agents": {
+    "019d1565-c654-77a1-84f2-4c32d7a35de8": {
+      "appearanceId": "sun",
+      "updatedAt": "2026-03-22T13:31:02.000Z"
+    },
+    "019d1561-6ef6-7661-a881-bfd8d1acff0f": {
+      "appearanceId": "mint",
+      "updatedAt": "2026-03-22T12:10:00.655Z"
+    },
+    "019d15bc-974b-7b03-b30b-00b81029dee2": {
+      "appearanceId": "ember",
+      "updatedAt": "2026-03-22T13:29:39.813Z"
+    },
+    "019d1626-74be-7cd3-bffd-ed0eec932137": {
+      "appearanceId": "fern",
+      "updatedAt": "2026-03-22T15:38:14.399Z"
+    },
+    "019d1626-c630-75c3-be0d-2b5f25890aaf": {
+      "appearanceId": "fern",
+      "updatedAt": "2026-03-22T15:38:14.405Z"
+    },
+    "019d1625-7934-74a1-9a73-3592c307a6a8": {
+      "appearanceId": "rose",
+      "updatedAt": "2026-03-22T15:38:14.412Z"
+    },
+    "019d1625-c7e5-7c43-9ed2-62e3391bab85": {
+      "appearanceId": "slate",
+      "updatedAt": "2026-03-22T15:38:14.418Z"
+    },
+    "019d1626-c6a1-7663-a32d-0d9892d5fa41": {
+      "appearanceId": "fern",
+      "updatedAt": "2026-03-22T15:38:14.424Z"
+    },
+    "019d1625-c863-76a1-9faa-84744b317b87": {
+      "appearanceId": "iris",
+      "updatedAt": "2026-03-22T15:38:14.431Z"
+    },
+    "019d1636-7100-7673-b016-9befde1d191d": {
+      "appearanceId": "mint",
+      "updatedAt": "2026-03-22T15:43:10.498Z"
+    },
+    "019d1637-3047-7d80-aab8-af670a7a8952": {
+      "appearanceId": "mint",
+      "updatedAt": "2026-03-22T15:43:49.021Z"
+    },
+    "019d1637-6b3f-7fa0-a0d4-134765278f76": {
+      "appearanceId": "fern",
+      "updatedAt": "2026-03-22T15:44:01.061Z"
+    },
+    "019d1649-61d0-7e30-8784-8b63af6c5ba1": {
+      "appearanceId": "mint",
+      "updatedAt": "2026-03-22T16:03:50.444Z"
+    },
+    "019d164a-4ead-7363-852b-4e07f8332a28": {
+      "appearanceId": "iris",
+      "updatedAt": "2026-03-22T16:04:50.048Z"
+    },
+    "019d164a-8967-7880-86ca-9e0ea43bc213": {
+      "appearanceId": "fern",
+      "updatedAt": "2026-03-22T16:05:06.075Z"
+    },
+    "019d164a-cbb5-7d22-9464-6af0d7cbd5dd": {
+      "appearanceId": "ember",
+      "updatedAt": "2026-03-22T16:05:22.253Z"
+    },
+    "019d164c-dcac-78d3-8697-291ba8da62f7": {
+      "appearanceId": "slate",
+      "updatedAt": "2026-03-22T16:07:38.967Z"
+    },
+    "019d164d-8497-7720-9ca2-1a3858f13554": {
+      "appearanceId": "slate",
+      "updatedAt": "2026-03-22T16:08:10.270Z"
+    },
+    "019d164d-c6b4-71a0-9cb0-30b0ef746863": {
+      "appearanceId": "sun",
+      "updatedAt": "2026-03-22T16:08:25.231Z"
+    },
+    "019d164e-1d29-79d3-9ed3-01ddd21531ce": {
+      "appearanceId": "mint",
+      "updatedAt": "2026-03-22T16:09:01.116Z"
+    },
+    "019d164e-f455-7f21-81f7-ee6c4ce3a29a": {
+      "appearanceId": "sun",
+      "updatedAt": "2026-03-22T16:09:42.305Z"
+    },
+    "019d164f-2f61-7bf3-ad29-50224dd8a7e4": {
+      "appearanceId": "rose",
+      "updatedAt": "2026-03-22T16:09:59.303Z"
+    }
+  }
+}

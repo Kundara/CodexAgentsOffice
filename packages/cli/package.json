@@ -1,0 +1,17 @@
+{
+  "name": "@codex-agents-office/cli",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "codex-agents-office": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codex-agents-office/core": "file:../core",
+    "@codex-agents-office/web": "file:../web"
+  }
+}
