@@ -36,7 +36,7 @@ Codex Agents Office turns those signals into a current-state office view instead
 - **Persistent appearance overrides**
   Agent looks are stored in `.codex-agents/agents.json`.
 - **Current-workload-first rendering**
-  The product is optimized for what is happening now, not for long-form transcript playback.
+  The product is optimized for what is happening now, while still keeping the 4 most recent lead sessions visible in the rec area.
 - **Codex-native state first**
   Local Codex thread state and cloud task data drive the scene before any transcript-like fallback sources.
 
@@ -51,7 +51,7 @@ It supports:
 - fleet summaries across multiple projects
 - deep links into one project with `?project=/abs/project/path`
 - office and terminal-style rendering with `?view=map` and `?view=terminal`
-- current workload by default, with older sessions available through `?history=1`
+- live agents plus the 4 most recent lead sessions for each workspace
 - static screenshot rendering through `?screenshot=1`
 
 ### Terminal
@@ -144,7 +144,7 @@ Claude local session logs are supported as a secondary source for discovery and 
 The normalized snapshot is then rendered into:
 
 - desks for active work
-- rec-area placement for waiting or resting work
+- rec-area placement for waiting, resting, and the 4 most recent lead sessions
 - hover cards and session panels for longer detail
 - live notifications for file changes, commands, approval waits, and user-input waits
 

@@ -87,6 +87,7 @@ curl http://127.0.0.1:4181/api/fleet
 ```bash
 lsof -iTCP:4181 -sTCP:LISTEN -n -P
 lsof -tiTCP:4181 -sTCP:LISTEN | xargs -r kill
+pkill -f 'packages/web/dist/server.js --port 4181'
 ```
 
 - If launching through the CLI entrypoint, rebuild both packages first:
@@ -122,6 +123,7 @@ node packages/web/dist/server.js --port 4181
 ## Renderer expectations
 
 - Use current workload by default.
+- Keep the browser map fixed to live agents on desks plus the 4 most recent lead sessions in the rec area.
 - Keep browser layout responsive across wide and narrow screens.
 - Empty rooms should read as quiet space, not error states.
 - Rec Room is for waiting/resting agents only.

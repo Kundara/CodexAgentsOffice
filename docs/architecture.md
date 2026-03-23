@@ -73,7 +73,7 @@ Sources:
   - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
   - live SSE updates for browser clients
   - map and terminal-style views through `?view=map|terminal`
-  - current-workload mode by default, with history opt-in through `?history=1`
+  - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
   - snapshot-only rendering through `?screenshot=1`
   - session-card hover/focus dims unrelated agents so the visible thread cluster for that session stands out in the map
   - HTTP endpoints for snapshot refresh, room scaffolding, and appearance cycling
@@ -157,6 +157,7 @@ The active office view currently favors an open station language over enclosed c
 - chairs and seated reach points sit slightly outward from the desk so the monitor relationship reads cleanly
 - workstation computers currently use the single complete desk cut, avoiding the broken narrow pseudo-monitor asset
 - waiting and resting agents move to an integrated wall-side rec strip instead of a detached room
+- the browser view no longer exposes a current/history toggle; it always shows current agents plus 4 recent lead sessions
 - rec facilities sit on the same raised upper floor band as the wall-side walkway, not in a floating inset
 - the rec strip combines vending, counter, doors, clock, plants, sofa, and shelf props inside the same scene
 - long task titles stay in hover cards and the session panel instead of being drawn over the map

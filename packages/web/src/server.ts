@@ -1690,7 +1690,6 @@ function renderHtml(options: ServerOptions): string {
           <div class="tabs-head">
             <strong>Workspaces</strong>
             <div class="tabs-actions">
-              <button id="active-only-button" class="toggle-button">Current only</button>
               <span class="muted" id="project-count"></span>
             </div>
           </div>
@@ -1730,7 +1729,7 @@ function renderHtml(options: ServerOptions): string {
       const params = new URLSearchParams(window.location.search);
       const initialProject = params.get("project") || "all";
       const initialView = params.get("view") || "map";
-      const initialActiveOnly = params.get("history") !== "1" && params.get("active") !== "0";
+      const initialActiveOnly = true;
       const screenshotMode = params.get("screenshot") === "1";
       if (screenshotMode) {
         document.body.classList.add("snapshot-mode");
@@ -1806,7 +1805,6 @@ function renderHtml(options: ServerOptions): string {
 
       const mapViewButton = document.getElementById("map-view-button");
       const terminalViewButton = document.getElementById("terminal-view-button");
-      const activeOnlyButton = document.getElementById("active-only-button");
       const refreshButton = document.getElementById("refresh-button");
       const scaffoldButton = document.getElementById("scaffold-button");
       const connectionPill = document.getElementById("connection-pill");
@@ -1826,8 +1824,7 @@ function renderHtml(options: ServerOptions): string {
         if (state.view === "map") url.searchParams.delete("view");
         else url.searchParams.set("view", state.view);
         url.searchParams.delete("active");
-        if (state.activeOnly) url.searchParams.delete("history");
-        else url.searchParams.set("history", "1");
+        url.searchParams.delete("history");
         window.history.replaceState({}, "", url);
       }
 
@@ -1839,12 +1836,6 @@ function renderHtml(options: ServerOptions): string {
 
       function setView(nextView) {
         state.view = nextView === "terminal" ? "terminal" : "map";
-        syncUrl();
-        render();
-      }
-
-      function setActiveOnly(nextValue) {
-        state.activeOnly = Boolean(nextValue);
         syncUrl();
         render();
       }
@@ -1876,18 +1867,31 @@ function renderHtml(options: ServerOptions): string {
         return agent.isCurrent === true;
       }
 
+      function isRecentLeadCandidate(agent) {
+        return agent.source !== "cloud"
+          && agent.source !== "presence"
+          && !agent.parentThreadId
+          && Boolean(agent.threadId || agent.source === "claude");
+      }
+
+      function recentLeadAgents(snapshot, limit = 4) {
+        const activeIds = new Set(snapshot.agents.filter(isBusyAgent).map((agent) => agent.id));
+        return [...snapshot.agents]
+          .filter((agent) => isRecentLeadCandidate(agent) && !activeIds.has(agent.id))
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+          .slice(0, limit);
+      }
+
       function busyCount(snapshot) {
         return snapshot.agents.filter(isBusyAgent).length;
       }
 
       function viewSnapshot(snapshot) {
-        if (!state.activeOnly) {
-          return snapshot;
-        }
-
+        const activeAgents = snapshot.agents.filter(isBusyAgent);
+        const recentLeads = recentLeadAgents(snapshot, 4);
         return {
           ...snapshot,
-          agents: snapshot.agents.filter(isBusyAgent)
+          agents: [...activeAgents, ...recentLeads]
         };
       }
 
@@ -1973,7 +1977,7 @@ function renderHtml(options: ServerOptions): string {
       function isLeadSession(snapshot, agent) {
         return agent.source !== "cloud"
           && !agent.parentThreadId
-          && (agent.isCurrent === true || childAgentsFor(snapshot, agent.id).length > 0);
+          && (Boolean(agent.threadId || agent.source === "claude") || childAgentsFor(snapshot, agent.id).length > 0);
       }
 
       function agentRankLabel(snapshot, agent) {
@@ -3316,10 +3320,10 @@ function renderHtml(options: ServerOptions): string {
           return \`<div class="room" style="left:\${room.x * tile}px; top:\${room.y * tile}px; width:\${roomPixelWidth}px; height:\${roomPixelHeight}px;"><div class="room-meta"><div class="room-head">\${escapeHtml(room.name)}\${pathLabel}</div><span class="muted">\${activeDeskOccupants.length} active agent\${activeDeskOccupants.length === 1 ? "" : "s"}</span></div><div class="room-stage"><div class="room-mural"></div><div class="room-floor"></div>\${decor.join("")}\${recAreaHtml}\${boothHtml.join("")}\${empty}</div></div>\`;
         }).join("");
 
-        const hint = options.showHint === false
+          const hint = options.showHint === false
           ? ""
           : (options.liveOnly
-            ? '<div class="muted">Showing current workload only. Active parent sessions act as mini-boss desks and live subagents cluster under them.</div>'
+            ? '<div class="muted">Showing live agents plus the 4 most recent lead sessions. Recent leads cool down in the rec area while live subagents stay on the floor.</div>'
             : '<div class="muted">Room shells come from the project XML, while booths are generated live from Codex sessions and grouped by parent session and subagent role.</div>');
         const sceneClass = compact ? "scene-grid compact" : "scene-grid";
 
@@ -3418,9 +3422,7 @@ function renderHtml(options: ServerOptions): string {
 
       function renderSessions(snapshot) {
         if (!snapshot || snapshot.agents.length === 0) {
-          return state.activeOnly
-            ? '<div class="empty">No live sessions in the selected workspace right now.</div>'
-            : '<div class="empty">No sessions found for the selected project.</div>';
+          return '<div class="empty">No live or recent lead sessions in the selected workspace right now.</div>';
         }
 
         const sorted = [...snapshot.agents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -3444,9 +3446,7 @@ function renderHtml(options: ServerOptions): string {
         );
 
         if (entries.length === 0) {
-          return state.activeOnly
-            ? '<div class="empty">No live sessions across the tracked workspaces right now.</div>'
-            : '<div class="empty">No sessions found across the tracked workspaces.</div>';
+          return '<div class="empty">No live or recent lead sessions across the tracked workspaces right now.</div>';
         }
 
         entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
@@ -3510,14 +3510,6 @@ function renderHtml(options: ServerOptions): string {
       }
 
       function syncLiveAgentState(projects) {
-        if (!state.activeOnly) {
-          enteringAgentKeys = new Set();
-          liveAgentMemory.clear();
-          renderedAgentSceneState.clear();
-          departingAgents = [];
-          return;
-        }
-
         const now = Date.now();
         const previousKeys = new Set(liveAgentMemory.keys());
         const nextMemory = new Map();
@@ -3670,12 +3662,9 @@ function renderHtml(options: ServerOptions): string {
         const counts = fleetCounts({ projects: displayedProjects });
 
         setTextIfChanged(stamp, \`Updated \${fleet.generatedAt}\`);
-        setTextIfChanged(projectCount, state.activeOnly
-          ? \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live\`
-          : \`\${fleet.projects.length} tracked\`);
+        setTextIfChanged(projectCount, \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live · 4 recent leads\`);
         mapViewButton.classList.toggle("active", state.view === "map");
         terminalViewButton.classList.toggle("active", state.view === "terminal");
-        activeOnlyButton.classList.toggle("active", state.activeOnly);
         setConnection(state.connection);
 
         setHtmlIfChanged(kpis, [
@@ -3691,7 +3680,7 @@ function renderHtml(options: ServerOptions): string {
           ...visibleProjects(fleet).map((project) => {
             const counts = countsForSnapshot(viewSnapshot(project));
             const activeClass = project.projectRoot === state.selected ? " active" : "";
-            const badge = state.activeOnly ? busyCount(project) : counts.total;
+            const badge = busyCount(project);
             return \`<button class="project-tab\${activeClass}" data-action="select-project" data-project-root="\${escapeHtml(project.projectRoot)}" title="\${escapeHtml(project.projectRoot)}">\${escapeHtml(projectLabel(project.projectRoot))} <span class="muted">\${badge}</span></button>\`;
           })
         ].join(""));
@@ -3701,7 +3690,7 @@ function renderHtml(options: ServerOptions): string {
             const centerChanged = setHtmlIfChanged(centerContent, renderWorkspaceScroll(displayedProjects), { preserveScroll: true });
             setHtmlIfChanged(sessionList, renderFleetSessions(displayedProjects), { preserveScroll: true });
             setTextIfChanged(centerTitle, "All Workspaces");
-            setTextIfChanged(roomsPath, state.activeOnly ? "Current workload across tracked workspaces" : "All workspaces");
+            setTextIfChanged(roomsPath, "Live agents plus 4 recent lead sessions across tracked workspaces");
             if (centerChanged) {
               fitScenes();
             }
@@ -3836,9 +3825,6 @@ function renderHtml(options: ServerOptions): string {
 
       refreshButton.addEventListener("click", async () => {
         ingestFleet(await postJson("/api/refresh"));
-      });
-      activeOnlyButton.addEventListener("click", () => {
-        setActiveOnly(!state.activeOnly);
       });
       scaffoldButton.addEventListener("click", async () => {
         const snapshot = currentSnapshot();
