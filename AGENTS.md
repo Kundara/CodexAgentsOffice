@@ -62,6 +62,7 @@ The project goal is not generic chat replay. It is live workload visibility:
 npm install
 npm run build
 npm run typecheck
+npx codex-agents-office demo preview --port 4181
 npx codex-agents-office watch
 npx codex-agents-office snapshot /abs/project/path
 npx codex-agents-office web /abs/project/path --port 4181

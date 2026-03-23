@@ -3,3 +3,11 @@ dist/
 .DS_Store
 *.vsix
 .vscode-test/
+
+# Local validation and debug captures belong under artifacts/, not the repo root.
+/.dom-*.html
+/.fleet-check.json
+/.tmp-fleet.json
+/error.log
+/office-shot-*.html
+/artifacts/tmp/

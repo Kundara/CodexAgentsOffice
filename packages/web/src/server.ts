@@ -555,11 +555,30 @@ function renderHtml(options: ServerOptions): string {
         flex-wrap: wrap;
       }
 
+      .hero-copy {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .hero-title-row {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+
+      .hero-title-row h1 {
+        margin: 0;
+      }
+
       .hero-actions {
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
         align-items: center;
+        justify-content: flex-end;
       }
 
       .view-toggle {
@@ -587,22 +606,54 @@ function renderHtml(options: ServerOptions): string {
         box-shadow: inset 0 0 0 1px rgba(75, 214, 159, 0.2);
       }
 
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-        gap: 10px;
+      .hero-summary {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 11px;
       }
 
-      .kpi {
-        border: 1px solid var(--border);
-        background: rgba(255,255,255,0.03);
-        padding: 10px 12px;
+      .hero-summary-item {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 4px;
+        padding-left: 8px;
+        border-left: 1px solid rgba(255,255,255,0.12);
+        white-space: nowrap;
       }
 
-      .kpi strong {
-        display: block;
-        font-size: 26px;
-        margin-top: 4px;
+      .hero-summary-item:first-child {
+        padding-left: 0;
+        border-left: 0;
+      }
+
+      .hero-summary-item strong {
+        color: var(--text);
+        font-size: 15px;
+        letter-spacing: 0.02em;
+      }
+
+      .hero-summary-item.primary strong {
+        font-size: 18px;
+      }
+
+      .hero-summary-item.is-active strong {
+        color: var(--accent);
+      }
+
+      .hero-summary-item.is-waiting strong {
+        color: var(--accent-2);
+      }
+
+      .hero-summary-item.is-blocked strong {
+        color: var(--danger);
+      }
+
+      .hero-summary-item.is-cloud strong {
+        color: #98d8ff;
       }
 
       .layout {
@@ -734,7 +785,7 @@ function renderHtml(options: ServerOptions): string {
         box-shadow: 0 4px 14px rgba(0,0,0,0.18);
         transform: translate(-50%, calc(-100% - 4px));
         transform-origin: bottom center;
-        animation: agent-toast-float 2200ms ease-out forwards;
+        animation: agent-toast-float 3300ms ease-out forwards;
       }
 
       .agent-toast.edit {
@@ -1182,18 +1233,6 @@ function renderHtml(options: ServerOptions): string {
         transform: translateX(-50%);
       }
 
-      .office-avatar::before {
-        content: "";
-        position: absolute;
-        left: -4px;
-        top: 2px;
-        width: 6px;
-        height: 6px;
-        border-radius: 999px;
-        background: var(--appearance-body, #4bd69f);
-        border: 2px solid rgba(18,28,24,0.8);
-      }
-
       .office-avatar-shell.entering .office-avatar {
         --fx-animation: avatar-flash-in 150ms steps(1, end) 1;
       }
@@ -1294,29 +1333,29 @@ function renderHtml(options: ServerOptions): string {
       }
 
       .agent-hover-title {
-        font-size: 7px;
-        line-height: 1.1;
-        color: #fff7df;
-        margin-bottom: 2px;
+        font-size: 6px;
+        line-height: 1.05;
+        color: #bdefff;
+        margin-bottom: 1px;
       }
 
       .agent-hover-title strong {
         display: block;
-        font-size: 8px;
-        line-height: 1.1;
+        font-size: 7px;
+        line-height: 1.05;
       }
 
       .agent-hover-summary {
-        font-size: 8px;
-        line-height: 1.05;
+        font-size: 6px;
+        line-height: 1;
         color: #f4efdf;
         overflow-wrap: anywhere;
       }
 
       .agent-hover-meta {
-        margin-top: 2px;
-        font-size: 7px;
-        line-height: 1.1;
+        margin-top: 1px;
+        font-size: 6px;
+        line-height: 1;
         color: rgba(244, 239, 223, 0.62);
         overflow-wrap: anywhere;
       }
@@ -1407,26 +1446,6 @@ function renderHtml(options: ServerOptions): string {
         position: absolute;
         image-rendering: pixelated;
         pointer-events: none;
-      }
-
-      .legend {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        font-size: 12px;
-      }
-
-      .legend span {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 999px;
-        display: inline-block;
       }
 
       .card-actions {
@@ -1653,10 +1672,6 @@ function renderHtml(options: ServerOptions): string {
         .layout {
           grid-template-columns: 1fr;
         }
-
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
       }
 
       @media (max-width: 640px) {
@@ -1664,8 +1679,16 @@ function renderHtml(options: ServerOptions): string {
           padding: 12px;
         }
 
-        .kpis {
-          grid-template-columns: 1fr;
+        .hero-title-row {
+          gap: 8px 12px;
+        }
+
+        .hero-summary {
+          gap: 6px;
+        }
+
+        .hero-summary-item {
+          padding-left: 6px;
         }
       }
     </style>
@@ -1674,9 +1697,12 @@ function renderHtml(options: ServerOptions): string {
     <div class="page">
       <section class="hero">
         <div class="hero-top">
-          <div>
+          <div class="hero-copy">
             <div class="muted">Codex activity observer</div>
-            <h1 style="margin: 4px 0 0;">Codex Agents Office</h1>
+            <div class="hero-title-row">
+              <h1>Codex Agents Office</h1>
+              <div id="hero-summary" class="hero-summary"></div>
+            </div>
             <div id="stamp" class="muted">Loading…</div>
           </div>
           <div class="hero-actions">
@@ -1689,7 +1715,6 @@ function renderHtml(options: ServerOptions): string {
             <div id="connection-pill" class="status-pill state-connecting">Connecting</div>
           </div>
         </div>
-        <div id="kpis" class="kpis"></div>
         <div class="tabs-shell">
           <div class="tabs-head">
             <strong>Workspaces</strong>
@@ -1705,12 +1730,6 @@ function renderHtml(options: ServerOptions): string {
         <main class="panel">
           <div class="panel-header">
             <strong id="center-title">Fleet</strong>
-            <div class="legend">
-              <span><i class="dot" style="background:#4bd69f"></i>active</span>
-              <span><i class="dot" style="background:#f5b74f"></i>waiting</span>
-              <span><i class="dot" style="background:#f06d5e"></i>blocked</span>
-              <span><i class="dot" style="background:#98d8ff"></i>cloud</span>
-            </div>
           </div>
           <div class="panel-body">
             <div id="center-content"></div>
@@ -1814,7 +1833,7 @@ function renderHtml(options: ServerOptions): string {
       const scaffoldButton = document.getElementById("scaffold-button");
       const connectionPill = document.getElementById("connection-pill");
       const stamp = document.getElementById("stamp");
-      const kpis = document.getElementById("kpis");
+      const heroSummary = document.getElementById("hero-summary");
       const projectCount = document.getElementById("project-count");
       const projectTabs = document.getElementById("project-tabs");
       const centerTitle = document.getElementById("center-title");
@@ -2604,6 +2623,7 @@ function renderHtml(options: ServerOptions): string {
       function renderAgentHover(snapshot, agent, options = {}) {
         const lead = parentLabelFor(snapshot, agent);
         const summary = agentHoverSummary(snapshot, agent);
+        const hoverTitle = agent.nickname || agent.label;
         const meta = [
           titleCaseWords(agentKindLabel(snapshot, agent)),
           agentProvenanceLabel(agent),
@@ -2613,7 +2633,7 @@ function renderHtml(options: ServerOptions): string {
         const className = options.className || "agent-hover";
         const styleAttr = options.style ? \` style="\${escapeHtml(options.style)}"\` : "";
 
-        return \`<div class="\${escapeHtml(className)}"\${styleAttr}><div class="agent-hover-title"><strong>\${escapeHtml(agent.label)}</strong></div><div class="agent-hover-summary">\${escapeHtml(summary)}</div><div class="agent-hover-meta">\${escapeHtml(meta)}</div></div>\`;
+        return \`<div class="\${escapeHtml(className)}"\${styleAttr}><div class="agent-hover-title"><strong>\${escapeHtml(hoverTitle)}</strong></div><div class="agent-hover-summary">\${escapeHtml(summary)}</div><div class="agent-hover-meta">\${escapeHtml(meta)}</div></div>\`;
       }
 
       function flattenRooms(rooms) {
@@ -2832,12 +2852,14 @@ function renderHtml(options: ServerOptions): string {
         const chairHeight = chair.h * chairScale;
         const centerX = Math.round(boothWidth / 2);
         const innerInset = compact ? 4 : 6;
+        const centerInset = options.sharedCenter ? 0 : innerInset;
+        const deskEdgeClamp = options.sharedCenter ? 0 : 2;
         const workstationX = mirrored
-          ? innerInset
-          : Math.round(boothWidth - workstationWidth - innerInset);
+          ? centerInset
+          : Math.round(boothWidth - workstationWidth - centerInset);
         const deskX = mirrored
-          ? Math.max(2, Math.round(workstationX + workstationWidth * 0.54 - deskWidth * 0.52))
-          : Math.max(2, Math.round(workstationX + workstationWidth * 0.48 - deskWidth * 0.5));
+          ? Math.max(deskEdgeClamp, Math.round(workstationX + workstationWidth * 0.54 - deskWidth * 0.52))
+          : Math.max(deskEdgeClamp, Math.round(workstationX + workstationWidth * 0.48 - deskWidth * 0.5));
         const deskY = Math.round(boothHeight - deskHeight - (compact ? 11 : 13));
         const workstationY = Math.round(deskY - workstationHeight * (compact ? 0.2 : 0.18));
         const chairOutset = compact ? 3 : 5;
@@ -2995,6 +3017,7 @@ function renderHtml(options: ServerOptions): string {
               compact,
               {
                 ...options,
+                sharedCenter: hasBothSides,
                 mirrored: false,
                 lead: options.lead && Boolean(leftAgent),
                 absoluteX: x + (hasBothSides ? padX : singleCellX),
@@ -3015,6 +3038,7 @@ function renderHtml(options: ServerOptions): string {
               compact,
               {
                 ...options,
+                sharedCenter: hasBothSides,
                 mirrored: true,
                 lead: false,
                 absoluteX: x + (hasBothSides ? padX + cellWidth + centerGap : singleCellX),
@@ -3818,6 +3842,18 @@ function renderHtml(options: ServerOptions): string {
         return state.fleet.projects.find((snapshot) => snapshot.projectRoot === state.selected) || null;
       }
 
+      function renderHeroSummary(counts) {
+        return [
+          ["Agents", counts.total, "primary"],
+          ["Active", counts.active, "is-active"],
+          ["Waiting", counts.waiting, "is-waiting"],
+          ["Blocked", counts.blocked, "is-blocked"],
+          ["Cloud", counts.cloud, "is-cloud"]
+        ].map(([label, value, className]) =>
+          \`<span class="hero-summary-item \${className}"><strong>\${value}</strong><span>\${label}</span></span>\`
+        ).join("");
+      }
+
       function ingestFleet(fleet) {
         const previousFleet = state.fleet;
         queueSnapshotEvents(fleet);
@@ -3855,13 +3891,7 @@ function renderHtml(options: ServerOptions): string {
         terminalViewButton.classList.toggle("active", state.view === "terminal");
         setConnection(state.connection);
 
-        setHtmlIfChanged(kpis, [
-          ["Agents", counts.total],
-          ["Active", counts.active],
-          ["Waiting", counts.waiting],
-          ["Blocked", counts.blocked],
-          ["Cloud", counts.cloud]
-        ].map(([label, value]) => \`<div class="kpi"><div class="muted">\${label}</div><strong>\${value}</strong></div>\`).join(""));
+        setHtmlIfChanged(heroSummary, renderHeroSummary(counts));
 
         setHtmlIfChanged(projectTabs, [
           \`<button class="project-tab\${state.selected === "all" ? " active" : ""}" data-action="select-project" data-project-root="all">All</button>\`,

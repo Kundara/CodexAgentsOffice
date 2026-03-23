@@ -67,6 +67,11 @@ Sources:
   - local thread state, last action, resume command
   - cloud task list
 
+- Demo preview harness
+  - disposable fake app workspace for visual/testing passes
+  - scripted presence timeline with demo agents, demo skills, and room config
+  - auto-cleanup on exit unless launched with `--keep`
+
 - Browser mode
   - fleet view across multiple configured project roots
   - deep-linkable single-project room view through `?project=<abs-path>`

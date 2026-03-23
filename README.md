@@ -90,6 +90,16 @@ npm run build
 npm run typecheck
 ```
 
+### Run the disposable preview harness
+
+```bash
+npx codex-agents-office demo preview --port 4181
+```
+
+This creates a disposable fake app in your temp directory, writes demo `.codex/agents`, demo `.codex/skills`, `.codex-agents/rooms.xml`, and a scripted `presence.json` timeline, then hosts that workspace in the office view.
+
+By default the preview auto-stops after 75 seconds and removes the fake app. Use `--duration 0` to keep it running until interrupted, or `--keep` to preserve the generated workspace for inspection.
+
 ### Run the web view
 
 ```bash
@@ -163,6 +173,8 @@ The normalized snapshot is then rendered into:
   CLI entrypoints for `watch`, `snapshot`, room scaffolding, Aseprite inspection, and web hosting.
 - [`packages/vscode`](packages/vscode)
   VS Code activity-bar integration.
+- [`artifacts`](artifacts)
+  Visual validation captures, sprite-debug working files, and troubleshooting snapshots kept out of the repo root.
 - [`docs`](docs)
   Architecture, hooks, references, and project priorities.
 
@@ -198,3 +210,5 @@ The main gap is richer event-to-motion mapping. The project now carries more typ
 Pixel office art in this project is based on the [Pixel Office asset pack by 2dPig](https://2dpig.itch.io/pixel-office).
 
 Source asset files live under [`packages/web/public/pixel-office`](packages/web/public/pixel-office), including the original atlas PNG and `.aseprite` files used by this repo's current sprite pipeline.
+
+Non-runtime validation screenshots and sprite-debug leftovers live under [`artifacts`](artifacts) so the repository root stays focused on source files.

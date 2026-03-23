@@ -48,6 +48,7 @@ A good iteration improves at least one of these:
 - browser render for current mode
 - browser render for history mode
 - browser render for explicit `web /abs/project/path` launch
+- `demo preview` creates a disposable workspace, serves it, and removes it when the run ends
 - verify workspace tabs show real Codex workspaces
 - verify explicit project launch stays pinned to the requested project roots
 - verify Claude-discovered projects do not displace explicit Codex project roots when the CLI pins roots
