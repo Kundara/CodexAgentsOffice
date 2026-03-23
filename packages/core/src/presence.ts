@@ -97,6 +97,7 @@ export async function loadFreshPresenceAgents(projectRoot: string): Promise<Dash
       appearance: getAppearanceById(entry.appearanceId ?? DEFAULT_BOSS_APPEARANCE_ID),
       updatedAt: entry.updatedAt,
       paths: entry.cwd ? [entry.cwd] : [],
+      activityEvent: null,
       threadId: null,
       taskId: null,
       resumeCommand: null,

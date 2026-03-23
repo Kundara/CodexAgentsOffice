@@ -134,10 +134,18 @@ export interface CloudTask {
   attemptTotal: number;
 }
 
+export interface AgentActivityEvent {
+  type: "fileChange" | "commandExecution" | "agentMessage" | "other";
+  action: "created" | "edited" | "deleted" | "moved" | "ran" | "said" | "updated";
+  path: string | null;
+  title: string;
+  isImage: boolean;
+}
+
 export interface DashboardAgent {
   id: string;
   label: string;
-  source: "local" | "cloud" | "presence";
+  source: "local" | "cloud" | "presence" | "claude";
   sourceKind: string;
   parentThreadId: string | null;
   depth: number;
@@ -153,6 +161,7 @@ export interface DashboardAgent {
   appearance: AppearanceProfile;
   updatedAt: string;
   paths: string[];
+  activityEvent: AgentActivityEvent | null;
   threadId: string | null;
   taskId: string | null;
   resumeCommand: string | null;

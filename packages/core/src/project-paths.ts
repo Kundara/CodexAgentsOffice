@@ -1,6 +1,7 @@
 import { basename, normalize } from "node:path";
 
 import { withAppServerClient } from "./app-server";
+import { discoverClaudeProjects } from "./claude";
 import type { CodexThread } from "./types";
 
 export interface DiscoveredProject {
@@ -85,4 +86,27 @@ export async function discoverCodexProjects(limit = 50): Promise<DiscoveredProje
   });
 
   return [...projects.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+export async function discoverProjects(limit = 50): Promise<DiscoveredProject[]> {
+  const merged = new Map<string, DiscoveredProject>();
+  const [codexProjects, claudeProjects] = await Promise.all([
+    discoverCodexProjects(limit).catch(() => []),
+    discoverClaudeProjects(limit).catch(() => [])
+  ]);
+
+  for (const project of [...codexProjects, ...claudeProjects]) {
+    const existing = merged.get(project.root);
+    if (existing) {
+      existing.updatedAt = Math.max(existing.updatedAt, project.updatedAt);
+      existing.count += project.count;
+      continue;
+    }
+
+    merged.set(project.root, { ...project });
+  }
+
+  return [...merged.values()]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, limit);
 }

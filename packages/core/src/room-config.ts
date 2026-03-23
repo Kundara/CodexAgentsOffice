@@ -103,7 +103,7 @@ async function discoverSuggestedRooms(projectRoot: string): Promise<RoomDefiniti
   const picked = entries
     .filter((entry) => entry.isDirectory())
     .filter((entry) => !entry.name.startsWith("."))
-    .filter((entry) => !["node_modules", "dist"].includes(entry.name))
+    .filter((entry) => !["node_modules", "dist", "docs", "packages"].includes(entry.name))
     .slice(0, 3);
 
   return picked.map((entry, index) => ({

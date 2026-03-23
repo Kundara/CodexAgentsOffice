@@ -2,9 +2,11 @@
 
 ## Goal
 
-Render Codex work as a room-based "agent office" without depending on private internals. The current pass keeps the official Codex integration surface, but replaces the placeholder boxes with a real PixelOffice-based visual layer.
+Render Codex work as a room-based "agent office" without depending on private internals. The current pass keeps the official Codex integration surface and renders active workload as room-based office stations built from PixelOffice assets.
 
 ## Codex hook strategy
+
+The detailed hook inventory now lives in [docs/integration-hooks.md](/mnt/f/AI/CodexAgentsOffice/docs/integration-hooks.md). This file stays focused on architecture and product shape.
 
 1. `codex app-server`
 
@@ -18,15 +20,19 @@ Render Codex work as a room-based "agent office" without depending on private in
 
    Source: [Codex web](https://developers.openai.com/codex/cloud)
 
-3. Per-project room config
+3. Claude local session logs
+
+   `~/.claude/projects/*.jsonl` is a usable secondary source for project discovery and recent Claude activity. It is not equivalent to Codex app-server: the data is transcript-like and requires inference. That makes it suitable as a best-effort adapter layer, not as the primary truth source.
+
+4. Per-project room config
 
    Each project can define its own spatial hierarchy in `.codex-agents/rooms.xml`. Rooms map to directory prefixes so the same session can move between rooms as its working files change.
 
-4. Per-project appearance roster
+5. Per-project appearance roster
 
    New sessions get a deterministic random appearance. Overrides are stored in `.codex-agents/agents.json`, which locks their look until changed.
 
-5. Codex subagent roles
+6. Codex subagent roles
 
    Codex ships with built-in subagents such as `default`, `worker`, and `explorer`, and custom agents can define `nickname_candidates` for more readable spawned names. The visual layer groups booths by the underlying role, while still showing the friendlier label when available.
 
@@ -64,15 +70,18 @@ Sources:
 - Browser mode
   - fleet view across multiple configured project roots
   - deep-linkable single-project room view through `?project=<abs-path>`
+  - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
   - live SSE updates for browser clients
   - map and terminal-style views through `?view=map|terminal`
   - current-workload mode by default, with history opt-in through `?history=1`
   - snapshot-only rendering through `?screenshot=1`
+  - session-card hover/focus dims unrelated agents so the visible thread cluster for that session stands out in the map
   - HTTP endpoints for snapshot refresh, room scaffolding, and appearance cycling
   - PixelOffice art served from `/assets/pixel-office/...`
-  - auto-generated booth clusters inside each room based on the currently mapped agent set
-  - repeated booth runs for repeated Codex agent roles
-  - synthetic boss heartbeat for the server workspace when the live desktop thread is not surfaced by `codex app-server`
+  - auto-generated room activity based on the currently mapped agent set
+  - repeated workstation rows for repeated Codex agent roles
+  - anchored file-change notifications for current agents
+- hover/session detail surfaces for longer text instead of large scene overlays
 
 ## Room XML
 
@@ -98,11 +107,78 @@ The closest open-source reference is [pixel-agents](https://github.com/pablodelu
 
 The main change here is swapping transcript-only heuristics for Codex app-server + cloud surfaces first.
 
+## Transparency Model
+
+The reader should be able to answer two questions for any visible state:
+
+1. Why is this agent shown as active, waiting, blocked, or done?
+2. Which Codex signal caused that representation?
+
+The current implementation already has the right base surfaces:
+
+- thread status from `thread/list` and `thread/read`
+- active flags for approval waits and user-input waits
+- turn and item history for summarization
+- app-server notifications for live changes
+- file-change driven activity events
+
+What is still missing is fuller event attribution in the UI. Right now the browser mostly renders a trustworthy current-state summary, with anchored file-change toasts as the clearest event-level notification path. Reaching a stronger transparency bar means exposing more of the live app-server event stream directly in motion and notification design.
+That gap is smaller now: command execution, approval waits, and user-input waits also emit anchored notification events in the browser.
+
+## Event-driven notification roadmap
+
+Codex exposes enough signal for a more explicit notification model than the current one.
+
+The highest-value mapping is:
+
+- `waitingOnApproval`
+  strong blocked indicator and approval-needed toast
+- `waitingOnUserInput`
+  waiting indicator and ask-user toast
+- `item/*` command execution
+  running / completed / failed command notifications
+- `fileChange`
+  anchored create / edit / delete / move toasts, with image preview when possible
+- `turn/*`
+  turn started / finished / interrupted / failed status transitions
+- subagent spawn and completion
+  parent-linked spawn/finish notifications and motion updates
+
+## Current workstation model
+
+The active office view currently favors an open station language over enclosed cubicles:
+
+- mirrored two-seat workstation pods define the primary desk language
+- a pod collapses to a single centered seat when only one live agent occupies it
+- newly occupied seats use a short retro blink reveal so the workstation appears before the worker settles
+- left and right seats face opposite directions inside each pod
+- seated agents flip with the workstation direction and align to the desk/chair reach point
+- live spawn and finish motion uses the center-top room entrance as the path anchor so workers walk in and out from a visible doorway
+- chairs and seated reach points sit slightly outward from the desk so the monitor relationship reads cleanly
+- workstation computers currently use the single complete desk cut, avoiding the broken narrow pseudo-monitor asset
+- waiting and resting agents move to an integrated wall-side rec strip instead of a detached room
+- rec facilities sit on the same raised upper floor band as the wall-side walkway, not in a floating inset
+- the rec strip combines vending, counter, doors, clock, plants, sofa, and shelf props inside the same scene
+- long task titles stay in hover cards and the session panel instead of being drawn over the map
+- the floor is restored to the blue office-strip language from the reference art, including an upper wall-side walkway for rec facilities
+
+## Secondary Claude support
+
+Claude support uses a deliberately weaker contract than Codex:
+
+- project discovery merges Codex-discovered roots with roots inferred from `~/.claude/projects`
+- the snapshot builder can include recent Claude sessions for matching project roots
+- Claude session state is inferred from recent tool uses such as read, edit, bash, and task delegation
+- Claude agents are rendered in the same room model, but without pretending they have Codex-grade typed status
+
+This is useful because it broadens observability across the machine, but it should remain visually and architecturally secondary to the official Codex path.
+
 ## Asset pipeline
 
-- The runtime path uses the provided PNG sheets directly.
-- The supplied `.aseprite` files are kept in the repo and can be inspected through `codex-agents-office aseprite inspect <file>`.
-- Official Aseprite docs recommend exporting slice metadata into JSON via sprite sheet export or `--data`; that is the planned bridge from authored Aseprite assets into a richer scene manifest.
+- The source PixelOffice atlas PNG and `.aseprite` files are kept in the repo for reference and future export work.
+- The runtime path now uses standalone PNG cuts under `/assets/pixel-office/sprites/...` instead of CSS background-position math against the atlas.
+- The supplied `.aseprite` files can still be inspected through `codex-agents-office aseprite inspect <file>`.
+- Official Aseprite docs recommend exporting slice metadata into JSON via sprite sheet export or `--data`; that is still the likely bridge from authored Aseprite assets into a richer scene manifest later.
 
 Sources:
 

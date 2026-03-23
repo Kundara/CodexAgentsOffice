@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { cwd, env } from "node:process";
 import { basename, extname, normalize, resolve } from "node:path";
@@ -6,7 +7,7 @@ import { basename, extname, normalize, resolve } from "node:path";
 import {
   canonicalizeProjectPath,
   cycleAgentAppearance,
-  discoverCodexProjects,
+  discoverProjects,
   ProjectLiveMonitor,
   scaffoldRoomsFile,
   type DashboardSnapshot
@@ -26,67 +27,93 @@ interface ServerOptions {
   host: string;
   port: number;
   projects: ProjectDescriptor[];
+  explicitProjects: boolean;
+}
+
+interface ServerMeta {
+  pid: number;
+  startedAt: string;
+  buildAt: string;
+  entry: string;
+  host: string;
+  port: number;
+  explicitProjects: boolean;
+  projects: ProjectDescriptor[];
 }
 
 const WEB_PUBLIC_DIR = resolve(__dirname, "../public");
+const SERVER_STARTED_AT = new Date().toISOString();
+const SERVER_BUILD_AT = statSync(__filename).mtime.toISOString();
+
+interface PixelSprite {
+  url: string;
+  w: number;
+  h: number;
+}
+
+const PIXEL_OFFICE_SPRITES_DIR = "/assets/pixel-office/sprites";
+
+function pixelOfficeSprite(group: string, name: string, w: number, h: number): PixelSprite {
+  return {
+    url: `${PIXEL_OFFICE_SPRITES_DIR}/${group}/${name}.png`,
+    w,
+    h
+  };
+}
 
 const PIXEL_OFFICE_MANIFEST = {
-  sheetUrl: "/assets/pixel-office/PixelOfficeAssets.png",
-  sheetSize: { width: 256, height: 160 },
   avatars: [
-    { id: "nova", x: 0, y: 80, w: 16, h: 32 },
-    { id: "lex", x: 16, y: 80, w: 16, h: 32 },
-    { id: "mira", x: 32, y: 80, w: 16, h: 32 },
-    { id: "atlas", x: 0, y: 112, w: 16, h: 32 },
-    { id: "echo", x: 16, y: 112, w: 16, h: 32 },
-    { id: "pico", x: 32, y: 112, w: 16, h: 32 }
+    { id: "nova", ...pixelOfficeSprite("avatars", "nova", 15, 23) },
+    { id: "lex", ...pixelOfficeSprite("avatars", "lex", 19, 24) },
+    { id: "mira", ...pixelOfficeSprite("avatars", "mira", 13, 21) },
+    { id: "atlas", ...pixelOfficeSprite("avatars", "atlas", 17, 23) },
+    { id: "echo", ...pixelOfficeSprite("avatars", "echo", 17, 23) }
   ],
   chairs: [
-    { x: 6, y: 41, w: 11, h: 22 },
-    { x: 19, y: 41, w: 11, h: 22 },
-    { x: 32, y: 41, w: 11, h: 22 },
-    { x: 45, y: 41, w: 11, h: 22 },
-    { x: 58, y: 41, w: 11, h: 22 },
-    { x: 71, y: 41, w: 11, h: 22 }
+    pixelOfficeSprite("chairs", "chair-1", 11, 22),
+    pixelOfficeSprite("chairs", "chair-2", 11, 22),
+    pixelOfficeSprite("chairs", "chair-3", 11, 22),
+    pixelOfficeSprite("chairs", "chair-4", 11, 22),
+    pixelOfficeSprite("chairs", "chair-5", 11, 22),
+    pixelOfficeSprite("chairs", "chair-6", 11, 22)
   ],
   props: {
-    sky: { x: 0, y: 0, w: 256, h: 38 },
-    floorStrip: { x: 3, y: 68, w: 73, h: 24 },
-    counter: { x: 171, y: 44, w: 79, h: 17 },
-    deskWide: { x: 115, y: 47, w: 40, h: 16 },
-    deskSmall: { x: 85, y: 47, w: 26, h: 16 },
-    cabinet: { x: 84, y: 70, w: 26, h: 20 },
-    cubicleWall: { x: 171, y: 44, w: 79, h: 17 },
-    cubiclePanelLeft: { x: 188, y: 63, w: 17, h: 19 },
-    cubiclePanelRight: { x: 213, y: 63, w: 17, h: 19 },
-    cubiclePost: { x: 207, y: 63, w: 4, h: 27 },
-    windowLeft: { x: 59, y: 96, w: 26, h: 21 },
-    windowRight: { x: 88, y: 96, w: 26, h: 21 },
-    boothDoor: { x: 98, y: 120, w: 16, h: 31 },
-    sofaGray: { x: 119, y: 66, w: 33, h: 15 },
-    sofaBlue: { x: 120, y: 83, w: 33, h: 16 },
-    sofaGreen: { x: 120, y: 102, w: 33, h: 16 },
-    sofaOrange: { x: 120, y: 121, w: 33, h: 16 },
-    vending: { x: 159, y: 123, w: 24, h: 34 },
-    bookshelf: { x: 184, y: 126, w: 24, h: 31 },
-    plant: { x: 170, y: 65, w: 14, h: 19 },
-    calendar: { x: 234, y: 81, w: 17, h: 11 },
-    workstation: { x: 233, y: 106, w: 15, h: 19 },
-    cooler: { x: 147, y: 140, w: 9, h: 17 },
-    tower: { x: 240, y: 128, w: 6, h: 19 },
-    clock: { x: 159, y: 108, w: 19, h: 6 },
-    mug: { x: 159, y: 91, w: 7, h: 11 },
-    artWarm: { x: 179, y: 94, w: 12, h: 9 },
-    artUk: { x: 193, y: 94, w: 12, h: 9 },
-    artUs: { x: 207, y: 94, w: 12, h: 9 },
-    filePurple: { x: 211, y: 119, w: 11, h: 8 },
-    fileBlue: { x: 211, y: 129, w: 11, h: 8 },
-    fileGreen: { x: 211, y: 140, w: 11, h: 8 },
-    badge: { x: 200, y: 107, w: 9, h: 9 },
-    paper: { x: 239, y: 94, w: 11, h: 8 },
-    socket: { x: 211, y: 151, w: 10, h: 6 },
-    catBlack: { x: 65, y: 129, w: 13, h: 13 },
-    catSleep: { x: 59, y: 146, w: 24, h: 11 }
+    sky: pixelOfficeSprite("props", "sky", 256, 38),
+    floorStrip: pixelOfficeSprite("props", "floorStrip", 73, 24),
+    deskWide: pixelOfficeSprite("props", "deskWide", 40, 16),
+    deskSmall: pixelOfficeSprite("props", "deskSmall", 26, 16),
+    counter: pixelOfficeSprite("props", "deskWide", 40, 16),
+    cabinet: pixelOfficeSprite("props", "cabinet", 26, 20),
+    cubiclePanelLeft: pixelOfficeSprite("props", "cubiclePanelLeft", 17, 19),
+    cubiclePanelRight: pixelOfficeSprite("props", "cubiclePanelRight", 17, 19),
+    cubiclePost: pixelOfficeSprite("props", "cubiclePost", 4, 27),
+    windowLeft: pixelOfficeSprite("props", "windowLeft", 26, 21),
+    windowRight: pixelOfficeSprite("props", "windowRight", 26, 21),
+    boothDoor: pixelOfficeSprite("props", "boothDoor", 16, 31),
+    sofaGray: pixelOfficeSprite("props", "sofaGray", 33, 15),
+    sofaBlue: pixelOfficeSprite("props", "sofaBlue", 33, 16),
+    sofaGreen: pixelOfficeSprite("props", "sofaGreen", 33, 16),
+    sofaOrange: pixelOfficeSprite("props", "sofaOrange", 33, 16),
+    vending: pixelOfficeSprite("props", "vending", 24, 34),
+    bookshelf: pixelOfficeSprite("props", "bookshelf", 24, 31),
+    plant: pixelOfficeSprite("props", "plant", 14, 19),
+    calendar: pixelOfficeSprite("props", "calendar", 17, 11),
+    workstation: pixelOfficeSprite("props", "workstation", 15, 19),
+    cooler: pixelOfficeSprite("props", "cooler", 9, 17),
+    tower: pixelOfficeSprite("props", "tower", 6, 19),
+    clock: pixelOfficeSprite("props", "clock", 19, 6),
+    mug: pixelOfficeSprite("props", "mug", 7, 11),
+    artWarm: pixelOfficeSprite("props", "artWarm", 12, 9),
+    artUk: pixelOfficeSprite("props", "artUk", 12, 9),
+    artUs: pixelOfficeSprite("props", "artUs", 12, 9),
+    filePurple: pixelOfficeSprite("props", "filePurple", 11, 8),
+    fileBlue: pixelOfficeSprite("props", "fileBlue", 11, 8),
+    fileGreen: pixelOfficeSprite("props", "fileGreen", 11, 8),
+    badge: pixelOfficeSprite("props", "badge", 9, 9),
+    paper: pixelOfficeSprite("props", "paper", 11, 8),
+    socket: pixelOfficeSprite("props", "socket", 10, 6),
+    catBlack: pixelOfficeSprite("props", "catBlack", 13, 13),
+    catSleep: pixelOfficeSprite("props", "catSleep", 24, 11)
   }
 } as const;
 
@@ -191,11 +218,13 @@ function parseArgs(argv: string[]): ServerOptions {
     }
   }
 
+  const explicitProjects = projects.length > 0;
   const uniqueProjects = Array.from(new Set(projects.length > 0 ? projects : [cwd()]));
   return {
     host,
     port: Number.isFinite(port) ? port : 4181,
-    projects: buildProjectDescriptors(uniqueProjects)
+    projects: buildProjectDescriptors(uniqueProjects),
+    explicitProjects
   };
 }
 
@@ -221,13 +250,29 @@ function buildFleetResponse(
   };
 }
 
+function buildServerMeta(options: ServerOptions): ServerMeta {
+  return {
+    pid: process.pid,
+    startedAt: SERVER_STARTED_AT,
+    buildAt: SERVER_BUILD_AT,
+    entry: __filename,
+    host: options.host,
+    port: options.port,
+    explicitProjects: options.explicitProjects,
+    projects: options.projects
+  };
+}
+
 class FleetLiveService {
   private readonly monitors = new Map<string, ProjectLiveMonitor>();
   private readonly clients = new Set<ServerResponse>();
   private projects: ProjectDescriptor[] = [];
   private fleet: FleetResponse | null = null;
 
-  constructor(private readonly seedProjects: ProjectDescriptor[]) {}
+  constructor(
+    private readonly seedProjects: ProjectDescriptor[],
+    private readonly explicitProjects: boolean
+  ) {}
 
   async start(): Promise<void> {
     await this.refreshProjectSet();
@@ -314,7 +359,7 @@ class FleetLiveService {
   }
 
   private async refreshProjectSet(): Promise<void> {
-    const discoveredProjects = await discoverCodexProjects(50).catch(() => []);
+    const discoveredProjects = await discoverProjects(50).catch(() => []);
     const normalizedSeeds = this.seedProjects
       .map((project) => {
         const root = canonicalizeProjectPath(project.root);
@@ -322,11 +367,14 @@ class FleetLiveService {
       })
       .filter((project): project is ProjectDescriptor => Boolean(project));
 
-    const nextProjects = buildProjectDescriptors(
-      discoveredProjects.length > 0
-        ? discoveredProjects.map((project) => project.root)
-        : normalizedSeeds.map((project) => project.root)
-    );
+    const nextProjectRoots = this.explicitProjects
+      ? normalizedSeeds.map((project) => project.root)
+      : (
+        discoveredProjects.length > 0
+          ? discoveredProjects.map((project) => project.root)
+          : normalizedSeeds.map((project) => project.root)
+      );
+    const nextProjects = buildProjectDescriptors(nextProjectRoots);
 
     const nextRoots = new Set(nextProjects.map((project) => project.root));
 
@@ -393,6 +441,43 @@ function notFound(response: ServerResponse): void {
     "content-type": "text/plain; charset=utf-8"
   });
   response.end("Not found");
+}
+
+function isPreviewableImage(filePath: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(filePath);
+}
+
+async function sendProjectFile(
+  response: ServerResponse,
+  projectRoot: string,
+  filePath: string,
+  method: string
+): Promise<void> {
+  const normalizedRoot = canonicalizeProjectPath(projectRoot) ?? resolve(projectRoot);
+  const candidate = filePath.startsWith("/")
+    ? resolve(filePath)
+    : resolve(normalizedRoot, filePath);
+  const insideProject = candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}/`);
+
+  if (!insideProject || !isPreviewableImage(candidate)) {
+    notFound(response);
+    return;
+  }
+
+  try {
+    const body = await readFile(candidate);
+    response.writeHead(200, {
+      "content-type": contentTypeForPath(candidate),
+      "cache-control": "no-store"
+    });
+    if (method === "HEAD") {
+      response.end();
+      return;
+    }
+    response.end(body);
+  } catch {
+    notFound(response);
+  }
 }
 
 function renderHtml(options: ServerOptions): string {
@@ -556,6 +641,16 @@ function renderHtml(options: ServerOptions): string {
         padding: 12px;
       }
 
+      .session-card {
+        transition: border-color 120ms linear, background 120ms linear;
+      }
+
+      .session-card:hover,
+      .session-card:focus-within {
+        border-color: rgba(75, 214, 159, 0.36);
+        background: rgba(75, 214, 159, 0.06);
+      }
+
       .muted { color: var(--muted); font-size: 12px; }
 
       .tabs-shell {
@@ -616,6 +711,120 @@ function renderHtml(options: ServerOptions): string {
         overflow: hidden;
       }
 
+      .scene-notifications {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 50;
+        overflow: hidden;
+      }
+
+      .agent-toast {
+        position: absolute;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        max-width: 260px;
+        padding: 2px 8px;
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 999px;
+        background: rgba(20, 30, 26, 0.8);
+        color: var(--text);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+        transform: translate(-50%, calc(-100% - 4px));
+        transform-origin: bottom center;
+        animation: agent-toast-float 2200ms ease-out forwards;
+      }
+
+      .agent-toast.edit {
+        border-color: rgba(75, 214, 159, 0.22);
+        color: #baf6dc;
+      }
+
+      .agent-toast.create {
+        border-color: rgba(245, 183, 79, 0.28);
+        color: #ffe1a2;
+      }
+
+      .agent-toast.run {
+        border-color: rgba(115, 196, 255, 0.24);
+        color: #bee8ff;
+      }
+
+      .agent-toast.waiting {
+        border-color: rgba(245, 183, 79, 0.24);
+        color: #ffe1a2;
+      }
+
+      .agent-toast.blocked {
+        border-color: rgba(255, 120, 120, 0.28);
+        color: #ffb3b3;
+      }
+
+      .agent-toast.update {
+        border-color: rgba(214, 183, 255, 0.22);
+        color: #ead7ff;
+      }
+
+      .agent-toast.image {
+        min-width: 120px;
+        padding: 3px 7px;
+        gap: 6px;
+      }
+
+      .agent-toast-preview {
+        width: 42px;
+        height: 42px;
+        flex: 0 0 42px;
+        border: 2px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.05);
+        object-fit: cover;
+        image-rendering: pixelated;
+      }
+
+      .agent-toast-copy {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .agent-toast-label {
+        font-size: 11px;
+        line-height: 1.2;
+        color: currentColor;
+        font-weight: 700;
+      }
+
+      .agent-toast-title {
+        font-size: 11px;
+        line-height: 1.2;
+        color: rgba(255,255,255,0.9);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 176px;
+      }
+
+      @keyframes agent-toast-float {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, calc(-78% - 1px)) scale(0.94);
+        }
+        12% {
+          opacity: 1;
+          transform: translate(-50%, calc(-100% - 10px)) scale(1);
+        }
+        78% {
+          opacity: 1;
+          transform: translate(-50%, calc(-165% - 32px)) scale(1);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, calc(-195% - 44px)) scale(0.96);
+        }
+      }
+
       .scene-fit.compact {
         min-height: 280px;
       }
@@ -623,15 +832,19 @@ function renderHtml(options: ServerOptions): string {
       .scene-grid {
         flex: 0 0 auto;
         position: relative;
-        border: 1px dashed rgba(255,255,255,0.12);
+        border: 2px solid rgba(46, 92, 123, 0.72);
+        border-radius: 14px;
         min-height: 520px;
         overflow: hidden;
+        box-shadow:
+          inset 0 0 0 2px rgba(255,255,255,0.05),
+          0 18px 40px rgba(0,0,0,0.28);
         background:
-          radial-gradient(circle at 12% 0%, rgba(255,255,255,0.06), transparent 20%),
-          radial-gradient(circle at 88% 8%, rgba(75, 214, 159, 0.08), transparent 18%),
-          linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px),
-          linear-gradient(180deg, rgba(7, 18, 15, 0.92), rgba(11, 21, 18, 0.98));
+          radial-gradient(circle at 14% 8%, rgba(255,255,255,0.08), transparent 22%),
+          radial-gradient(circle at 82% 4%, rgba(153, 215, 255, 0.1), transparent 20%),
+          linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+          linear-gradient(180deg, #102235, #0b1b2b 62%, #071522);
         background-size: var(--tile) var(--tile);
         transform-origin: top left;
         will-change: transform;
@@ -643,12 +856,14 @@ function renderHtml(options: ServerOptions): string {
 
       .room {
         position: absolute;
-        border: 3px solid #4a7b69;
+        border: 3px solid #365a76;
+        border-radius: 10px;
         background:
-          linear-gradient(180deg, #9fcbfa 0 30%, #d8ecff 30% 31%, #c7d6e8 31% 52%, #31a2ea 52% 53%, #1c7bc4 53% 100%);
+          linear-gradient(180deg, #96cdf9 0 15%, #dceefe 15% 16%, #ecf4fb 16% 24%, #3aa1eb 24% 25%, #1f7fcf 25% 100%);
         overflow: hidden;
         box-shadow:
           0 10px 0 rgba(0, 0, 0, 0.22),
+          0 18px 28px rgba(0, 0, 0, 0.18),
           inset 0 0 0 2px rgba(255, 255, 255, 0.08);
       }
 
@@ -664,8 +879,8 @@ function renderHtml(options: ServerOptions): string {
         inset: 26px 0 0;
         background:
           linear-gradient(180deg, transparent 0 20%, rgba(13, 24, 20, 0.08) 20% 21%, transparent 21% 100%),
-          repeating-linear-gradient(180deg, rgba(255,255,255,0.06) 0 3px, rgba(255,255,255,0) 3px 22px);
-        opacity: 0.45;
+          repeating-linear-gradient(180deg, rgba(255,255,255,0.05) 0 3px, rgba(255,255,255,0) 3px 22px);
+        opacity: 0.34;
         pointer-events: none;
       }
 
@@ -681,8 +896,8 @@ function renderHtml(options: ServerOptions): string {
         right: 8px;
         top: 8px;
         height: 34%;
-        background: linear-gradient(180deg, rgba(120, 189, 247, 0.58), rgba(214, 238, 255, 0.08));
-        opacity: 0.7;
+        background: linear-gradient(180deg, rgba(157, 214, 255, 0.48), rgba(214, 238, 255, 0.04));
+        opacity: 0.52;
         pointer-events: none;
       }
 
@@ -691,10 +906,10 @@ function renderHtml(options: ServerOptions): string {
         left: 0;
         right: 0;
         bottom: 0;
-        height: 48%;
+        height: 76%;
         background:
-          linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0)),
-          repeating-linear-gradient(180deg, #2aa3e5 0 10px, #1b8fd0 10px 20px);
+          linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0) 18%),
+          repeating-linear-gradient(180deg, #48a7ee 0 22px, #7eeaff 22px 24px, #2f8fdf 24px 46px, #63b6ff 46px 48px);
       }
 
       .role-banner {
@@ -713,27 +928,58 @@ function renderHtml(options: ServerOptions): string {
 
       .booth {
         position: absolute;
-        z-index: 3;
+        z-index: var(--stack-order, 3);
         outline: none;
       }
 
       .booth:hover,
       .booth:focus-within {
-        z-index: 8;
+        z-index: calc(var(--stack-order, 3) + 200);
       }
 
       .booth.lead {
         filter: drop-shadow(0 0 10px rgba(245, 183, 79, 0.22));
       }
 
-      .booth.entering {
-        animation: booth-enter 0.36s linear both;
+      .cubicle-cell {
+        position: absolute;
+        inset: 0 auto auto 0;
+        z-index: 3;
+        outline: none;
       }
 
-      .booth.departing {
-        opacity: 0.8;
-        animation: booth-exit 0.36s linear forwards;
+      .cubicle-cell:hover,
+      .cubicle-cell:focus-within {
+        z-index: 20;
+      }
+
+      .cubicle-cell.entering {
+        z-index: 16;
+      }
+
+      .cubicle-cell.departing {
+        z-index: 16;
         pointer-events: none;
+      }
+
+      .desk-shell {
+        position: absolute;
+        inset: 0;
+      }
+
+      .cubicle-cell.entering .desk-shell {
+        animation: workstation-spawn 260ms steps(1, end) both;
+      }
+
+      .cubicle-cell.departing .desk-shell {
+        animation: workstation-despawn 220ms steps(1, end) forwards;
+      }
+
+      .snapshot-mode .cubicle-cell.entering .desk-shell,
+      .snapshot-mode .cubicle-cell.departing .desk-shell {
+        animation: none;
+        opacity: 1;
+        transform: none;
       }
 
       .lead-banner {
@@ -774,8 +1020,9 @@ function renderHtml(options: ServerOptions): string {
       .rec-room {
         position: absolute;
         border: 3px solid #b98b36;
+        border-radius: 10px;
         background:
-          linear-gradient(180deg, #f6dba0 0 26%, #ead0a0 26% 27%, #b9884b 27% 100%);
+          linear-gradient(180deg, #f6dba0 0 24%, #efd8ab 24% 25%, #ffe7bc 25% 46%, #c99457 46% 47%, #b1783a 47% 100%);
         overflow: hidden;
         box-shadow:
           0 10px 0 rgba(0, 0, 0, 0.22),
@@ -795,6 +1042,14 @@ function renderHtml(options: ServerOptions): string {
 
       .rec-room .room-meta {
         background: rgba(71, 45, 12, 0.7);
+      }
+
+      .rec-room.inset {
+        z-index: 8;
+        box-shadow:
+          0 8px 0 rgba(0, 0, 0, 0.2),
+          0 14px 24px rgba(0, 0, 0, 0.18),
+          inset 0 0 0 2px rgba(255,255,255,0.14);
       }
 
       .booth-wall {
@@ -869,31 +1124,61 @@ function renderHtml(options: ServerOptions): string {
 
       .office-sprite {
         position: absolute;
-        background-image: url("/assets/pixel-office/PixelOfficeAssets.png");
         background-repeat: no-repeat;
+        background-position: 0 0;
+        background-size: 100% 100%;
         image-rendering: pixelated;
         pointer-events: none;
       }
 
-      .office-avatar {
+      .office-avatar-shell {
         position: absolute;
         z-index: 4;
-        background-image: url("/assets/pixel-office/PixelOfficeAssets.png");
+        transform-origin: 50% 100%;
+        transform: scaleX(var(--avatar-flip, 1));
+        will-change: transform, opacity;
+      }
+
+      .office-avatar-shell.entering {
+        z-index: 12;
+        animation: avatar-arrive 480ms steps(6, end) both;
+      }
+
+      .office-avatar-shell.departing {
+        z-index: 12;
+        animation: avatar-leave 420ms steps(6, end) forwards;
+      }
+
+      .snapshot-mode .office-avatar-shell.entering,
+      .snapshot-mode .office-avatar-shell.departing {
+        animation: none;
+        opacity: 1;
+        transform: scaleX(var(--avatar-flip, 1));
+      }
+
+      .office-avatar {
+        position: absolute;
+        inset: 0;
+        z-index: 6;
         background-repeat: no-repeat;
+        background-position: 0 0;
+        background-size: 100% 100%;
         image-rendering: pixelated;
         transform-origin: 50% 100%;
         filter: drop-shadow(0 3px 0 rgba(0,0,0,0.24));
+        animation: var(--state-animation, none), var(--fx-animation, none);
       }
 
       .office-avatar::after {
         content: "";
         position: absolute;
-        left: 3px;
-        right: 3px;
-        bottom: -5px;
-        height: 4px;
-        background: var(--appearance-shadow, rgba(0,0,0,0.25));
-        opacity: 0.55;
+        left: 50%;
+        bottom: -2px;
+        width: 58%;
+        height: 2px;
+        background: rgba(10, 20, 28, 0.18);
+        opacity: 0.4;
+        transform: translateX(-50%);
       }
 
       .office-avatar::before {
@@ -908,6 +1193,14 @@ function renderHtml(options: ServerOptions): string {
         border: 2px solid rgba(18,28,24,0.8);
       }
 
+      .office-avatar-shell.entering .office-avatar {
+        --fx-animation: avatar-flash-in 180ms steps(1, end) 1;
+      }
+
+      .office-avatar-shell.departing .office-avatar {
+        --fx-animation: avatar-flash-out 180ms steps(1, end) 1;
+      }
+
       .office-avatar.state-editing,
       .office-avatar.state-running,
       .office-avatar.state-validating,
@@ -915,27 +1208,27 @@ function renderHtml(options: ServerOptions): string {
       .office-avatar.state-thinking,
       .office-avatar.state-planning,
       .office-avatar.state-delegating {
-        animation: worker-bob 1s steps(2, end) infinite;
+        --state-animation: worker-bob 1s steps(2, end) infinite;
       }
 
       .office-avatar.state-idle,
       .office-avatar.state-done {
-        animation: worker-idle 1.6s steps(2, end) infinite;
+        --state-animation: worker-idle 1.6s steps(2, end) infinite;
       }
 
       .office-avatar.state-blocked {
         outline: 2px solid rgba(240, 109, 94, 0.65);
-        animation: worker-alert 0.9s steps(2, end) infinite;
+        --state-animation: worker-alert 0.9s steps(2, end) infinite;
       }
 
       .office-avatar.state-waiting {
         outline: 2px solid rgba(245, 183, 79, 0.55);
-        animation: worker-idle 1.6s steps(2, end) infinite;
+        --state-animation: worker-idle 1.6s steps(2, end) infinite;
       }
 
       .office-avatar.state-cloud {
         outline: 2px solid rgba(152, 216, 255, 0.55);
-        animation: worker-cloud 1.2s steps(2, end) infinite;
+        --state-animation: worker-cloud 1.2s steps(2, end) infinite;
       }
 
       .speech-bubble {
@@ -971,10 +1264,10 @@ function renderHtml(options: ServerOptions): string {
         left: 50%;
         bottom: calc(100% + 8px);
         z-index: 9;
-        width: min(220px, max-content);
-        min-width: 150px;
-        max-width: 240px;
-        padding: 6px 7px;
+        width: min(196px, calc(100vw - 20px));
+        min-width: 128px;
+        max-width: 196px;
+        padding: 3px 4px;
         border: 2px solid rgba(13, 24, 20, 0.7);
         background: rgba(9, 17, 14, 0.95);
         color: #f4efdf;
@@ -985,8 +1278,8 @@ function renderHtml(options: ServerOptions): string {
         transition: opacity 90ms linear, transform 90ms linear;
       }
 
-      .booth:hover .agent-hover,
-      .booth:focus-within .agent-hover,
+      .cubicle-cell:hover .agent-hover,
+      .cubicle-cell:focus-within .agent-hover,
       .waiting-agent:hover .waiting-hover,
       .waiting-agent:focus-within .waiting-hover,
       .lounge-agent:hover .lounge-hover,
@@ -996,39 +1289,30 @@ function renderHtml(options: ServerOptions): string {
       }
 
       .agent-hover-title {
-        font-size: 10px;
-        line-height: 1.3;
+        font-size: 7px;
+        line-height: 1.1;
         color: #fff7df;
-        margin-bottom: 6px;
+        margin-bottom: 2px;
       }
 
       .agent-hover-title strong {
         display: block;
-        margin-bottom: 2px;
+        font-size: 8px;
+        line-height: 1.1;
       }
 
-      .agent-hover-row {
-        display: grid;
-        grid-template-columns: 48px minmax(0, 1fr);
-        gap: 6px;
-        align-items: start;
-        font-size: 10px;
-        line-height: 1.25;
-      }
-
-      .agent-hover-row + .agent-hover-row {
-        margin-top: 4px;
-      }
-
-      .agent-hover-key {
-        color: rgba(244, 239, 223, 0.62);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-
-      .agent-hover-value {
-        min-width: 0;
+      .agent-hover-summary {
+        font-size: 8px;
+        line-height: 1.05;
         color: #f4efdf;
+        overflow-wrap: anywhere;
+      }
+
+      .agent-hover-meta {
+        margin-top: 2px;
+        font-size: 7px;
+        line-height: 1.1;
+        color: rgba(244, 239, 223, 0.62);
         overflow-wrap: anywhere;
       }
 
@@ -1087,6 +1371,18 @@ function renderHtml(options: ServerOptions): string {
       .waiting-agent:hover,
       .waiting-agent:focus-within {
         z-index: 8;
+      }
+
+      [data-focus-agent] {
+        transition: opacity 120ms linear;
+      }
+
+      .scene-grid[data-focus-active="true"] [data-focus-agent] {
+        opacity: 0.5;
+      }
+
+      .scene-grid[data-focus-active="true"] [data-focus-agent].is-focused {
+        opacity: 1;
       }
 
       .lounge-agent {
@@ -1184,10 +1480,10 @@ function renderHtml(options: ServerOptions): string {
         justify-content: space-between;
         gap: 10px;
         align-items: center;
-        padding: 4px 6px;
+        padding: 4px 8px;
         font-size: 11px;
         border-bottom: 1px solid rgba(255,255,255,0.08);
-        background: rgba(13, 24, 20, 0.7);
+        background: rgba(12, 29, 43, 0.68);
       }
 
       .room-head {
@@ -1288,17 +1584,65 @@ function renderHtml(options: ServerOptions): string {
         100% { transform: translateY(0); opacity: 1; }
       }
 
-      @keyframes booth-enter {
-        0% { transform: translate(-72px, 10px); opacity: 0; }
-        35% { transform: translate(-42px, 6px); opacity: 1; }
-        70% { transform: translate(-16px, 2px); opacity: 1; }
-        100% { transform: translate(0, 0); opacity: 1; }
+      @keyframes workstation-spawn {
+        0% { opacity: 0; }
+        18% { opacity: 1; }
+        32% { opacity: 0; }
+        46% { opacity: 1; }
+        60% { opacity: 0; }
+        76% { opacity: 1; transform: translateY(-1px); }
+        100% { opacity: 1; transform: translateY(0); }
       }
 
-      @keyframes booth-exit {
-        0% { transform: translate(0, 0); opacity: 1; }
-        30% { transform: translate(14px, 2px); opacity: 1; }
-        100% { transform: translate(82px, 10px); opacity: 0; }
+      @keyframes workstation-despawn {
+        0% { opacity: 1; }
+        24% { opacity: 0; }
+        42% { opacity: 1; }
+        64% { opacity: 0; }
+        82% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+
+      @keyframes avatar-arrive {
+        0% {
+          opacity: 0;
+          transform: translate(var(--path-x, 0px), var(--path-y, 0px)) scaleX(var(--avatar-flip, 1));
+        }
+        10% {
+          opacity: 1;
+          transform: translate(var(--path-x, 0px), var(--path-y, 0px)) scaleX(var(--avatar-flip, 1));
+        }
+        100% {
+          opacity: 1;
+          transform: translate(0, 0) scaleX(var(--avatar-flip, 1));
+        }
+      }
+
+      @keyframes avatar-leave {
+        0% {
+          opacity: 1;
+          transform: translate(0, 0) scaleX(var(--avatar-flip, 1));
+        }
+        85% {
+          opacity: 1;
+          transform: translate(var(--path-x, 0px), var(--path-y, 0px)) scaleX(var(--avatar-flip, 1));
+        }
+        100% {
+          opacity: 0;
+          transform: translate(var(--path-x, 0px), var(--path-y, 0px)) scaleX(var(--avatar-flip, 1));
+        }
+      }
+
+      @keyframes avatar-flash-in {
+        0% { opacity: 0; filter: brightness(2.2) contrast(1.4) drop-shadow(0 0 0 rgba(255,255,255,0)); }
+        40% { opacity: 1; filter: brightness(2.8) contrast(1.6) drop-shadow(0 0 8px rgba(255,255,255,0.82)); }
+        100% { opacity: 1; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.24)); }
+      }
+
+      @keyframes avatar-flash-out {
+        0% { opacity: 1; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.24)); }
+        45% { opacity: 1; filter: brightness(2.6) contrast(1.5) drop-shadow(0 0 8px rgba(255,255,255,0.8)); }
+        100% { opacity: 0.2; filter: brightness(0.9) contrast(1) drop-shadow(0 0 0 rgba(255,255,255,0)); }
       }
 
       @media (max-width: 1240px) {
@@ -1388,17 +1732,26 @@ function renderHtml(options: ServerOptions): string {
       const initialView = params.get("view") || "map";
       const initialActiveOnly = params.get("history") !== "1" && params.get("active") !== "0";
       const screenshotMode = params.get("screenshot") === "1";
+      if (screenshotMode) {
+        document.body.classList.add("snapshot-mode");
+      }
       const state = {
         fleet: null,
         selected: initialProject,
         view: initialView === "terminal" ? "terminal" : "map",
         activeOnly: initialActiveOnly,
-        connection: screenshotMode ? "snapshot" : "connecting"
+        connection: screenshotMode ? "snapshot" : "connecting",
+        focusedSessionKeys: []
       };
       let events = null;
       const liveAgentMemory = new Map();
+      let renderedAgentSceneState = new Map();
+      let sceneStateDraft = null;
       let enteringAgentKeys = new Set();
       let departingAgents = [];
+      let notifications = [];
+      let notificationTicker = null;
+      const seenNotificationKeys = new Set();
 
       const projectMetaByRoot = new Map(configuredProjects.map((project) => [project.root, project]));
       function projectInfo(projectRoot) {
@@ -1414,6 +1767,41 @@ function renderHtml(options: ServerOptions): string {
 
       function agentKey(projectRoot, agent) {
         return \`\${projectRoot}::\${agent.id}\`;
+      }
+
+      function rememberAgentSceneState(snapshot, agent, sceneState) {
+        if (!agent || !sceneState) {
+          return;
+        }
+        const target = sceneStateDraft || renderedAgentSceneState;
+        target.set(agentKey(snapshot.projectRoot, agent), sceneState);
+      }
+
+      function roomEntranceLayout(roomPixelWidth, compact) {
+        const doorScale = compact ? 1.42 : 1.7;
+        const clockScale = compact ? 0.92 : 1.08;
+        const centerDoorY = compact ? 26 : 34;
+        return {
+          doorScale,
+          clockScale,
+          centerDoorX: Math.round(roomPixelWidth / 2 - pixelOffice.props.boothDoor.w * doorScale),
+          centerDoorY,
+          entryX: Math.round(roomPixelWidth / 2),
+          entryY: Math.round(centerDoorY + pixelOffice.props.boothDoor.h * doorScale + (compact ? 2 : 3))
+        };
+      }
+
+      function agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight) {
+        const startX = Math.round(entrance.entryX - avatarWidth / 2);
+        const startY = Math.round(entrance.entryY - avatarHeight + 2);
+        return {
+          pathX: startX - targetX,
+          pathY: startY - targetY
+        };
+      }
+
+      function motionShellClass(mode) {
+        return mode ? \`office-avatar-shell \${mode}\` : "office-avatar-shell";
       }
 
       const mapViewButton = document.getElementById("map-view-button");
@@ -1532,12 +1920,18 @@ function renderHtml(options: ServerOptions): string {
         if (agent.role) {
           return String(agent.role).toLowerCase();
         }
-        return agent.source === "cloud" ? "cloud" : "default";
+        if (agent.source === "cloud") {
+          return "cloud";
+        }
+        if (agent.source === "claude") {
+          return "claude";
+        }
+        return "default";
       }
 
       function titleCaseWords(value) {
         return String(value)
-          .split(/\s+/)
+          .split(/\\s+/)
           .filter(Boolean)
           .map((word) => word[0] ? word[0].toUpperCase() + word.slice(1) : word)
           .join(" ");
@@ -1560,7 +1954,7 @@ function renderHtml(options: ServerOptions): string {
         if (count === 1) {
           return phrase;
         }
-        const words = String(phrase).split(/\s+/).filter(Boolean);
+        const words = String(phrase).split(/\\s+/).filter(Boolean);
         if (words.length === 0) {
           return phrase;
         }
@@ -1599,6 +1993,35 @@ function renderHtml(options: ServerOptions): string {
         return snapshot.agents.find((candidate) => candidate.id === agent.parentThreadId)?.label ?? null;
       }
 
+      function focusAgentKey(snapshot, agent) {
+        return agentKey(snapshot.projectRoot, agent);
+      }
+
+      function collectFocusedSessionKeys(snapshot, agent) {
+        const queue = [agent.id];
+        const visited = new Set(queue);
+        const keys = new Set([focusAgentKey(snapshot, agent)]);
+        while (queue.length > 0) {
+          const currentId = queue.shift();
+          for (const candidate of snapshot.agents) {
+            if (candidate.parentThreadId !== currentId || visited.has(candidate.id)) {
+              continue;
+            }
+            visited.add(candidate.id);
+            queue.push(candidate.id);
+            keys.add(focusAgentKey(snapshot, candidate));
+          }
+        }
+        return [...keys];
+      }
+
+      function focusWrapperAttrs(snapshot, agent) {
+        if (!agent) {
+          return "";
+        }
+        return \` data-focus-agent="true" data-focus-key="\${escapeHtml(focusAgentKey(snapshot, agent))}"\`;
+      }
+
       function stationRoleLabel(role, count) {
         const normalized = String(role || "default").trim().toLowerCase().replace(/[_-]+/g, " ");
         const base =
@@ -1631,6 +2054,35 @@ function renderHtml(options: ServerOptions): string {
           });
       }
 
+      function compareAgentsForDeskLayout(snapshot, left, right) {
+        const leadDelta = Number(isLeadSession(snapshot, right)) - Number(isLeadSession(snapshot, left));
+        if (leadDelta !== 0) {
+          return leadDelta;
+        }
+
+        const depthDelta = left.depth - right.depth;
+        if (depthDelta !== 0) {
+          return depthDelta;
+        }
+
+        const parentDelta = String(left.parentThreadId || "").localeCompare(String(right.parentThreadId || ""));
+        if (parentDelta !== 0) {
+          return parentDelta;
+        }
+
+        const roleDelta = agentRole(left).localeCompare(agentRole(right));
+        if (roleDelta !== 0) {
+          return roleDelta;
+        }
+
+        const labelDelta = String(left.label || "").localeCompare(String(right.label || ""));
+        if (labelDelta !== 0) {
+          return labelDelta;
+        }
+
+        return String(left.id || "").localeCompare(String(right.id || ""));
+      }
+
       function roleTone(role) {
         const normalized = String(role || "default").toLowerCase();
         switch (normalized) {
@@ -1642,6 +2094,8 @@ function renderHtml(options: ServerOptions): string {
             return "#f5b74f";
           case "cloud":
             return "#98d8ff";
+          case "claude":
+            return "#ffab91";
           case "default":
             return "#f2ead7";
           default:
@@ -1723,27 +2177,277 @@ function renderHtml(options: ServerOptions): string {
         return \`\${deltaDays}d ago\`;
       }
 
+      function agentKindLabel(snapshot, agent) {
+        const role = agentRoleLabel(agent).toLowerCase();
+        if (agent.source === "cloud") {
+          return \`cloud \${role}\`;
+        }
+        if (isLeadSession(snapshot, agent)) {
+          return \`lead \${role}\`;
+        }
+        if (agent.parentThreadId) {
+          return \`\${role} subagent\`;
+        }
+        return role;
+      }
+
+      function agentHoverSummary(snapshot, agent) {
+        const detail = String(agent.detail || "").trim();
+        const focus = primaryFocusPath(snapshot, agent);
+        if (!focus) {
+          return detail;
+        }
+        if (["Thinking", "Idle", "Finished recently", "No turns yet"].includes(detail)) {
+          return \`In \${focus}\`;
+        }
+        return detail;
+      }
+
+      function notificationLabel(event) {
+        if (!event) {
+          return "";
+        }
+        switch (event.action) {
+          case "created":
+            return "Created";
+          case "deleted":
+            return "Deleted";
+          case "moved":
+            return "Moved";
+          case "edited":
+            return event.isImage ? "Updated" : "Edited";
+          case "ran":
+            return "Ran";
+          case "said":
+            return "Update";
+          default:
+            return "Changed";
+        }
+      }
+
+      function notificationDescriptor(snapshot, agent, previous) {
+        const event = agent.activityEvent;
+        const stateChanged = !previous || previous.state !== agent.state || previous.detail !== agent.detail;
+        if (!agent.isCurrent && !(stateChanged && (agent.state === "waiting" || agent.state === "blocked"))) {
+          return null;
+        }
+
+        if (event && agent.isCurrent) {
+          if (event.type === "fileChange") {
+            return {
+              kindClass: event.action === "created" ? "create" : "edit",
+              label: notificationLabel(event),
+              title: notificationTitle(snapshot, agent),
+              imageUrl: event.isImage && event.path ? projectFileUrl(snapshot.projectRoot, event.path) : null
+            };
+          }
+
+          if (event.type === "commandExecution") {
+            return {
+              kindClass: agent.state === "blocked" ? "blocked" : "run",
+              label: agent.state === "blocked" ? "Failed" : "Ran",
+              title: notificationTitle(snapshot, agent),
+              imageUrl: null
+            };
+          }
+
+          if (event.type === "agentMessage" && stateChanged && agent.state !== "done") {
+            return {
+              kindClass: "update",
+              label: "Update",
+              title: notificationTitle(snapshot, agent),
+              imageUrl: null
+            };
+          }
+        }
+
+        if (!stateChanged) {
+          return null;
+        }
+
+        if (agent.state === "blocked") {
+          const approvalWait = /approval/i.test(agent.detail);
+          return {
+            kindClass: "blocked",
+            label: approvalWait ? "Needs" : "Blocked",
+            title: approvalWait ? "approval" : agent.detail,
+            imageUrl: null
+          };
+        }
+
+        if (agent.state === "waiting") {
+          const inputWait = /user input/i.test(agent.detail);
+          return {
+            kindClass: "waiting",
+            label: inputWait ? "Needs" : "Waiting",
+            title: inputWait ? "input" : agent.detail,
+            imageUrl: null
+          };
+        }
+
+        return null;
+      }
+
+      function buildNotificationFingerprint(projectRoot, agent, descriptor) {
+        return [
+          projectRoot,
+          agent.id,
+          descriptor.kindClass,
+          descriptor.label,
+          descriptor.title,
+          descriptor.imageUrl || ""
+        ].join("::");
+      }
+
+      function notificationTitle(snapshot, agent) {
+        const event = agent.activityEvent;
+        if (!event) {
+          return agent.detail;
+        }
+        if (event.path) {
+          const cleaned = cleanReportedPath(snapshot.projectRoot, event.path);
+          return cleaned || event.title || agent.detail;
+        }
+        return event.title || agent.detail;
+      }
+
+      function shortenNotificationText(value, maxLength = 44) {
+        const normalized = String(value || "").replace(/\\s+/g, " ").trim();
+        if (normalized.length <= maxLength) {
+          return normalized;
+        }
+        return normalized.slice(0, maxLength - 1) + "…";
+      }
+
+      function notificationLine(descriptor) {
+        const label = shortenNotificationText(descriptor.label || "", 18);
+        const title = shortenNotificationText(descriptor.title || "", 46);
+        return {
+          label,
+          title
+        };
+      }
+
+      function projectFileUrl(projectRoot, path) {
+        return \`/api/project-file?projectRoot=\${encodeURIComponent(projectRoot)}&path=\${encodeURIComponent(path)}\`;
+      }
+
+      function queueAgentNotifications(previousFleet, nextFleet) {
+        if (!previousFleet || screenshotMode) {
+          return;
+        }
+
+        const previousAgents = new Map();
+        for (const snapshot of previousFleet.projects || []) {
+          for (const agent of snapshot.agents || []) {
+            previousAgents.set(agentKey(snapshot.projectRoot, agent), agent);
+          }
+        }
+
+        for (const snapshot of nextFleet.projects || []) {
+          for (const agent of snapshot.agents || []) {
+            const key = agentKey(snapshot.projectRoot, agent);
+            const previous = previousAgents.get(key);
+            const descriptor = notificationDescriptor(snapshot, agent, previous);
+            if (!descriptor) {
+              continue;
+            }
+
+            const nextFingerprint = buildNotificationFingerprint(snapshot.projectRoot, agent, descriptor);
+            const previousDescriptor = previous ? notificationDescriptor(snapshot, previous, null) : null;
+            const previousFingerprint = previous && previousDescriptor
+              ? buildNotificationFingerprint(snapshot.projectRoot, previous, previousDescriptor)
+              : null;
+            const nextNotificationKey = nextFingerprint + "::" + agent.updatedAt;
+
+            if (nextFingerprint === previousFingerprint || seenNotificationKeys.has(nextNotificationKey)) {
+              continue;
+            }
+
+            notifications.push({
+              id: nextNotificationKey,
+              key,
+              projectRoot: snapshot.projectRoot,
+              createdAt: Date.now(),
+              kindClass: descriptor.kindClass,
+              label: descriptor.label,
+              title: descriptor.title,
+              imageUrl: descriptor.imageUrl
+            });
+            seenNotificationKeys.add(nextNotificationKey);
+          }
+        }
+
+        notifications = notifications.slice(-24);
+        ensureNotificationTicker();
+      }
+
+      function pruneNotifications() {
+        const now = Date.now();
+        notifications = notifications.filter((entry) => now - entry.createdAt < 2400);
+        if (notifications.length === 0 && notificationTicker) {
+          clearInterval(notificationTicker);
+          notificationTicker = null;
+        }
+      }
+
+      function renderNotifications() {
+        const wrappers = document.querySelectorAll("[data-scene-fit]");
+        wrappers.forEach((wrapper) => {
+          const layer = wrapper.querySelector("[data-scene-notifications]");
+          if (!(wrapper instanceof HTMLElement) || !(layer instanceof HTMLElement)) {
+            return;
+          }
+
+          const wrapperRect = wrapper.getBoundingClientRect();
+          const selectedProject = state.selected === "all" ? null : state.selected;
+          const visible = notifications.filter((entry) => {
+            if (selectedProject) {
+              return entry.projectRoot === selectedProject;
+            }
+            return true;
+          });
+          const stackByKey = new Map();
+
+          layer.innerHTML = visible.map((entry) => {
+            const anchor = wrapper.querySelector(\`[data-agent-key="\${CSS.escape(entry.key)}"]\`);
+            if (!(anchor instanceof HTMLElement)) {
+              return "";
+            }
+            const stackIndex = stackByKey.get(entry.key) ?? 0;
+            stackByKey.set(entry.key, stackIndex + 1);
+            const rect = anchor.getBoundingClientRect();
+            const left = rect.left - wrapperRect.left + rect.width / 2;
+            const top = rect.top - wrapperRect.top - stackIndex * 18;
+            const line = notificationLine(entry);
+            const image = entry.imageUrl
+              ? \`<img class="agent-toast-preview" src="\${escapeHtml(entry.imageUrl)}" alt="\${escapeHtml(entry.title)}" />\`
+              : "";
+            return \`<div class="agent-toast \${entry.kindClass}\${entry.imageUrl ? " image" : ""}" style="left:\${Math.round(left)}px; top:\${Math.round(top)}px;"><div class="agent-toast-copy"><div class="agent-toast-label">\${escapeHtml(line.label)}</div><div class="agent-toast-title">\${escapeHtml(line.title)}</div></div>\${image}</div>\`;
+          }).join("");
+        });
+      }
+
+      function ensureNotificationTicker() {
+        if (notificationTicker || screenshotMode) {
+          return;
+        }
+        notificationTicker = setInterval(() => {
+          pruneNotifications();
+          renderNotifications();
+        }, 120);
+      }
+
       function renderAgentHover(snapshot, agent) {
         const lead = parentLabelFor(snapshot, agent);
-        const focus = primaryFocusPath(snapshot, agent);
-        const branch = agent.git && agent.git.branch ? agent.git.branch : null;
-        const rows = [
-          ["Now", agent.detail],
-          ["Type", \`\${agentRankLabel(snapshot, agent)} · \${agentRoleLabel(agent)}\`]
-        ];
-        if (focus) {
-          rows.push(["Focus", focus]);
-        }
-        if (lead) {
-          rows.push(["Lead", lead]);
-        }
-        if (branch) {
-          rows.push(["Branch", branch]);
-        }
-        rows.push(["Source", agent.source === "cloud" ? "Codex Cloud" : titleCaseWords(agent.sourceKind || agent.source)]);
-        rows.push(["Updated", formatUpdatedAt(agent.updatedAt)]);
+        const summary = agentHoverSummary(snapshot, agent);
+        const meta = [
+          titleCaseWords(agentKindLabel(snapshot, agent)),
+          lead ? \`with \${lead}\` : "",
+          formatUpdatedAt(agent.updatedAt)
+        ].filter(Boolean).join(" · ");
 
-        return \`<div class="agent-hover"><div class="agent-hover-title"><strong>\${escapeHtml(agent.label)}</strong><span>\${escapeHtml(agent.appearance.label)}</span></div>\${rows.map(([key, value]) => \`<div class="agent-hover-row"><span class="agent-hover-key">\${escapeHtml(key)}</span><span class="agent-hover-value">\${escapeHtml(value)}</span></div>\`).join("")}</div>\`;
+        return \`<div class="agent-hover"><div class="agent-hover-title"><strong>\${escapeHtml(agent.label)}</strong></div><div class="agent-hover-summary">\${escapeHtml(summary)}</div><div class="agent-hover-meta">\${escapeHtml(meta)}</div></div>\`;
       }
 
       function flattenRooms(rooms) {
@@ -1758,9 +2462,6 @@ function renderHtml(options: ServerOptions): string {
       }
 
       function renderSprite(sprite, x, y, scale, className, extraStyle = "", title = "", options = {}) {
-        const sheetUrl = options.sheetUrl || pixelOffice.sheetUrl;
-        const sheetWidth = options.sheetWidth || pixelOffice.sheetSize.width;
-        const sheetHeight = options.sheetHeight || pixelOffice.sheetSize.height;
         const width = Math.round(sprite.w * scale);
         const height = Math.round(sprite.h * scale);
         const style = [
@@ -1768,9 +2469,7 @@ function renderHtml(options: ServerOptions): string {
           \`top:\${Math.round(y)}px\`,
           \`width:\${width}px\`,
           \`height:\${height}px\`,
-          \`background-image:url(\${sheetUrl})\`,
-          \`background-size:\${sheetWidth * scale}px \${sheetHeight * scale}px\`,
-          \`background-position:-\${sprite.x * scale}px -\${sprite.y * scale}px\`,
+          \`background-image:url(\${sprite.url})\`,
           extraStyle
         ].filter(Boolean).join(";");
         const titleAttr = title ? \` title="\${escapeHtml(title)}"\` : "";
@@ -1779,28 +2478,6 @@ function renderHtml(options: ServerOptions): string {
 
       function fitSpriteToWidth(sprite, width, minScale, maxScale) {
         return Math.max(minScale, Math.min(maxScale, width / sprite.w));
-      }
-
-      function chairSpriteForAgent(agent) {
-        return pixelOffice.chairs[stableHash(agent.id) % pixelOffice.chairs.length];
-      }
-
-      function wallArtForRole(role) {
-        switch (role) {
-          case "explorer":
-          case "office_mapper":
-            return pixelOffice.props.artUs;
-          case "worker":
-          case "engineer":
-          case "implementer":
-            return pixelOffice.props.artUk;
-          case "content_designer":
-          case "designer":
-          case "writer":
-            return pixelOffice.props.artWarm;
-          default:
-            return pixelOffice.props.artWarm;
-        }
       }
 
       function fileSpriteForRole(role) {
@@ -1825,6 +2502,10 @@ function renderHtml(options: ServerOptions): string {
           pixelOffice.props.sofaGreen
         ];
         return sofas[index % sofas.length];
+      }
+
+      function computerSpriteForAgent(agent, mirrored) {
+        return pixelOffice.props.workstation;
       }
 
       function roomSkyHtml(roomPixelWidth, compact) {
@@ -1854,27 +2535,40 @@ function renderHtml(options: ServerOptions): string {
         }));
       }
 
-      function buildClusterLayout(cluster, compact, leadBoothWidth, leadBoothHeight, childBoothWidth, childBoothHeight) {
+      function partitionAgents(agents, size) {
+        const rows = [];
+        for (let index = 0; index < agents.length; index += size) {
+          rows.push(agents.slice(index, index + size));
+        }
+        return rows;
+      }
+
+      function buildClusterLayout(cluster, compact, leadBoothWidth, leadBoothHeight, childBoothWidth, childBoothHeight, availableWidth) {
         const labelHeight = compact ? 12 : 14;
-        const roleGapX = compact ? 8 : 12;
         const roleGapY = compact ? 8 : 10;
         const boothGap = 6;
         const childCols = 2;
-        let rightY = 0;
-        let rightWidth = 0;
+        const stripWidth = Math.min(
+          availableWidth,
+          Math.max(
+            Math.round(leadBoothWidth * (compact ? 1.8 : 2)),
+            childCols * childBoothWidth + (childCols - 1) * boothGap + (compact ? 10 : 14)
+          )
+        );
         const roleGroups = groupAgentsByRole(cluster.children);
+        let cursorY = leadBoothHeight + (roleGroups.length > 0 ? roleGapY : 0);
 
         const groups = roleGroups.map((group) => {
-          const columns = Math.max(1, Math.min(childCols, group.agents.length));
+          const columns = childCols;
           const rows = Math.max(1, Math.ceil(group.agents.length / childCols));
-          const showLabel = group.agents.length > 1 || group.role !== "default" || roleGroups.length > 1;
-          const visibleLabelHeight = showLabel ? labelHeight + 4 : 0;
-          const width = columns * childBoothWidth + (columns - 1) * boothGap;
+          const showLabel = group.agents.length > 1;
+          const visibleLabelHeight = showLabel ? labelHeight + 2 : 0;
+          const width = stripWidth;
           const height = visibleLabelHeight + rows * childBoothHeight + (rows - 1) * boothGap;
           const layout = {
             ...group,
-            x: leadBoothWidth + roleGapX,
-            y: rightY,
+            x: 0,
+            y: cursorY,
             width,
             height,
             columns,
@@ -1882,33 +2576,23 @@ function renderHtml(options: ServerOptions): string {
             showLabel,
             labelOffset: visibleLabelHeight
           };
-          rightY += height + roleGapY;
-          rightWidth = Math.max(rightWidth, width);
+          cursorY += height + roleGapY;
           return layout;
         });
-
-        if (groups.length > 0) {
-          rightY -= roleGapY;
-        }
 
         return {
           lead: cluster.lead,
           children: cluster.children,
           groups,
-          width: leadBoothWidth + (groups.length > 0 ? roleGapX + rightWidth : 0),
-          height: Math.max(leadBoothHeight, rightY)
+          width: stripWidth,
+          height: groups.length > 0 ? cursorY - roleGapY : leadBoothHeight
         };
       }
 
-      function restingAgentsFor(snapshot, compact, liveOnly) {
-        if (liveOnly) {
-          return [];
-        }
-
+      function restingAgentsFor(snapshot, compact) {
         return snapshot.agents
           .filter((agent) => agent.source !== "cloud" && (agent.state === "idle" || agent.state === "done"))
-          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-          .slice(0, compact ? 4 : 6);
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       }
 
       function loungeMetaLabel(waitingCount, restingCount) {
@@ -1942,140 +2626,276 @@ function renderHtml(options: ServerOptions): string {
         return slots[index % slots.length];
       }
 
-      function boothPose(agent, boothWidth, boothHeight, avatar, avatarScale) {
-        const avatarWidth = avatar.w * avatarScale;
-        const avatarHeight = avatar.h * avatarScale;
-        const seated = {
-          x: Math.max(10, Math.round(boothWidth * 0.38)),
-          y: Math.max(2, Math.round(boothHeight - avatarHeight + 2)),
-          flip: false,
-          bubble: null
-        };
-        const aisle = {
-          x: Math.max(8, Math.round(boothWidth - avatarWidth - 4)),
-          y: Math.max(0, Math.round(boothHeight - avatarHeight + 8)),
-          flip: true,
-          bubble: null
-        };
-        switch (agent.state) {
-          case "editing":
-          case "thinking":
-          case "planning":
-          case "scanning":
-          case "delegating":
-            return seated;
-          case "running":
-          case "validating":
-            return {
-              ...aisle,
-              y: Math.max(0, aisle.y - 6),
-              bubble: agent.state === "validating" ? "ok" : null
-            };
-          case "waiting":
-            return { ...aisle, bubble: "..." };
-          case "blocked":
-            return { ...aisle, bubble: "!" };
-          case "cloud":
-            return { ...aisle, bubble: "cloud" };
-          case "done":
-          case "idle":
-          default:
-            return {
-              ...aisle,
-              x: Math.max(6, Math.round(boothWidth * 0.52)),
-              flip: stableHash(agent.id) % 2 === 0
-            };
-        }
+      function chairSpriteForAgent(agent) {
+        return pixelOffice.chairs[stableHash(agent.id) % pixelOffice.chairs.length];
       }
 
-      function renderBooth(snapshot, agent, role, x, y, boothWidth, boothHeight, compact, options = {}) {
-        const avatar = avatarForAgent(agent);
+      function renderAvatarShell(snapshot, agent, state, shellStyle, avatarStyle, mode) {
+        return \`<div class="\${motionShellClass(mode)}" style="\${shellStyle}"><div class="office-avatar state-\${state}" data-agent-key="\${escapeHtml(agentKey(snapshot.projectRoot, agent))}" data-agent-id="\${escapeHtml(agent.id)}" data-project-root="\${escapeHtml(snapshot.projectRoot)}" style="\${avatarStyle}"></div></div>\`;
+      }
+
+      function renderCubicleCell(snapshot, agent, role, x, y, boothWidth, boothHeight, compact, options = {}) {
+        const state = agent?.state || "idle";
+        const motionMode = options.motionMode || null;
+        const avatar = agent ? avatarForAgent(agent) : null;
         const avatarScale = compact ? 1.25 : 1.5;
-        const pose = boothPose(agent, boothWidth, boothHeight, avatar, avatarScale);
-        const avatarWidth = avatar.w * avatarScale;
-        const avatarHeight = avatar.h * avatarScale;
-        const chair = chairSpriteForAgent(agent);
-        const art = wallArtForRole(role);
-        const files = fileSpriteForRole(role);
-        const wall = pixelOffice.props.cubicleWall;
-        const panelLeft = pixelOffice.props.cubiclePanelLeft;
-        const panelRight = pixelOffice.props.cubiclePanelRight;
-        const wallScale = fitSpriteToWidth(wall, boothWidth * (options.lead ? 0.88 : 0.82), compact ? 0.7 : 0.82, compact ? 0.88 : 1.02);
-        const chairScale = compact ? 1.14 : (options.lead ? 1.34 : 1.22);
-        const workstationScale = fitSpriteToWidth(pixelOffice.props.workstation, boothWidth * (options.lead ? 0.28 : 0.24), compact ? 1.78 : 2.02, compact ? 2.12 : 2.42);
-        const towerScale = compact ? 1.1 : 1.24;
-        const panelScale = compact ? 1.08 : 1.22;
-        const plantScale = compact ? 0.92 : 1.06;
-        const wallWidth = wall.w * wallScale;
-        const wallHeight = wall.h * wallScale;
-        const wallX = Math.round((boothWidth - wallWidth) / 2);
-        const wallY = compact ? 2 : 4;
-        const artScale = compact ? 0.96 : 1.06;
-        const artX = Math.max(4, wallX + Math.round(wallWidth * 0.34));
-        const artY = wallY + Math.max(2, Math.round(wallHeight * 0.58));
-        const workstationWidth = pixelOffice.props.workstation.w * workstationScale;
-        const workstationHeight = pixelOffice.props.workstation.h * workstationScale;
-        const workstationX = Math.round((boothWidth - workstationWidth) / 2);
-        const workstationY = Math.round(boothHeight - workstationHeight - (compact ? 6 : 8));
-        const chairX = Math.max(2, workstationX - chair.w * chairScale + Math.round(workstationWidth * 0.22));
-        const chairY = Math.round(boothHeight - chair.h * chairScale - (compact ? 1 : 2));
-        const towerX = Math.min(boothWidth - pixelOffice.props.tower.w * towerScale - 4, workstationX + workstationWidth - pixelOffice.props.tower.w * towerScale + (compact ? 1 : 2));
-        const towerY = Math.max(wallY + wallHeight + 2, workstationY + workstationHeight - pixelOffice.props.tower.h * towerScale - (compact ? 1 : 2));
-        const panelY = Math.max(wallY + wallHeight + (compact ? 1 : 2), workstationY - panelLeft.h * panelScale + Math.round(workstationHeight * 0.44));
-        const panelLeftX = Math.max(4, workstationX - panelLeft.w * panelScale + Math.round(workstationWidth * 0.16));
-        const panelRightX = Math.min(boothWidth - panelRight.w * panelScale - 4, workstationX + workstationWidth - Math.round(workstationWidth * 0.18));
-        const fileScale = compact ? 1.1 : 1.22;
-        const fileX = Math.min(boothWidth - files.w * fileScale - 4, workstationX + workstationWidth + (compact ? 2 : 4));
-        const fileY = Math.max(wallY + wallHeight + 2, workstationY + workstationHeight - files.h * fileScale - (compact ? 2 : 3));
-        const plantX = Math.max(4, wallX + wallWidth - pixelOffice.props.plant.w * plantScale - 4);
-        const plantY = Math.max(wallY + wallHeight + 2, workstationY + workstationHeight - pixelOffice.props.plant.h * plantScale - (compact ? 2 : 4));
-        const mugScale = compact ? 1.04 : 1.16;
-        const mugX = Math.max(5, workstationX + Math.round(workstationWidth * 0.7));
-        const mugY = Math.max(wallY + wallHeight + 4, workstationY + Math.round(workstationHeight * 0.5));
-        const deskShell = [
-          renderSprite(wall, wallX, wallY, wallScale, "office-sprite", "z-index:1; opacity:0.98;"),
-          renderSprite(art, artX, artY, artScale, "office-sprite", "z-index:2;"),
-          renderSprite(panelLeft, panelLeftX, panelY, panelScale, "office-sprite", "z-index:3; opacity:0.96;"),
-          renderSprite(panelRight, panelRightX, panelY, panelScale, "office-sprite", "z-index:3; opacity:0.96;"),
-          options.lead
-            ? renderSprite(pixelOffice.props.plant, plantX, plantY, plantScale, "office-sprite", "z-index:2;")
-            : renderSprite(files, fileX, fileY, fileScale, "office-sprite", "z-index:2; opacity:0.96;"),
-          renderSprite(chair, chairX, chairY, chairScale, "office-sprite", "z-index:2;"),
-          renderSprite(pixelOffice.props.workstation, workstationX, workstationY, workstationScale, "office-sprite", "z-index:5;"),
-          renderSprite(pixelOffice.props.tower, towerX, towerY, towerScale, "office-sprite", "z-index:4;"),
-          renderSprite(pixelOffice.props.mug, mugX, mugY, mugScale, "office-sprite", "z-index:6;")
-        ].join("");
-        const bubbleClass = agent.state === "blocked" ? "speech-bubble blocked"
-          : agent.state === "waiting" ? "speech-bubble waiting"
+        const avatarWidth = avatar ? avatar.w * avatarScale : 0;
+        const avatarHeight = avatar ? avatar.h * avatarScale : 0;
+        const mirrored = options.mirrored === true;
+        const chair = agent ? chairSpriteForAgent(agent) : pixelOffice.chairs[0];
+        const deskSprite = pixelOffice.props.cubiclePanelLeft;
+        const deskScale = fitSpriteToWidth(
+          deskSprite,
+          boothWidth * (options.lead ? 0.2 : 0.18),
+          compact ? 1.28 : 1.42,
+          compact ? 1.44 : 1.62
+        );
+        const computerSprite = computerSpriteForAgent(agent, mirrored);
+        const workstationScale = fitSpriteToWidth(
+          computerSprite,
+          boothWidth * (options.lead ? 0.23 : 0.21),
+          compact ? 1.32 : 1.48,
+          compact ? 1.68 : 1.96
+        );
+        const chairScale = compact ? 1.18 : 1.34;
+        const deskWidth = deskSprite.w * deskScale;
+        const deskHeight = deskSprite.h * deskScale;
+        const workstationWidth = computerSprite.w * workstationScale;
+        const workstationHeight = computerSprite.h * workstationScale;
+        const chairWidth = chair.w * chairScale;
+        const chairHeight = chair.h * chairScale;
+        const centerX = Math.round(boothWidth / 2);
+        const innerInset = compact ? 4 : 6;
+        const workstationX = mirrored
+          ? innerInset
+          : Math.round(boothWidth - workstationWidth - innerInset);
+        const deskX = mirrored
+          ? Math.max(2, Math.round(workstationX + workstationWidth * 0.54 - deskWidth * 0.52))
+          : Math.max(2, Math.round(workstationX + workstationWidth * 0.48 - deskWidth * 0.5));
+        const deskY = Math.round(boothHeight - deskHeight - (compact ? 11 : 13));
+        const workstationY = Math.round(deskY - workstationHeight * (compact ? 0.2 : 0.18));
+        const chairOutset = compact ? 3 : 5;
+        const chairLift = compact ? 1 : 2;
+        const chairX = (mirrored
+          ? Math.round(workstationX + workstationWidth - chairWidth * 0.18)
+          : Math.round(workstationX - chairWidth * 0.82))
+          + (mirrored ? chairOutset : -chairOutset);
+        const chairY = Math.round(deskY + deskHeight - chairHeight * 0.74) - chairLift;
+        const sideX = mirrored
+          ? Math.min(boothWidth - avatarWidth - 2, Math.round(deskX + deskWidth + (compact ? 6 : 8)))
+          : Math.max(2, Math.round(deskX - avatarWidth - (compact ? 6 : 8)));
+        const avatarPose = (() => {
+          if (!agent) {
+            return null;
+          }
+          const workstationFlip = mirrored;
+          const baseY = Math.round(deskY + deskHeight - avatarHeight + (compact ? 1 : 2));
+          const seatedX = mirrored
+            ? Math.min(boothWidth - avatarWidth - 2, Math.round(chairX - avatarWidth * 0.22 + (compact ? 2 : 4)))
+            : Math.max(2, Math.round(chairX + chairWidth * 0.22 - (compact ? 2 : 4)));
+          if (state === "editing" || state === "thinking" || state === "planning" || state === "scanning" || state === "delegating") {
+            return {
+              x: seatedX,
+              y: Math.max(0, baseY - (compact ? 1 : 3)),
+              flip: workstationFlip
+            };
+          }
+          if (state === "running" || state === "validating" || state === "blocked") {
+            const workingX = mirrored
+              ? Math.min(boothWidth - avatarWidth - 2, sideX + (compact ? 4 : 6))
+              : Math.max(2, sideX - (compact ? 4 : 6));
+            return {
+              x: workingX,
+              y: baseY,
+              flip: workstationFlip
+            };
+          }
+          if (state === "idle" || state === "done") {
+            return {
+              x: Math.max(2, Math.round(centerX - avatarWidth / 2)),
+              y: Math.max(0, baseY + (compact ? 1 : 2)),
+              flip: stableHash(agent.id) % 2 === 0
+            };
+          }
+          return {
+            x: sideX,
+            y: baseY,
+            flip: workstationFlip
+          };
+        })();
+        const bubbleClass = state === "blocked" ? "speech-bubble blocked"
+          : state === "waiting" ? "speech-bubble waiting"
           : "speech-bubble";
-        const bubble = pose.bubble
-          ? \`<div class="\${bubbleClass}" style="left:\${Math.round(pose.x + avatarWidth / 2)}px; top:\${Math.max(0, Math.round(pose.y - 12))}px;">\${escapeHtml(pose.bubble)}</div>\`
+        const bubbleLabel = !agent ? null
+          : state === "blocked" ? "!"
+          : state === "waiting" ? "..."
+          : state === "cloud" ? "cloud"
+          : state === "validating" ? "ok"
+          : null;
+        const bubble = bubbleLabel && !motionMode
+          ? \`<div class="\${bubbleClass}" style="left:\${Math.round((avatarPose?.x || 0) + avatarWidth / 2)}px; top:\${Math.max(0, Math.round((avatarPose?.y || 0) - 12))}px;">\${escapeHtml(bubbleLabel)}</div>\`
           : "";
-        const avatarStyle = [
-          \`left:\${Math.round(pose.x)}px\`,
-          \`top:\${Math.round(pose.y)}px\`,
-          \`width:\${Math.round(avatarWidth)}px\`,
-          \`height:\${Math.round(avatarHeight)}px\`,
-          \`background-size:\${256 * avatarScale}px \${160 * avatarScale}px\`,
-          \`background-position:-\${avatar.x * avatarScale}px -\${avatar.y * avatarScale}px\`,
-          \`--appearance-body:\${agent.appearance.body}\`,
-          \`--appearance-shadow:\${agent.appearance.shadow}\`,
-          pose.flip ? "transform: scaleX(-1)" : ""
-        ].filter(Boolean).join(";");
-        const monitorClass = isBusyAgent(agent) && agent.state !== "waiting" && agent.state !== "blocked"
+        const avatarStyle = avatar && agent && avatarPose
+          ? [
+            \`background-image:url(\${avatar.url})\`,
+            \`--appearance-body:\${agent.appearance.body}\`,
+            \`--appearance-shadow:\${agent.appearance.shadow}\`
+          ].filter(Boolean).join(";")
+          : "";
+        const monitorClass = agent && isBusyAgent(agent) && state !== "waiting" && state !== "blocked"
           ? "booth-monitor state-active"
           : "booth-monitor";
 
         const screenGlow = monitorClass.includes("state-active")
-          ? \`<div style="position:absolute;left:\${Math.round(workstationX + workstationWidth * 0.18)}px;top:\${Math.round(workstationY + workstationHeight * 0.12)}px;width:\${Math.max(8, Math.round(workstationWidth * 0.38))}px;height:\${Math.max(6, Math.round(workstationHeight * 0.18))}px;background:rgba(75,214,159,0.3);box-shadow:0 0 10px rgba(75,214,159,0.28);pointer-events:none;z-index:7;"></div>\`
+          ? \`<div style="position:absolute;left:\${Math.round(workstationX + workstationWidth * 0.19)}px;top:\${Math.round(workstationY + workstationHeight * 0.14)}px;width:\${Math.max(8, Math.round(workstationWidth * 0.36))}px;height:\${Math.max(5, Math.round(workstationHeight * 0.16))}px;background:rgba(75,214,159,0.3);box-shadow:0 0 10px rgba(75,214,159,0.28);pointer-events:none;z-index:7;"></div>\`
           : "";
-        const key = agentKey(snapshot.projectRoot, agent);
+        const absoluteCellX = Math.round(options.absoluteX ?? x);
+        const absoluteCellY = Math.round(options.absoluteY ?? y);
+        const avatarTargetX = avatarPose ? absoluteCellX + Math.round(avatarPose.x) : null;
+        const avatarTargetY = avatarPose ? absoluteCellY + Math.round(avatarPose.y) : null;
+        const entrance = options.entrance || null;
+        const path = avatarPose && entrance
+          ? agentPathDelta(entrance, avatarTargetX, avatarTargetY, avatarWidth, avatarHeight)
+          : { pathX: 0, pathY: 0 };
+        const shellStyle = avatar && agent && avatarPose
+          ? [
+            \`left:\${Math.round(avatarPose.x)}px\`,
+            \`top:\${Math.round(avatarPose.y)}px\`,
+            \`width:\${Math.round(avatarWidth)}px\`,
+            \`height:\${Math.round(avatarHeight)}px\`,
+            \`--avatar-flip:\${avatarPose.flip ? -1 : 1}\`,
+            \`--path-x:\${Math.round(path.pathX)}px\`,
+            \`--path-y:\${Math.round(path.pathY)}px\`
+          ].join(";")
+          : "";
+        const avatarHtml = avatar && agent && avatarPose
+          ? renderAvatarShell(snapshot, agent, state, shellStyle, avatarStyle, motionMode)
+          : "";
+        if (agent && avatar && avatarPose && entrance && motionMode !== "departing") {
+          rememberAgentSceneState(snapshot, agent, {
+            roomId: options.roomId || agent.roomId,
+            compact,
+            kind: "desk",
+            cellX: absoluteCellX,
+            cellY: absoluteCellY,
+            cellWidth: boothWidth,
+            cellHeight: boothHeight,
+            mirrored,
+            lead: Boolean(options.lead),
+            role,
+            entrance,
+            avatarX: avatarTargetX,
+            avatarY: avatarTargetY,
+            avatarWidth: Math.round(avatarWidth),
+            avatarHeight: Math.round(avatarHeight),
+            avatarFlip: avatarPose.flip ? -1 : 1
+          });
+        }
+        const deskShell = [
+          renderSprite(deskSprite, deskX, deskY, deskScale, "office-sprite", \`z-index:3;\${mirrored ? "transform:scaleX(-1);transform-origin:50% 50%;" : ""}\`),
+          renderSprite(chair, chairX, chairY, chairScale, "office-sprite", \`z-index:4;\${mirrored ? "transform:scaleX(-1);transform-origin:50% 50%;" : ""}\`),
+          renderSprite(computerSprite, workstationX, workstationY, workstationScale, "office-sprite", \`z-index:5;\${mirrored ? "transform:scaleX(-1);transform-origin:50% 50%;" : ""}\`),
+          screenGlow
+        ].join("");
+        const hoverHtml = agent ? renderAgentHover(snapshot, agent) : "";
+        const tabIndex = agent ? "0" : "-1";
+        const cellClasses = ["cubicle-cell"];
+        if (motionMode) cellClasses.push(motionMode);
+        return \`<div class="\${cellClasses.join(" ")}" tabindex="\${tabIndex}"\${focusWrapperAttrs(snapshot, agent)} style="left:\${Math.round(x)}px; top:\${Math.round(y)}px; width:\${boothWidth}px; height:\${boothHeight}px;"><div class="desk-shell">\${deskShell}</div>\${avatarHtml}\${bubble}\${hoverHtml}</div>\`;
+      }
+
+      function renderDeskPod(snapshot, agents, role, x, y, podWidth, podHeight, compact, options = {}) {
+        const padX = compact ? 8 : 10;
+        const centerGap = 0;
+        const cellWidth = Math.max(compact ? 44 : 58, Math.floor((podWidth - padX * 2 - centerGap) / 2));
         const classes = ["booth"];
         if (options.lead) classes.push("lead");
-        if (options.liveOnly && enteringAgentKeys.has(key)) classes.push("entering");
-        if (options.departing) classes.push("departing");
+        const stackOrder = 100 + Math.round(y + podHeight);
+        const leftAgent = agents[0] || null;
+        const rightAgent = agents[1] || null;
+        const hasBothSides = Boolean(leftAgent && rightAgent);
+        const singleCellX = Math.round((podWidth - cellWidth) / 2);
+        const podBase = [];
+        const cells = [
+          leftAgent
+            ? renderCubicleCell(
+              snapshot,
+              leftAgent,
+              role,
+              hasBothSides ? padX : singleCellX,
+              0,
+              cellWidth,
+              podHeight,
+              compact,
+              {
+                ...options,
+                mirrored: false,
+                lead: options.lead && Boolean(leftAgent),
+                absoluteX: x + (hasBothSides ? padX : singleCellX),
+                absoluteY: y,
+                motionMode: options.liveOnly && enteringAgentKeys.has(agentKey(snapshot.projectRoot, leftAgent)) ? "entering" : null
+              }
+            )
+            : "",
+          rightAgent
+            ? renderCubicleCell(
+              snapshot,
+              rightAgent,
+              role,
+              hasBothSides ? padX + cellWidth + centerGap : singleCellX,
+              0,
+              cellWidth,
+              podHeight,
+              compact,
+              {
+                ...options,
+                mirrored: true,
+                lead: false,
+                absoluteX: x + (hasBothSides ? padX + cellWidth + centerGap : singleCellX),
+                absoluteY: y,
+                motionMode: options.liveOnly && enteringAgentKeys.has(agentKey(snapshot.projectRoot, rightAgent)) ? "entering" : null
+              }
+            )
+            : ""
+        ].join("");
+        return \`<div class="\${classes.join(" ")}" style="left:\${Math.round(x)}px; top:\${Math.round(y)}px; width:\${podWidth}px; height:\${podHeight}px; --booth-accent:\${roleTone(role)}; --stack-order:\${stackOrder};">\${podBase.join("")}\${cells}</div>\`;
+      }
 
-        return \`<div class="\${classes.join(" ")}" tabindex="0" style="left:\${Math.round(x)}px; top:\${Math.round(y)}px; width:\${boothWidth}px; height:\${boothHeight}px; --booth-accent:\${roleTone(role)};">\${deskShell}\${screenGlow}<div class="office-avatar state-\${agent.state}" style="\${avatarStyle}"></div>\${bubble}\${renderAgentHover(snapshot, agent)}</div>\`;
+      function renderCubicleRow(snapshot, agents, role, x, y, rowWidth, rowHeight, compact, options = {}) {
+        const columns = Math.max(1, options.slots || agents.length);
+        const padX = compact ? 6 : 8;
+        const dividerGap = compact ? 10 : 14;
+        const cellWidth = Math.max(compact ? 42 : 56, Math.floor((rowWidth - padX * 2 - dividerGap * (columns - 1)) / columns));
+        const classes = ["booth"];
+        if (options.lead) classes.push("lead");
+        const stackOrder = 100 + Math.round(y + rowHeight);
+        const rowBase = [];
+        const mirrored = options.mirrored ?? ((options.rowIndex || 0) % 2 === 1);
+        const cells = agents.map((agent, index) => {
+          const cellX = padX + index * (cellWidth + dividerGap);
+          return renderCubicleCell(
+            snapshot,
+            agent,
+            role,
+            cellX,
+            0,
+            cellWidth,
+            rowHeight,
+            compact,
+            {
+              ...options,
+              mirrored,
+              absoluteX: x + cellX,
+              absoluteY: y,
+              motionMode: options.motionMode || (options.liveOnly && enteringAgentKeys.has(agentKey(snapshot.projectRoot, agent)) ? "entering" : null)
+            }
+          );
+        }).join("");
+        return \`<div class="\${classes.join(" ")}" style="left:\${Math.round(x)}px; top:\${Math.round(y)}px; width:\${rowWidth}px; height:\${rowHeight}px; --booth-accent:\${roleTone(role)}; --stack-order:\${stackOrder};">\${rowBase.join("")}\${cells}</div>\`;
+      }
+
+      function renderBooth(snapshot, agent, role, x, y, boothWidth, boothHeight, compact, options = {}) {
+        return renderCubicleRow(snapshot, [agent], role, x, y, boothWidth, boothHeight, compact, options);
       }
 
       function renderWaitingAvatar(snapshot, agent, x, y, compact) {
@@ -2088,12 +2908,11 @@ function renderHtml(options: ServerOptions): string {
           "top:0",
           \`width:\${Math.round(avatarWidth)}px\`,
           \`height:\${Math.round(avatarHeight)}px\`,
-          \`background-size:\${256 * avatarScale}px \${160 * avatarScale}px\`,
-          \`background-position:-\${avatar.x * avatarScale}px -\${avatar.y * avatarScale}px\`,
+          \`background-image:url(\${avatar.url})\`,
           \`--appearance-body:\${agent.appearance.body}\`,
           \`--appearance-shadow:\${agent.appearance.shadow}\`
         ].join(";");
-        return \`<div class="waiting-agent" tabindex="0" style="left:\${Math.round(x)}px; top:\${Math.round(y)}px;"><div class="office-avatar state-waiting" style="\${avatarStyle}"></div><div class="speech-bubble waiting" style="left:\${Math.round(avatarWidth / 2)}px; top:-10px;">...</div>\${renderAgentHover(snapshot, agent).replace("agent-hover", "waiting-hover")}</div>\`;
+        return \`<div class="waiting-agent" tabindex="0"\${focusWrapperAttrs(snapshot, agent)} style="left:\${Math.round(x)}px; top:\${Math.round(y)}px;"><div class="office-avatar state-waiting" data-agent-key="\${escapeHtml(agentKey(snapshot.projectRoot, agent))}" style="\${avatarStyle}"></div><div class="speech-bubble waiting" style="left:\${Math.round(avatarWidth / 2)}px; top:-10px;">...</div>\${renderAgentHover(snapshot, agent).replace("agent-hover", "waiting-hover")}</div>\`;
       }
 
       function renderRestingAvatar(snapshot, agent, index, compact, recRoomWidth) {
@@ -2114,8 +2933,7 @@ function renderHtml(options: ServerOptions): string {
           "top:0",
           \`width:\${Math.round(avatarWidth)}px\`,
           \`height:\${Math.round(avatarHeight)}px\`,
-          \`background-size:\${256 * avatarScale}px \${160 * avatarScale}px\`,
-          \`background-position:-\${avatar.x * avatarScale}px -\${avatar.y * avatarScale}px\`,
+          \`background-image:url(\${avatar.url})\`,
           \`--appearance-body:\${agent.appearance.body}\`,
           \`--appearance-shadow:\${agent.appearance.shadow}\`,
           transforms.length > 0 ? \`transform:\${transforms.join(" ")}\` : ""
@@ -2123,184 +2941,380 @@ function renderHtml(options: ServerOptions): string {
         const bubble = slot.bubble
           ? \`<div class="speech-bubble resting" style="left:\${Math.round(avatarWidth / 2)}px; top:-10px;">\${escapeHtml(slot.bubble)}</div>\`
           : "";
-        return \`<div class="lounge-agent" tabindex="0" style="left:\${Math.round(slot.x)}px; top:\${Math.round(slot.y)}px;"><div class="office-avatar state-\${agent.state}" style="\${avatarStyle}"></div>\${bubble}\${renderAgentHover(snapshot, agent).replace("agent-hover", "lounge-hover")}</div>\`;
+        return \`<div class="lounge-agent" tabindex="0"\${focusWrapperAttrs(snapshot, agent)} style="left:\${Math.round(slot.x)}px; top:\${Math.round(slot.y)}px;"><div class="office-avatar state-\${agent.state}" data-agent-key="\${escapeHtml(agentKey(snapshot.projectRoot, agent))}" style="\${avatarStyle}"></div>\${bubble}\${renderAgentHover(snapshot, agent).replace("agent-hover", "lounge-hover")}</div>\`;
+      }
+
+      function renderWallsideAvatar(snapshot, agent, x, y, compact, options = {}) {
+        const motionMode = options.motionMode || null;
+        const avatar = avatarForAgent(agent);
+        const avatarScale = compact ? 1.25 : 1.5;
+        const avatarWidth = avatar.w * avatarScale;
+        const avatarHeight = avatar.h * avatarScale;
+        const avatarStyle = [
+          \`background-image:url(\${avatar.url})\`,
+          \`--appearance-body:\${agent.appearance.body}\`,
+          \`--appearance-shadow:\${agent.appearance.shadow}\`
+        ].filter(Boolean).join(";");
+        const targetX = Math.round(x);
+        const targetY = Math.round(y + (options.settle ? 3 : 0));
+        const entrance = options.entrance || null;
+        const path = entrance
+          ? agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight)
+          : { pathX: 0, pathY: 0 };
+        const shellStyle = [
+          "left:0",
+          "top:0",
+          \`width:\${Math.round(avatarWidth)}px\`,
+          \`height:\${Math.round(avatarHeight)}px\`,
+          \`--avatar-flip:\${options.flip ? -1 : 1}\`,
+          \`--path-x:\${Math.round(path.pathX)}px\`,
+          \`--path-y:\${Math.round(path.pathY)}px\`
+        ].join(";");
+        const bubbleLabel = options.bubble ?? (
+          agent.state === "waiting" ? "..."
+          : agent.state === "done" ? "zZ"
+          : agent.state === "idle" ? "ok"
+          : null
+        );
+        const bubbleClass = bubbleLabel === "..."
+          ? "speech-bubble waiting"
+          : bubbleLabel
+            ? "speech-bubble resting"
+            : "";
+        const bubble = bubbleLabel && !motionMode
+          ? \`<div class="\${bubbleClass}" style="left:\${Math.round(avatarWidth / 2)}px; top:-10px;">\${escapeHtml(bubbleLabel)}</div>\`
+          : "";
+        const hoverClass = agent.state === "waiting" ? "waiting-hover" : "lounge-hover";
+        const wrapperClass = agent.state === "waiting" ? "waiting-agent" : "lounge-agent";
+        if (motionMode !== "departing") {
+          rememberAgentSceneState(snapshot, agent, {
+            roomId: options.roomId || agent.roomId,
+            compact,
+            kind: "wallside",
+            x: targetX,
+            y: targetY,
+            entrance,
+            bubble: options.bubble ?? null,
+            flip: options.flip ? -1 : 1,
+            settle: Boolean(options.settle),
+            avatarWidth: Math.round(avatarWidth),
+            avatarHeight: Math.round(avatarHeight)
+          });
+        }
+        return \`<div class="\${wrapperClass}\${motionMode ? \` \${motionMode}\` : ""}" tabindex="0"\${focusWrapperAttrs(snapshot, agent)} style="left:\${Math.round(x)}px; top:\${Math.round(y)}px;">\${renderAvatarShell(snapshot, agent, agent.state, shellStyle, avatarStyle, motionMode)}\${bubble}\${renderAgentHover(snapshot, agent).replace("agent-hover", hoverClass)}</div>\`;
+      }
+
+      function wallsideWaitingSlotAt(index, compact, roomPixelWidth, walkwayY) {
+        const columns = compact ? 4 : 5;
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        const startX = compact ? 78 : 96;
+        const stepX = compact ? 26 : 32;
+        const stepY = compact ? 14 : 17;
+        return {
+          x: Math.min(roomPixelWidth - (compact ? 118 : 144), startX + column * stepX),
+          y: walkwayY + (compact ? 2 : 4) + row * stepY + (column % 2 === 0 ? 0 : 2),
+          flip: (index + row) % 2 === 1
+        };
+      }
+
+      function wallsideRestingSlotAt(index, compact, roomPixelWidth, walkwayY) {
+        const columns = compact ? 4 : 5;
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        const startX = roomPixelWidth - (compact ? 72 : 94);
+        const stepX = compact ? 24 : 30;
+        const stepY = compact ? 14 : 17;
+        return {
+          x: Math.max(compact ? 186 : 236, startX - column * stepX),
+          y: walkwayY + (compact ? 2 : 4) + row * stepY + (column % 2 === 0 ? 1 : 3),
+          flip: column % 2 === 0,
+          settle: row === 0 && column % 3 === 0
+        };
+      }
+
+      function isUtilityRoom(room) {
+        if (!room || room.path === ".") {
+          return false;
+        }
+        const label = \`\${room.name || ""} \${room.path || ""}\`.toLowerCase();
+        return ["docs", "packages"].some((segment) => label === segment || label.includes(\` \${segment}\`) || label.includes(\`/\${segment}\`));
+      }
+
+      function buildSceneRooms(rooms) {
+        const visibleRooms = [];
+        const roomAlias = new Map();
+
+        function visit(room, parentVisibleId = null) {
+          const suppress = parentVisibleId !== null && isUtilityRoom(room);
+          const visibleId = suppress ? parentVisibleId : room.id;
+          roomAlias.set(room.id, visibleId);
+          if (!suppress) {
+            visibleRooms.push(room);
+          }
+          if (Array.isArray(room.children)) {
+            room.children.forEach((child) => visit(child, visibleId));
+          }
+        }
+
+        rooms.forEach((room) => visit(room, null));
+
+        const primaryRoomId = visibleRooms.find((room) => room.path === "." || room.id === "root")?.id || visibleRooms[0]?.id || null;
+        visibleRooms.sort((left, right) => (right.width * right.height) - (left.width * left.height));
+        return { visibleRooms, roomAlias, primaryRoomId };
+      }
+
+      function renderRoomEntranceDecor(roomPixelWidth, compact, options = {}) {
+        const entrance = roomEntranceLayout(roomPixelWidth, compact);
+        const plantScale = compact ? 1.08 : 1.22;
+        const sprites = [
+          renderSprite(pixelOffice.props.boothDoor, entrance.centerDoorX, entrance.centerDoorY, entrance.doorScale, "office-sprite", "z-index:2;"),
+          renderSprite(pixelOffice.props.boothDoor, Math.round(roomPixelWidth / 2), entrance.centerDoorY, entrance.doorScale, "office-sprite", "z-index:2; transform:scaleX(-1); transform-origin:50% 50%;")
+        ];
+        if (options.clock !== false) {
+          sprites.push(
+            renderSprite(pixelOffice.props.clock, Math.round(roomPixelWidth / 2 - pixelOffice.props.clock.w * entrance.clockScale / 2), compact ? 12 : 14, entrance.clockScale, "office-sprite", "z-index:3;")
+          );
+        }
+        if (options.plants) {
+          sprites.push(
+            renderSprite(pixelOffice.props.plant, entrance.centerDoorX - (compact ? 24 : 28), compact ? 48 : 60, plantScale, "office-sprite", "z-index:3;"),
+            renderSprite(pixelOffice.props.plant, Math.round(roomPixelWidth / 2 + pixelOffice.props.boothDoor.w * entrance.doorScale + (compact ? 6 : 8)), compact ? 48 : 60, plantScale, "office-sprite", "z-index:3;")
+          );
+        }
+        return {
+          entrance,
+          html: sprites.join("")
+        };
+      }
+
+      function renderIntegratedRecArea(snapshot, primaryRoomId, waitingAgents, restingAgents, compact, roomPixelWidth) {
+        const leftWindowScale = compact ? 0.82 : 0.96;
+        const rightWindowScale = compact ? 0.82 : 0.96;
+        const sofaScale = compact ? 1.18 : 1.42;
+        const shelfScale = compact ? 0.96 : 1.12;
+        const coolerScale = compact ? 1.18 : 1.36;
+        const vendingScale = compact ? 1.02 : 1.16;
+        const counterScale = compact ? 0.88 : 1.02;
+        const baseY = compact ? 42 : 54;
+        const walkwayY = compact ? 62 : 78;
+        const leftWindowX = compact ? 52 : 76;
+        const rightWindowX = roomPixelWidth - (compact ? 86 : 108);
+        const entranceDecor = renderRoomEntranceDecor(roomPixelWidth, compact, { plants: true });
+        const facilityHtml = [
+          renderSprite(pixelOffice.props.windowLeft, leftWindowX, compact ? 16 : 20, leftWindowScale, "office-sprite", "z-index:2; opacity:0.92;"),
+          renderSprite(pixelOffice.props.windowRight, rightWindowX, compact ? 16 : 20, rightWindowScale, "office-sprite", "z-index:2; opacity:0.92;"),
+          entranceDecor.html,
+          renderSprite(pixelOffice.props.vending, compact ? 10 : 14, baseY - (compact ? 2 : 4), vendingScale, "office-sprite", "z-index:3;"),
+          renderSprite(pixelOffice.props.cooler, compact ? 38 : 48, baseY + (compact ? 8 : 10), coolerScale, "office-sprite", "z-index:3;"),
+          renderSprite(pixelOffice.props.counter, compact ? 60 : 76, baseY + (compact ? 8 : 10), counterScale, "office-sprite", "z-index:3;"),
+          renderSprite(pixelOffice.props.sofaOrange, roomPixelWidth - (compact ? 118 : 152), baseY + (compact ? 8 : 10), sofaScale, "office-sprite", "z-index:3;"),
+          renderSprite(pixelOffice.props.bookshelf, roomPixelWidth - (compact ? 34 : 40), baseY - (compact ? 2 : 4), shelfScale, "office-sprite", "z-index:3;")
+        ];
+        const agentHtml = [
+          ...waitingAgents.map((agent, index) => {
+            const slot = wallsideWaitingSlotAt(index, compact, roomPixelWidth, walkwayY);
+            return renderWallsideAvatar(snapshot, agent, slot.x, slot.y, compact, { flip: slot.flip, bubble: "...", entrance: entranceDecor.entrance, roomId: primaryRoomId, motionMode: enteringAgentKeys.has(agentKey(snapshot.projectRoot, agent)) ? "entering" : null });
+          }),
+          ...restingAgents.map((agent, index) => {
+            const slot = wallsideRestingSlotAt(index, compact, roomPixelWidth, walkwayY);
+            return renderWallsideAvatar(snapshot, agent, slot.x, slot.y, compact, { flip: slot.flip, settle: slot.settle, entrance: entranceDecor.entrance, roomId: primaryRoomId, motionMode: enteringAgentKeys.has(agentKey(snapshot.projectRoot, agent)) ? "entering" : null });
+          })
+        ];
+        return facilityHtml.join("") + agentHtml.join("");
       }
 
       function renderRoomScene(snapshot, options = {}) {
-        const rooms = flattenRooms(snapshot.rooms.rooms);
+        const sceneRooms = buildSceneRooms(snapshot.rooms.rooms);
+        const rooms = sceneRooms.visibleRooms;
         if (rooms.length === 0) {
           return '<div class="empty">No rooms configured.</div>';
         }
 
         const compact = options.compact === true;
+        const showOverlayLabels = options.showOverlayLabels === true;
         const tile = compact ? 18 : 24;
         const baseMaxX = Math.max(...rooms.map((room) => room.x + room.width), 24);
         const maxY = Math.max(...rooms.map((room) => room.y + room.height), 16);
         const waitingAgents = snapshot.agents.filter((agent) => agent.state === "waiting" && agent.source !== "cloud");
-        const restingAgents = restingAgentsFor(snapshot, compact, options.liveOnly === true);
-        const restingAgentIds = new Set(restingAgents.map((agent) => agent.id));
-        const loungeVisibleCount = waitingAgents.length + restingAgents.length;
-        const recRoomWidth = loungeVisibleCount === 0
-          ? 0
-          : restingAgents.length > 0
-          ? (compact ? 12 * tile : 14 * tile)
-          : (compact ? 9 * tile : 10 * tile);
-        const recRoomHeight = Math.max(compact ? 126 : 168, 6 * tile);
-        const sceneWidth = baseMaxX * tile + (recRoomWidth > 0 ? recRoomWidth + tile : 0);
+        const restingAgents = restingAgentsFor(snapshot, compact);
+        const offDeskAgentIds = new Set([...waitingAgents, ...restingAgents].map((agent) => agent.id));
+        const sceneWidth = baseMaxX * tile;
 
         const html = rooms.map((room) => {
+          const isPrimaryRoom = room.id === sceneRooms.primaryRoomId;
+          const roomAgentId = (agent) => sceneRooms.roomAlias.get(agent.roomId) || (agent.source === "cloud" ? "cloud" : sceneRooms.primaryRoomId);
           const occupants = snapshot.agents.filter(
-            (agent) => agent.roomId === room.id
+            (agent) => roomAgentId(agent) === room.id
               && agent.source !== "cloud"
-              && agent.state !== "waiting"
-              && !restingAgentIds.has(agent.id)
+              && !offDeskAgentIds.has(agent.id)
           );
+          const activeDeskOccupants = occupants.filter((agent) => agent.state !== "idle" && agent.state !== "done");
           const roomPixelWidth = room.width * tile;
           const roomPixelHeight = room.height * tile;
           const stageHeight = roomPixelHeight - 26;
-          const leadBoothWidth = compact ? 78 : 104;
-          const leadBoothHeight = compact ? 54 : 72;
-          const childBoothWidth = compact ? 52 : 70;
-          const childBoothHeight = compact ? 40 : 52;
-          const gapX = compact ? 8 : 12;
-          const gapY = compact ? 10 : 14;
+          const entranceDecor = renderRoomEntranceDecor(roomPixelWidth, compact, { plants: isPrimaryRoom });
+          const recAreaHtml = isPrimaryRoom
+            ? renderIntegratedRecArea(snapshot, room.id, waitingAgents, restingAgents, compact, roomPixelWidth)
+            : "";
+          const podWidth = compact ? 120 : 152;
+          const podHeight = compact ? 66 : 86;
           const paddingX = compact ? 8 : 12;
-          const childBottom = Array.isArray(room.children) && room.children.length > 0
-            ? Math.max(...room.children.map((child) => ((child.y - room.y) + child.height) * tile))
-            : 0;
-          const basePaddingTop = compact ? 40 : 52;
-          const clusterLabels = [];
+          const layoutWidth = Math.max(podWidth, roomPixelWidth - paddingX * 2);
+          const floorBandTop = Math.round(stageHeight * (compact ? 0.24 : 0.26));
+          const basePaddingTop = compact ? 48 : 56;
           const boothHtml = [];
-          const clusterLayouts = buildLeadClusters(occupants)
-            .map((cluster) => buildClusterLayout(cluster, compact, leadBoothWidth, leadBoothHeight, childBoothWidth, childBoothHeight));
-          const centerSingleCluster = clusterLayouts.length === 1;
-          const maxClusterHeight = clusterLayouts.length > 0
-            ? Math.max(...clusterLayouts.map((cluster) => cluster.height))
-            : leadBoothHeight;
-          const paddingTop = Math.min(
-            Math.max(basePaddingTop, childBottom + (compact ? 18 : 24)),
-            Math.max(basePaddingTop, stageHeight - maxClusterHeight - 10)
-          );
-          let cursorX = paddingX;
-          let cursorY = paddingTop;
-          let rowHeight = 0;
-
-          clusterLayouts.forEach((cluster) => {
-            if (cursorX > paddingX && cursorX + cluster.width > roomPixelWidth - paddingX) {
-              cursorX = paddingX;
-              cursorY += rowHeight + gapY;
-              rowHeight = 0;
+          const orderedOccupants = [...occupants].sort((left, right) => compareAgentsForDeskLayout(snapshot, left, right));
+          const pods = [];
+          for (let index = 0; index < orderedOccupants.length; index += 2) {
+            pods.push(orderedOccupants.slice(index, index + 2));
+          }
+          const columnCount = pods.length === 0
+            ? 0
+            : Math.min(layoutWidth >= (compact ? 260 : 320) ? 2 : 1, pods.length);
+          const baseColumnSize = columnCount > 0 ? Math.floor(pods.length / columnCount) : 0;
+          const extraColumns = columnCount > 0 ? pods.length % columnCount : 0;
+          const columns = [];
+          let podIndex = 0;
+          for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+            const size = baseColumnSize + (columnIndex < extraColumns ? 1 : 0);
+            columns.push(pods.slice(podIndex, podIndex + size));
+            podIndex += size;
+          }
+          const columnGap = compact ? 14 : 18;
+          const podGap = compact ? 14 : 18;
+          const columnOffsets = compact ? [0, 10] : [0, 16];
+          const usedColumns = columns.filter((column) => column.length > 0);
+          const totalDeskHeight = usedColumns.length > 0
+            ? Math.max(...usedColumns.map((column, columnIndex) => (
+              column.length * podHeight
+              + Math.max(0, column.length - 1) * podGap
+              + columnOffsets[columnIndex % columnOffsets.length]
+            )))
+            : 0;
+          const rowStartY = usedColumns.length === 0
+            ? basePaddingTop
+            : Math.max(
+              basePaddingTop,
+              Math.min(floorBandTop, stageHeight - totalDeskHeight - (compact ? 8 : 12))
+            );
+          const layoutTotalWidth = usedColumns.length > 0
+            ? usedColumns.length * podWidth + Math.max(0, usedColumns.length - 1) * columnGap
+            : 0;
+          const startX = paddingX + Math.max(0, Math.floor((layoutWidth - layoutTotalWidth) / 2));
+          usedColumns.forEach((columnPods, columnIndex) => {
+            const columnX = startX + columnIndex * (podWidth + columnGap);
+            const columnOffsetY = columnOffsets[columnIndex % columnOffsets.length];
+            const columnRole = columnPods[0]?.[0] ? agentRole(columnPods[0][0]) : "default";
+            if (showOverlayLabels) {
+              const label = columnIndex === 0 ? "Lead column" : stationRoleLabel(columnRole, columnPods.flat().filter(Boolean).length);
+              boothHtml.push(
+                '<div class="' + (columnIndex === 0 ? "lead-banner" : "station-tag") + '" style="left:' + columnX + 'px; top:' + Math.max(8, rowStartY + columnOffsetY - (compact ? 18 : 22)) + 'px; ' + (columnIndex === 0 ? "border-color:" + roleTone(columnRole) + ";" : "--station-tone:" + roleTone(columnRole) + ";") + ' z-index:' + (90 + Math.round(rowStartY + columnOffsetY)) + ';">' + escapeHtml(label) + "</div>"
+              );
             }
-
-            const clusterX = centerSingleCluster
-              ? Math.round((roomPixelWidth - cluster.width) / 2)
-              : cursorX;
-            const clusterY = cursorY;
-            const leadY = clusterY + Math.max(0, cluster.height - leadBoothHeight);
-            cursorX += centerSingleCluster ? 0 : cluster.width + gapX;
-            rowHeight = Math.max(rowHeight, cluster.height);
-
-            clusterLabels.push(
-              \`<div class="lead-banner" style="left:\${clusterX}px; top:\${Math.max(8, clusterY - (compact ? 18 : 22))}px; border-color:\${roleTone(agentRole(cluster.lead))};">\${escapeHtml(cluster.lead.label)} · \${escapeHtml(agentRankLabel(snapshot, cluster.lead))}</div>\`
-            );
-            boothHtml.push(
-              renderBooth(
-                snapshot,
-                cluster.lead,
-                agentRole(cluster.lead),
-                clusterX,
-                leadY,
-                leadBoothWidth,
-                leadBoothHeight,
-                compact,
-                { lead: true, liveOnly: options.liveOnly }
-              )
-            );
-
-            cluster.groups.forEach((group) => {
-              const tagX = clusterX + group.x;
-              const tagY = clusterY + group.y;
-              const stationLabel = \`\${stationRoleLabel(group.role, group.agents.length)}\${group.agents.length > 1 ? \` ×\${group.agents.length}\` : ""}\`;
-              if (group.showLabel) {
-                clusterLabels.push(
-                  \`<div class="station-tag" style="left:\${tagX}px; top:\${tagY}px; --station-tone:\${roleTone(group.role)};">\${escapeHtml(stationLabel)}</div>\`
-                );
-              }
-
-              group.agents.forEach((child, childIndex) => {
-                const childColumn = childIndex % group.columns;
-                const childRow = Math.floor(childIndex / group.columns);
-                const childX = tagX + childColumn * (childBoothWidth + 6);
-                const childY = tagY + group.labelOffset + childRow * (childBoothHeight + 6);
-                boothHtml.push(
-                  renderBooth(
-                    snapshot,
-                    child,
-                    agentRole(child),
-                    childX,
-                    childY,
-                    childBoothWidth,
-                    childBoothHeight,
-                    compact,
-                    { liveOnly: options.liveOnly }
-                  )
-                );
-              });
+            columnPods.forEach((podAgents, rowIndex) => {
+              const podY = rowStartY + columnOffsetY + rowIndex * (podHeight + podGap);
+              const podRole = podAgents[0] ? agentRole(podAgents[0]) : columnRole;
+              boothHtml.push(
+                renderDeskPod(
+                  snapshot,
+                  podAgents,
+                  podRole,
+                  columnX,
+                  podY,
+                  podWidth,
+                  podHeight,
+                  compact,
+                  {
+                    lead: columnIndex === 0 && rowIndex === 0,
+                    liveOnly: options.liveOnly,
+                    roomId: room.id,
+                    entrance: entranceDecor.entrance,
+                    columnIndex,
+                    rowIndex
+                  }
+                )
+              );
             });
           });
+          const paddingTop = rowStartY;
 
           const ghosts = departingAgents.filter(
-            (ghost) => ghost.projectRoot === snapshot.projectRoot && ghost.roomId === room.id && ghost.expiresAt > Date.now()
+            (ghost) => ghost.projectRoot === snapshot.projectRoot
+              && (sceneRooms.roomAlias.get(ghost.sceneState?.roomId || ghost.roomId) || sceneRooms.primaryRoomId) === room.id
+              && ghost.expiresAt > Date.now()
           );
           ghosts.forEach((ghost, index) => {
-            boothHtml.push(
-              renderBooth(
-                snapshot,
-                ghost.agent,
-                agentRole(ghost.agent),
-                paddingX + index * (compact ? 18 : 22),
-                Math.max(paddingTop, stageHeight - (compact ? 54 : 72)),
-                compact ? 58 : 76,
-                compact ? 44 : 56,
-                compact,
-                { departing: true }
-              )
-            );
+            const sceneState = ghost.sceneState;
+            if (!sceneState || sceneState.compact !== compact) {
+              return;
+            }
+            if (sceneState.kind === "desk") {
+              boothHtml.push(
+                renderCubicleCell(
+                  snapshot,
+                  ghost.agent,
+                  sceneState.role || agentRole(ghost.agent),
+                  sceneState.cellX,
+                  sceneState.cellY,
+                  sceneState.cellWidth,
+                  sceneState.cellHeight,
+                  compact,
+                  {
+                    mirrored: sceneState.mirrored,
+                    lead: sceneState.lead,
+                    absoluteX: sceneState.cellX,
+                    absoluteY: sceneState.cellY,
+                    roomId: sceneState.roomId,
+                    entrance: sceneState.entrance || entranceDecor.entrance,
+                    motionMode: "departing"
+                  }
+                )
+              );
+              return;
+            }
+            if (sceneState.kind === "wallside") {
+              boothHtml.push(
+                renderWallsideAvatar(
+                  snapshot,
+                  ghost.agent,
+                  sceneState.x,
+                  sceneState.y - (sceneState.settle ? 3 : 0),
+                  compact,
+                  {
+                    flip: sceneState.flip === -1,
+                    settle: sceneState.settle,
+                    bubble: sceneState.bubble,
+                    roomId: sceneState.roomId,
+                    entrance: sceneState.entrance || entranceDecor.entrance,
+                    motionMode: "departing"
+                  }
+                )
+              );
+            }
           });
 
           const decor = [roomSkyHtml(roomPixelWidth, compact)];
-          const windowScale = compact ? 0.82 : 0.96;
+          if (!isPrimaryRoom) {
+            decor.push(entranceDecor.html);
+          }
           const calendarScale = compact ? 0.94 : 1.08;
-          const plantScale = compact ? 0.9 : 1.06;
-          const bookshelfScale = compact ? 0.74 : 0.88;
-          if (room.width >= 7) {
-            decor.push(renderSprite(pixelOffice.props.windowLeft, 18, compact ? 12 : 16, windowScale, "office-sprite", "z-index:2; opacity:0.92;"));
-          }
-          if (room.width >= 8) {
-            decor.push(renderSprite(pixelOffice.props.windowRight, 18 + pixelOffice.props.windowLeft.w * windowScale + 8, compact ? 12 : 16, windowScale, "office-sprite", "z-index:2; opacity:0.92;"));
-          }
-          if (room.width >= 9) {
+          if (room.width >= 9 && !isPrimaryRoom) {
             decor.push(renderSprite(pixelOffice.props.calendar, roomPixelWidth - pixelOffice.props.calendar.w * calendarScale - 14, compact ? 12 : 16, calendarScale, "office-sprite", "z-index:2;"));
           }
-          if (room.width >= 10) {
-            decor.push(renderSprite(pixelOffice.props.plant, roomPixelWidth - pixelOffice.props.plant.w * plantScale - 16, compact ? 26 : 34, plantScale, "office-sprite", "z-index:2;"));
-          }
-          if (room.width >= 12) {
-            decor.push(renderSprite(pixelOffice.props.bookshelf, roomPixelWidth - pixelOffice.props.bookshelf.w * bookshelfScale - 18, compact ? 40 : 52, bookshelfScale, "office-sprite", "z-index:2; opacity:0.96;"));
-          }
 
-          const empty = occupants.length === 0
+          const visibleRecOccupants = isPrimaryRoom ? waitingAgents.length + restingAgents.length : 0;
+          const empty = occupants.length === 0 && visibleRecOccupants === 0
             ? (options.liveOnly
               ? '<div class="room-empty">No live agent activity here right now.</div>'
               : '<div class="room-empty">No mapped agent activity here yet.</div>')
             : "";
+          const pathLabel = room.path && room.path !== "."
+            ? \` <span class="muted">[\${escapeHtml(room.path)}]</span>\`
+            : "";
 
-          return \`<div class="room" style="left:\${room.x * tile}px; top:\${room.y * tile}px; width:\${roomPixelWidth}px; height:\${roomPixelHeight}px;"><div class="room-meta"><div class="room-head">\${escapeHtml(room.name)} <span class="muted">[\${escapeHtml(room.path)}]</span></div><span class="muted">\${occupants.length} active agent\${occupants.length === 1 ? "" : "s"}</span></div><div class="room-stage"><div class="room-mural"></div><div class="room-floor"></div>\${decor.join("")}\${clusterLabels.join("")}\${boothHtml.join("")}\${empty}</div></div>\`;
+          return \`<div class="room" style="left:\${room.x * tile}px; top:\${room.y * tile}px; width:\${roomPixelWidth}px; height:\${roomPixelHeight}px;"><div class="room-meta"><div class="room-head">\${escapeHtml(room.name)}\${pathLabel}</div><span class="muted">\${activeDeskOccupants.length} active agent\${activeDeskOccupants.length === 1 ? "" : "s"}</span></div><div class="room-stage"><div class="room-mural"></div><div class="room-floor"></div>\${decor.join("")}\${recAreaHtml}\${boothHtml.join("")}\${empty}</div></div>\`;
         }).join("");
-
-        const recRoomHtml = loungeVisibleCount === 0
-          ? ""
-          : \`<div class="rec-room" style="left:\${baseMaxX * tile + tile}px; top:\${tile}px; width:\${recRoomWidth}px; height:\${recRoomHeight}px;"><div class="room-meta"><div class="room-head">Rec Room</div><span class="muted">\${escapeHtml(loungeMetaLabel(waitingAgents.length, restingAgents.length))}</span></div><div class="room-stage"><div class="room-floor" style="height:68%; background:repeating-linear-gradient(180deg, #2aa3e5 0 10px, #1b8fd0 10px 20px);"></div><div class="lounge-rug"></div><div class="lounge-zone">\${roomSkyHtml(recRoomWidth - 20, compact)}\${renderSprite(pixelOffice.props.bookshelf, 8, compact ? 22 : 28, compact ? 0.92 : 1.08, "office-sprite", "z-index:2;")}\${renderSprite(pixelOffice.props.cooler, compact ? 58 : 72, compact ? 34 : 42, compact ? 1.6 : 1.9, "office-sprite", "z-index:3;")}\${renderSprite(pixelOffice.props.deskWide, compact ? 84 : 108, compact ? 36 : 48, compact ? 1.2 : 1.48, "office-sprite", "z-index:3;")}\${renderSprite(pixelOffice.props.mug, compact ? 110 : 140, compact ? 30 : 37, compact ? 1.2 : 1.36, "office-sprite", "z-index:4;")}\${renderSprite(pixelOffice.props.badge, compact ? 127 : 160, compact ? 31 : 38, compact ? 1.18 : 1.36, "office-sprite", "z-index:4;")}\${renderSprite(pixelOffice.props.windowRight, compact ? 92 : 116, compact ? 14 : 18, compact ? 0.92 : 1.05, "office-sprite", "z-index:2; opacity:0.9;")}\${renderSprite(pixelOffice.props.plant, compact ? 156 : 196, compact ? 30 : 40, compact ? 1 : 1.12, "office-sprite", "z-index:3;")}\${renderSprite(pixelOffice.props.sofaOrange, recRoomWidth - (compact ? 110 : 132), compact ? 34 : 44, compact ? 1.6 : 1.88, "office-sprite", "z-index:2;")}\${renderSprite(pixelOffice.props.vending, recRoomWidth - (compact ? 48 : 60), compact ? 22 : 28, compact ? 1.1 : 1.28, "office-sprite", "z-index:3;")}\${restingAgents.map((agent, index) => renderRestingAvatar(snapshot, agent, index, compact, recRoomWidth)).join("")}</div><div class="waiting-lane">\${waitingAgents.map((agent, index) => renderWaitingAvatar(snapshot, agent, 12 + index * (compact ? 34 : 42), compact ? 42 : 52, compact)).join("")}</div></div></div>\`;
 
         const hint = options.showHint === false
           ? ""
@@ -2309,7 +3323,7 @@ function renderHtml(options: ServerOptions): string {
             : '<div class="muted">Room shells come from the project XML, while booths are generated live from Codex sessions and grouped by parent session and subagent role.</div>');
         const sceneClass = compact ? "scene-grid compact" : "scene-grid";
 
-        return \`<div class="scene-shell">\${hint}<div class="scene-fit \${compact ? "compact" : ""}" data-scene-fit><div class="\${sceneClass}" data-scene-grid style="width:\${sceneWidth}px; height:\${maxY * tile}px;">\${html}\${recRoomHtml}</div></div></div>\`;
+        return \`<div class="scene-shell">\${hint}<div class="scene-fit \${compact ? "compact" : ""}" data-scene-fit><div class="scene-notifications" data-scene-notifications></div><div class="\${sceneClass}" data-scene-grid style="width:\${sceneWidth}px; height:\${maxY * tile}px;">\${html}</div></div></div>\`;
       }
 
       function renderTerminalSnapshot(snapshot) {
@@ -2411,17 +3425,16 @@ function renderHtml(options: ServerOptions): string {
 
         const sorted = [...snapshot.agents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         return sorted.map((agent) => {
-          const primaryAction = agent.threadId
-            ? \`<button data-action="copy-resume" data-command="\${escapeHtml(agent.resumeCommand || "")}">Copy resume</button>\`
-            : agent.url
+          const primaryAction = agent.url
             ? \`<a href="\${escapeHtml(agent.url)}" target="_blank" rel="noreferrer"><button>Open task</button></a>\`
-            : '<span class="muted">No jump target</span>';
+            : "";
           const appearanceAction = \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+          const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
 
           const location = relativeLocation(snapshot.projectRoot, agent.cwd || agent.url || "");
           const parentLabel = parentLabelFor(snapshot, agent);
           const leaderText = parentLabel ? \` · lead=\${escapeHtml(parentLabel)}\` : "";
-          return \`<article class="session-card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:start;"><div><strong>\${escapeHtml(agent.label)}</strong><div class="muted">\${escapeHtml(agentRankLabel(snapshot, agent))} · \${escapeHtml(agentRole(agent))} · [\${escapeHtml(agent.state)}] \${escapeHtml(agent.detail)}</div></div><span class="muted">\${escapeHtml(agent.appearance.label)}</span></div><div class="inline-code" style="margin-top:8px;">\${escapeHtml(location)}</div><div class="inline-code" style="margin-top:6px;">room=\${escapeHtml(agent.roomId || "cloud")} · source=\${escapeHtml(agent.sourceKind)}\${leaderText}</div><div class="inline-code" style="margin-top:6px;">updated=\${escapeHtml(agent.updatedAt)}</div><div class="card-actions">\${primaryAction}\${appearanceAction}</div></article>\`;
+          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:start;"><div><strong>\${escapeHtml(agent.label)}</strong><div class="muted">\${escapeHtml(agentRankLabel(snapshot, agent))} · \${escapeHtml(agentRole(agent))} · [\${escapeHtml(agent.state)}] \${escapeHtml(agent.detail)}</div></div><span class="muted">\${escapeHtml(agent.appearance.label)}</span></div><div class="inline-code" style="margin-top:8px;">\${escapeHtml(location)}</div><div class="inline-code" style="margin-top:6px;">room=\${escapeHtml(agent.roomId || "cloud")} · source=\${escapeHtml(agent.sourceKind)}\${leaderText}</div><div class="inline-code" style="margin-top:6px;">updated=\${escapeHtml(agent.updatedAt)}</div><div class="card-actions">\${primaryAction}\${appearanceAction}</div></article>\`;
         }).join("");
       }
 
@@ -2438,23 +3451,69 @@ function renderHtml(options: ServerOptions): string {
 
         entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
         return entries.map(({ snapshot, agent }) => {
-          const primaryAction = agent.threadId
-            ? \`<button data-action="copy-resume" data-command="\${escapeHtml(agent.resumeCommand || "")}">Copy resume</button>\`
-            : agent.url
+          const primaryAction = agent.url
             ? \`<a href="\${escapeHtml(agent.url)}" target="_blank" rel="noreferrer"><button>Open task</button></a>\`
-            : '<span class="muted">No jump target</span>';
+            : "";
           const appearanceAction = \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+          const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const location = relativeLocation(snapshot.projectRoot, agent.cwd || agent.url || "");
           const parentLabel = parentLabelFor(snapshot, agent);
           const leaderText = parentLabel ? \` · lead=\${escapeHtml(parentLabel)}\` : "";
-          return \`<article class="session-card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:start;"><div><strong>\${escapeHtml(agent.label)}</strong><div class="muted">\${escapeHtml(projectLabel(snapshot.projectRoot))} · \${escapeHtml(agentRankLabel(snapshot, agent))} · \${escapeHtml(agentRole(agent))} · [\${escapeHtml(agent.state)}] \${escapeHtml(agent.detail)}</div></div><span class="muted">\${escapeHtml(agent.appearance.label)}</span></div><div class="inline-code" style="margin-top:8px;">\${escapeHtml(location)}</div><div class="inline-code" style="margin-top:6px;">room=\${escapeHtml(agent.roomId || "cloud")} · source=\${escapeHtml(agent.sourceKind)}\${leaderText}</div><div class="inline-code" style="margin-top:6px;">updated=\${escapeHtml(agent.updatedAt)}</div><div class="card-actions">\${primaryAction}\${appearanceAction}</div></article>\`;
+          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:start;"><div><strong>\${escapeHtml(agent.label)}</strong><div class="muted">\${escapeHtml(projectLabel(snapshot.projectRoot))} · \${escapeHtml(agentRankLabel(snapshot, agent))} · \${escapeHtml(agentRole(agent))} · [\${escapeHtml(agent.state)}] \${escapeHtml(agent.detail)}</div></div><span class="muted">\${escapeHtml(agent.appearance.label)}</span></div><div class="inline-code" style="margin-top:8px;">\${escapeHtml(location)}</div><div class="inline-code" style="margin-top:6px;">room=\${escapeHtml(agent.roomId || "cloud")} · source=\${escapeHtml(agent.sourceKind)}\${leaderText}</div><div class="inline-code" style="margin-top:6px;">updated=\${escapeHtml(agent.updatedAt)}</div><div class="card-actions">\${primaryAction}\${appearanceAction}</div></article>\`;
         }).join("");
+      }
+
+      function applySessionFocus() {
+        const focusedKeys = new Set(state.focusedSessionKeys);
+        const hasFocus = focusedKeys.size > 0;
+        document.querySelectorAll("[data-scene-grid]").forEach((grid) => {
+          if (!(grid instanceof HTMLElement)) {
+            return;
+          }
+          if (hasFocus) {
+            grid.dataset.focusActive = "true";
+          } else {
+            delete grid.dataset.focusActive;
+          }
+        });
+        document.querySelectorAll("[data-focus-agent]").forEach((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return;
+          }
+          element.classList.toggle("is-focused", hasFocus && focusedKeys.has(element.dataset.focusKey || ""));
+        });
+      }
+
+      function setSessionFocusFromCard(card) {
+        if (!(card instanceof HTMLElement)) {
+          state.focusedSessionKeys = [];
+          applySessionFocus();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(card.dataset.focusKeys || "[]");
+          state.focusedSessionKeys = Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+        } catch {
+          state.focusedSessionKeys = [];
+        }
+        applySessionFocus();
+      }
+
+      function syncSessionFocusFromDom() {
+        const activeCard = document.querySelector(".session-card:focus-within, .session-card:hover");
+        if (activeCard instanceof HTMLElement) {
+          setSessionFocusFromCard(activeCard);
+          return;
+        }
+        state.focusedSessionKeys = [];
+        applySessionFocus();
       }
 
       function syncLiveAgentState(projects) {
         if (!state.activeOnly) {
           enteringAgentKeys = new Set();
           liveAgentMemory.clear();
+          renderedAgentSceneState.clear();
           departingAgents = [];
           return;
         }
@@ -2469,7 +3528,7 @@ function renderHtml(options: ServerOptions): string {
             nextMemory.set(key, {
               key,
               projectRoot: snapshot.projectRoot,
-              roomId: agent.state === "waiting" ? "__rec_room__" : agent.roomId,
+              roomId: agent.roomId,
               agent
             });
           }
@@ -2483,6 +3542,7 @@ function renderHtml(options: ServerOptions): string {
           if (!nextMemory.has(key)) {
             departingAgents.push({
               ...entry,
+              sceneState: renderedAgentSceneState.get(key) || null,
               expiresAt: now + 420
             });
           }
@@ -2510,11 +3570,19 @@ function renderHtml(options: ServerOptions): string {
           }
 
           const availableWidth = Math.max(wrapper.clientWidth - 4, 1);
+          const wrapperRect = wrapper.getBoundingClientRect();
+          const viewportRemaining = Math.max(window.innerHeight - wrapperRect.top - 20, 1);
           const availableHeight = Math.max(
-            window.innerHeight * (wrapper.classList.contains("compact") ? 0.34 : 0.68),
-            220
+            Math.min(
+              viewportRemaining,
+              window.innerHeight * (wrapper.classList.contains("compact") ? 0.34 : 0.68)
+            ),
+            wrapper.classList.contains("compact") ? 180 : 220
           );
-          const scale = Math.min(availableWidth / rawWidth, availableHeight / rawHeight);
+          const heightScale = wrapper.classList.contains("compact")
+            ? availableHeight / rawHeight
+            : Math.max(1, availableHeight / rawHeight);
+          const scale = Math.min(availableWidth / rawWidth, heightScale);
           const boundedScale = Number.isFinite(scale) && scale > 0
             ? Math.min(Math.max(scale, 0.2), 3.5)
             : 1;
@@ -2538,6 +3606,38 @@ function renderHtml(options: ServerOptions): string {
         return response.json();
       }
 
+      function setTextIfChanged(element, value) {
+        if (!element) {
+          return false;
+        }
+        const next = String(value ?? "");
+        if (element.textContent === next) {
+          return false;
+        }
+        element.textContent = next;
+        return true;
+      }
+
+      function setHtmlIfChanged(element, html, options = {}) {
+        if (!element) {
+          return false;
+        }
+        if (element.dataset.renderHtml === html) {
+          return false;
+        }
+
+        const preserveScroll = options.preserveScroll === true;
+        const scrollTop = preserveScroll ? element.scrollTop : 0;
+        const scrollLeft = preserveScroll ? element.scrollLeft : 0;
+        element.innerHTML = html;
+        element.dataset.renderHtml = html;
+        if (preserveScroll) {
+          element.scrollTop = scrollTop;
+          element.scrollLeft = scrollLeft;
+        }
+        return true;
+      }
+
       function currentSnapshot() {
         if (!state.fleet) return null;
         if (state.selected === "all") return null;
@@ -2545,6 +3645,8 @@ function renderHtml(options: ServerOptions): string {
       }
 
       function ingestFleet(fleet) {
+        const previousFleet = state.fleet;
+        queueAgentNotifications(previousFleet, fleet);
         state.fleet = fleet;
         if (state.selected !== "all") {
           const exists = state.fleet.projects.some((project) => project.projectRoot === state.selected);
@@ -2564,26 +3666,27 @@ function renderHtml(options: ServerOptions): string {
         const selectedRawSnapshot = currentSnapshot();
         const snapshot = selectedRawSnapshot ? viewSnapshot(selectedRawSnapshot) : null;
         syncLiveAgentState(displayedProjects);
+        sceneStateDraft = new Map();
         const counts = fleetCounts({ projects: displayedProjects });
 
-        stamp.textContent = \`Updated \${fleet.generatedAt}\`;
-        projectCount.textContent = state.activeOnly
+        setTextIfChanged(stamp, \`Updated \${fleet.generatedAt}\`);
+        setTextIfChanged(projectCount, state.activeOnly
           ? \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live\`
-          : \`\${fleet.projects.length} tracked\`;
+          : \`\${fleet.projects.length} tracked\`);
         mapViewButton.classList.toggle("active", state.view === "map");
         terminalViewButton.classList.toggle("active", state.view === "terminal");
         activeOnlyButton.classList.toggle("active", state.activeOnly);
         setConnection(state.connection);
 
-        kpis.innerHTML = [
+        setHtmlIfChanged(kpis, [
           ["Agents", counts.total],
           ["Active", counts.active],
           ["Waiting", counts.waiting],
           ["Blocked", counts.blocked],
           ["Cloud", counts.cloud]
-        ].map(([label, value]) => \`<div class="kpi"><div class="muted">\${label}</div><strong>\${value}</strong></div>\`).join("");
+        ].map(([label, value]) => \`<div class="kpi"><div class="muted">\${label}</div><strong>\${value}</strong></div>\`).join(""));
 
-        projectTabs.innerHTML = [
+        setHtmlIfChanged(projectTabs, [
           \`<button class="project-tab\${state.selected === "all" ? " active" : ""}" data-action="select-project" data-project-root="all">All</button>\`,
           ...visibleProjects(fleet).map((project) => {
             const counts = countsForSnapshot(viewSnapshot(project));
@@ -2591,24 +3694,48 @@ function renderHtml(options: ServerOptions): string {
             const badge = state.activeOnly ? busyCount(project) : counts.total;
             return \`<button class="project-tab\${activeClass}" data-action="select-project" data-project-root="\${escapeHtml(project.projectRoot)}" title="\${escapeHtml(project.projectRoot)}">\${escapeHtml(projectLabel(project.projectRoot))} <span class="muted">\${badge}</span></button>\`;
           })
-        ].join("");
+        ].join(""));
 
-        if (!snapshot) {
-          centerTitle.textContent = "All Workspaces";
-          centerContent.innerHTML = renderWorkspaceScroll(displayedProjects);
-          sessionList.innerHTML = renderFleetSessions(displayedProjects);
-          roomsPath.textContent = state.activeOnly ? "Current workload across tracked workspaces" : "All workspaces";
-          fitScenes();
-          return;
+        try {
+          if (!snapshot) {
+            const centerChanged = setHtmlIfChanged(centerContent, renderWorkspaceScroll(displayedProjects), { preserveScroll: true });
+            setHtmlIfChanged(sessionList, renderFleetSessions(displayedProjects), { preserveScroll: true });
+            setTextIfChanged(centerTitle, "All Workspaces");
+            setTextIfChanged(roomsPath, state.activeOnly ? "Current workload across tracked workspaces" : "All workspaces");
+            if (centerChanged) {
+              fitScenes();
+            }
+            renderedAgentSceneState = sceneStateDraft;
+            sceneStateDraft = null;
+            syncSessionFocusFromDom();
+            renderNotifications();
+            return;
+          }
+
+          setTextIfChanged(centerTitle, projectLabel(snapshot.projectRoot));
+          const sceneHtml = state.view === "terminal"
+            ? renderTerminalSnapshot(snapshot)
+            : renderRoomScene(snapshot, { liveOnly: state.activeOnly });
+          const centerChanged = setHtmlIfChanged(centerContent, sceneHtml, { preserveScroll: true });
+          const sessionsHtml = renderSessions(snapshot);
+          setHtmlIfChanged(sessionList, sessionsHtml, { preserveScroll: true });
+          setTextIfChanged(roomsPath, snapshot.rooms.generated ? "Auto rooms" : ".codex-agents/rooms.xml");
+          if (centerChanged) {
+            fitScenes();
+          }
+          renderedAgentSceneState = sceneStateDraft;
+          sceneStateDraft = null;
+          syncSessionFocusFromDom();
+          renderNotifications();
+        } catch (error) {
+          console.error("render failed", error);
+          const message = error instanceof Error ? error.message : String(error);
+          setHtmlIfChanged(centerContent, '<div class="empty">Render failed: ' + escapeHtml(message) + "</div>");
+          setHtmlIfChanged(sessionList, '<div class="empty">Render failed: ' + escapeHtml(message) + "</div>");
+          setConnection("offline");
+          renderedAgentSceneState = new Map();
+          sceneStateDraft = null;
         }
-
-        centerTitle.textContent = projectLabel(snapshot.projectRoot);
-        centerContent.innerHTML = state.view === "terminal"
-          ? renderTerminalSnapshot(snapshot)
-          : renderRoomScene(snapshot, { liveOnly: state.activeOnly });
-        sessionList.innerHTML = renderSessions(snapshot);
-        roomsPath.textContent = snapshot.rooms.generated ? "Auto rooms" : ".codex-agents/rooms.xml";
-        fitScenes();
       }
 
       async function refreshFleet() {
@@ -2650,19 +3777,61 @@ function renderHtml(options: ServerOptions): string {
           return;
         }
 
-        if (action === "copy-resume" && target.dataset.command) {
-          await navigator.clipboard.writeText(target.dataset.command);
-          target.textContent = "Copied";
-          setTimeout(() => { target.textContent = "Copy resume"; }, 1200);
-          return;
-        }
-
         if (action === "cycle-look" && target.dataset.projectRoot && target.dataset.agentId) {
           await postJson("/api/appearance/cycle", {
             projectRoot: target.dataset.projectRoot,
             agentId: target.dataset.agentId
           });
         }
+      });
+
+      document.body.addEventListener("pointerover", (event) => {
+        const card = event.target instanceof HTMLElement ? event.target.closest(".session-card[data-focus-keys]") : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(card instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && card.contains(relatedTarget)) {
+          return;
+        }
+        setSessionFocusFromCard(card);
+      });
+
+      document.body.addEventListener("pointerout", (event) => {
+        const card = event.target instanceof HTMLElement ? event.target.closest(".session-card[data-focus-keys]") : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(card instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && card.contains(relatedTarget)) {
+          return;
+        }
+        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(".session-card[data-focus-keys]")) {
+          return;
+        }
+        setSessionFocusFromCard(null);
+      });
+
+      document.body.addEventListener("focusin", (event) => {
+        const card = event.target instanceof HTMLElement ? event.target.closest(".session-card[data-focus-keys]") : null;
+        if (card instanceof HTMLElement) {
+          setSessionFocusFromCard(card);
+        }
+      });
+
+      document.body.addEventListener("focusout", (event) => {
+        const card = event.target instanceof HTMLElement ? event.target.closest(".session-card[data-focus-keys]") : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(card instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && card.contains(relatedTarget)) {
+          return;
+        }
+        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(".session-card[data-focus-keys]")) {
+          return;
+        }
+        setSessionFocusFromCard(null);
       });
 
       refreshButton.addEventListener("click", async () => {
@@ -2683,7 +3852,10 @@ function renderHtml(options: ServerOptions): string {
         window.addEventListener("online", () => setConnection("reconnecting"));
         window.addEventListener("offline", () => setConnection("offline"));
       }
-      window.addEventListener("resize", () => fitScenes());
+      window.addEventListener("resize", () => {
+        fitScenes();
+        renderNotifications();
+      });
 
       refreshFleet()
         .then(() => {
@@ -2731,6 +3903,22 @@ async function handleRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/server-meta") {
+    sendJson(response, 200, buildServerMeta(options));
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/api/project-file") {
+    const projectRoot = url.searchParams.get("projectRoot");
+    const filePath = url.searchParams.get("path");
+    if (!projectRoot || !filePath) {
+      sendJson(response, 400, { error: "projectRoot and path are required" });
+      return;
+    }
+    await sendProjectFile(response, projectRoot, filePath, request.method);
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/events") {
     service.registerSse(response);
     return;
@@ -2770,7 +3958,8 @@ async function handleRequest(
 
 export async function startWebServer(argv: string[] = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(argv);
-  const service = new FleetLiveService(options.projects);
+  const meta = buildServerMeta(options);
+  const service = new FleetLiveService(options.projects, options.explicitProjects);
   await service.start();
   const server = createServer((request, response) => {
     void handleRequest(request, response, options, service).catch((error) => {
@@ -2787,7 +3976,7 @@ export async function startWebServer(argv: string[] = process.argv.slice(2)): Pr
   });
 
   console.log(
-    `Codex Agents Office web listening on http://${options.host}:${options.port} for ${options.projects
+    `Codex Agents Office web listening on http://${options.host}:${options.port} pid=${meta.pid} build=${meta.buildAt} for ${options.projects
       .map((project) => project.root)
       .join(", ")}`
   );

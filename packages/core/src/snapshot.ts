@@ -2,11 +2,13 @@ import { basename } from "node:path";
 
 import { ensureAgentAppearance } from "./appearance";
 import { withAppServerClient } from "./app-server";
+import { loadClaudeAgents } from "./claude";
 import { listCloudTasks } from "./cloud";
 import { loadFreshPresenceAgents } from "./presence";
 import { findRoomForPaths, loadRoomConfig } from "./room-config";
 import { isCurrentWorkloadAgent } from "./workload";
 import type {
+  AgentActivityEvent,
   ActivityState,
   CloudTask,
   CodexThread,
@@ -193,12 +195,14 @@ export function summariseThread(thread: CodexThread): {
   state: ActivityState;
   detail: string;
   paths: string[];
+  activityEvent: AgentActivityEvent | null;
 } {
   if (thread.status.type === "systemError") {
     return {
       state: "blocked",
       detail: "System error",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
@@ -206,7 +210,8 @@ export function summariseThread(thread: CodexThread): {
     return {
       state: "blocked",
       detail: "Waiting on approval",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
@@ -214,7 +219,8 @@ export function summariseThread(thread: CodexThread): {
     return {
       state: "waiting",
       detail: "Waiting on user input",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
@@ -223,7 +229,8 @@ export function summariseThread(thread: CodexThread): {
     return {
       state: "idle",
       detail: "No turns yet",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
@@ -235,7 +242,8 @@ export function summariseThread(thread: CodexThread): {
     return {
       state: "blocked",
       detail: lastTurn.error?.message ?? "Turn failed",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
@@ -244,12 +252,16 @@ export function summariseThread(thread: CodexThread): {
     return {
       state: treatAsInProgress ? "thinking" : "idle",
       detail: treatAsInProgress ? "Thinking" : "Idle",
-      paths: [thread.cwd]
+      paths: [thread.cwd],
+      activityEvent: null
     };
   }
 
   switch (item.type) {
     case "fileChange": {
+      const primaryChange = Array.isArray(item.changes)
+        ? item.changes.find((entry) => typeof entry === "object" && entry && typeof (entry as Record<string, unknown>).path === "string") as Record<string, unknown> | undefined
+        : undefined;
       const paths = extractStringArray(item.changes, "path");
       const primaryPath = paths[0];
       const status = typeof item.status === "string" ? item.status : "inProgress";
@@ -257,7 +269,25 @@ export function summariseThread(thread: CodexThread): {
       return {
         state,
         detail: primaryPath ? `Editing ${primaryPath}` : "Editing files",
-        paths: paths.length > 0 ? paths : [thread.cwd]
+        paths: paths.length > 0 ? paths : [thread.cwd],
+        activityEvent: {
+          type: "fileChange",
+          action:
+            primaryChange && typeof primaryChange.kind === "string"
+              ? (
+                primaryChange.kind === "create" ? "created"
+                : primaryChange.kind === "delete" ? "deleted"
+                : primaryChange.kind === "move" || primaryChange.kind === "rename" ? "moved"
+                : "edited"
+              )
+              : "edited",
+          path: primaryPath ?? null,
+          title:
+            primaryPath
+              ? `${typeof primaryChange?.kind === "string" ? primaryChange.kind : "edit"} ${primaryPath}`
+              : "Editing files",
+          isImage: Boolean(primaryPath && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(primaryPath))
+        }
       };
     }
     case "commandExecution": {
@@ -268,13 +298,27 @@ export function summariseThread(thread: CodexThread): {
         return {
           state: "blocked",
           detail: command,
-          paths: [cwd]
+          paths: [cwd],
+          activityEvent: {
+            type: "commandExecution",
+            action: "ran",
+            path: cwd,
+            title: command,
+            isImage: false
+          }
         };
       }
       return {
         state: looksLikeValidationCommand(command) ? "validating" : "running",
         detail: command,
-        paths: [cwd]
+        paths: [cwd],
+        activityEvent: {
+          type: "commandExecution",
+          action: "ran",
+          path: cwd,
+          title: command,
+          isImage: false
+        }
       };
     }
     case "webSearch": {
@@ -282,7 +326,8 @@ export function summariseThread(thread: CodexThread): {
       return {
         state: "scanning",
         detail: query,
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     }
     case "mcpToolCall": {
@@ -292,14 +337,16 @@ export function summariseThread(thread: CodexThread): {
       return {
         state: status === "failed" ? "blocked" : "scanning",
         detail: `${server}.${tool}`,
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     }
     case "collabAgentToolCall":
       return {
         state: "delegating",
         detail: "Delegating to another agent",
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     case "collabToolCall": {
       const tool = typeof item.tool === "string" ? item.tool : "subagents";
@@ -330,20 +377,23 @@ export function summariseThread(thread: CodexThread): {
       return {
         state: "delegating",
         detail: label,
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     }
     case "plan":
       return {
         state: "planning",
         detail: "Updating plan",
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     case "reasoning":
       return {
         state: "thinking",
         detail: "Reasoning",
-        paths: [thread.cwd]
+        paths: [thread.cwd],
+        activityEvent: null
       };
     case "agentMessage":
       {
@@ -351,7 +401,14 @@ export function summariseThread(thread: CodexThread): {
         return {
           state: treatAsInProgress ? "thinking" : "done",
           detail: message.detail,
-          paths: message.paths.length > 0 ? message.paths : [thread.cwd]
+          paths: message.paths.length > 0 ? message.paths : [thread.cwd],
+          activityEvent: {
+            type: "agentMessage",
+            action: "said",
+            path: message.paths[0] ?? null,
+            title: message.detail,
+            isImage: false
+          }
         };
       }
     case "userMessage": {
@@ -360,7 +417,8 @@ export function summariseThread(thread: CodexThread): {
       return {
         state: treatAsInProgress ? "planning" : "idle",
         detail: shorten(text, 88),
-        paths: paths.length > 0 ? paths : [thread.cwd]
+        paths: paths.length > 0 ? paths : [thread.cwd],
+        activityEvent: null
       };
     }
     default:
@@ -371,7 +429,8 @@ export function summariseThread(thread: CodexThread): {
   return {
     state: treatAsInProgress ? "thinking" : ageMs <= DONE_WINDOW_MS ? "done" : "idle",
     detail: treatAsInProgress ? "Thinking" : ageMs <= DONE_WINDOW_MS ? "Finished recently" : "Idle",
-    paths: [thread.cwd]
+    paths: [thread.cwd],
+    activityEvent: null
   };
 }
 
@@ -450,6 +509,7 @@ export async function buildDashboardSnapshotFromState(input: {
       appearance,
       updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
       paths: summary.paths,
+      activityEvent: summary.activityEvent,
       threadId: thread.id,
       taskId: null,
       resumeCommand: `codex resume ${thread.id}`,
@@ -480,6 +540,7 @@ export async function buildDashboardSnapshotFromState(input: {
       appearance,
       updatedAt: task.updatedAt,
       paths: [],
+      activityEvent: null,
       threadId: null,
       taskId: task.id,
       resumeCommand: null,
@@ -492,7 +553,16 @@ export async function buildDashboardSnapshotFromState(input: {
   for (const presenceAgent of presenceAgents) {
     agents.push({
       ...presenceAgent,
-      roomId: findRoomForPaths(roomConfig, projectRoot, presenceAgent.paths)
+      roomId: findRoomForPaths(roomConfig, projectRoot, presenceAgent.paths),
+      activityEvent: null
+    });
+  }
+
+  const claudeAgents = await loadClaudeAgents(projectRoot);
+  for (const claudeAgent of claudeAgents) {
+    agents.push({
+      ...claudeAgent,
+      roomId: findRoomForPaths(roomConfig, projectRoot, claudeAgent.paths)
     });
   }
 
