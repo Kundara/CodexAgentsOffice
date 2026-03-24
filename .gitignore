@@ -13,3 +13,6 @@ dist/
 /artifacts/tmp/
 artifacts/validation
 .codex-agents
+artifacts
+AICodexAgentsOffice.win-runchrome-cdp
+.win-run
