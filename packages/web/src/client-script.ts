@@ -49,6 +49,7 @@ export function renderClientScript({
       const workstationEffects = new Map();
       const seenNotificationKeys = new Set();
       const recentNotificationTimes = new Map();
+      const recentNotificationFingerprintTimes = new Map();
       const recentToastLineTimes = new Map();
       const NOTIFICATION_TTL_MS = 2400;
       const MESSAGE_NOTIFICATION_TTL_MS = 4600;
@@ -56,6 +57,7 @@ export function renderClientScript({
       const COMMAND_NOTIFICATION_LINE_TTL_MS = 1200;
       const FILE_CHANGE_COMPUTER_FX_MS = 330;
       const NOTIFICATION_DEDUPE_WINDOW_MS = 1000;
+      const NOTIFICATION_FINGERPRINT_DEDUPE_MS = 4000;
       const TOAST_LINE_DEDUPE_MS = 45000;
       const NOTIFICATION_PRIORITY_DEFAULT = 0;
       const NOTIFICATION_PRIORITY_MESSAGE = 2;
@@ -267,9 +269,26 @@ export function renderClientScript({
       const projectTabs = document.getElementById("project-tabs");
       const centerTitle = document.getElementById("center-title");
       const workspaceFocusButton = document.getElementById("workspace-focus-button");
+      const workspacePanel = document.getElementById("workspace-panel");
       const centerContent = document.getElementById("center-content");
       const sessionList = document.getElementById("session-list");
       const roomsPath = document.getElementById("rooms-path");
+
+      function syncFleetBackdrop() {
+        const towerMode = state.view === "map";
+        document.body.classList.toggle("fleet-sky-active", towerMode);
+        if (workspacePanel instanceof HTMLElement) {
+          workspacePanel.dataset.panelMode = towerMode ? "tower" : "default";
+        }
+        if (centerContent instanceof HTMLElement) {
+          centerContent.dataset.contentMode = towerMode ? "tower" : "default";
+        }
+      }
+
+      function syncSkyParallax() {
+        const scrollY = Math.max(window.scrollY || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);
+        document.documentElement.style.setProperty("--tower-scroll-y", Math.round(scrollY) + "px");
+      }
 
       function syncUrl() {
         const url = new URL(window.location.href);
@@ -383,7 +402,7 @@ export function renderClientScript({
         return agent.source !== "cloud"
           && agent.source !== "presence"
           && !agent.parentThreadId
-          && Boolean(agent.threadId || agent.source === "claude");
+          && Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude");
       }
 
       function isRecentSessionCandidate(agent) {
@@ -426,9 +445,6 @@ export function renderClientScript({
         return [
           agent.id,
           agent.state,
-          agent.detail || "",
-          agent.updatedAt || "",
-          Array.isArray(agent.paths) ? agent.paths.join("|") : "",
           agent.roomId || "",
           agent.parentThreadId || "",
           agent.isCurrent ? "1" : "0",
@@ -546,6 +562,9 @@ export function renderClientScript({
         if (agent.source === "claude") {
           return "claude";
         }
+        if (agent.source === "cursor") {
+          return "cursor";
+        }
         return "default";
       }
 
@@ -597,7 +616,7 @@ export function renderClientScript({
       function isLeadSession(snapshot, agent) {
         return agent.source !== "cloud"
           && !agent.parentThreadId
-          && (Boolean(agent.threadId || agent.source === "claude") || childAgentsFor(snapshot, agent.id).length > 0);
+          && (Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude") || childAgentsFor(snapshot, agent.id).length > 0);
       }
 
       function agentRankLabel(snapshot, agent) {
@@ -720,6 +739,8 @@ export function renderClientScript({
             return "#98d8ff";
           case "claude":
             return "#ffab91";
+          case "cursor":
+            return "#9fd6a4";
           case "default":
             return "#f2ead7";
           default:
@@ -742,37 +763,37 @@ export function renderClientScript({
               deskStartRatio: 0.2,
               deskColumnGap: 16,
               deskRowGap: 0,
-              deskCubicleGap: 14,
-              cubiclesPerColumn: 2,
+              deskCubicleGap: 0,
+              cubiclesPerColumn: 1,
               cubicleRows: 3,
-              deskTopY: 50,
+              deskTopY: 56,
               podWidth: 120,
-              podHeight: 66,
+              podHeight: 54,
               bossLaneX: 14,
-              bossLaneWidth: 124,
+              bossLaneWidth: 86,
               bossOfficeGapToDesk: 14,
-              bossOfficeTopY: 46,
-              bossOfficeGapY: 16,
-              bossOfficeWidth: 108,
-              bossOfficeHeight: 70
+              bossOfficeTopY: 68,
+              bossOfficeGapY: 8,
+              bossOfficeWidth: 76,
+              bossOfficeHeight: 46
             }
           : {
               deskStartRatio: 0.2,
               deskColumnGap: 20,
               deskRowGap: 0,
-              deskCubicleGap: 18,
-              cubiclesPerColumn: 2,
+              deskCubicleGap: 0,
+              cubiclesPerColumn: 1,
               cubicleRows: 3,
-              deskTopY: 58,
+              deskTopY: 66,
               podWidth: 152,
-              podHeight: 86,
+              podHeight: 70,
               bossLaneX: 18,
-              bossLaneWidth: 152,
+              bossLaneWidth: 102,
               bossOfficeGapToDesk: 18,
-              bossOfficeTopY: 54,
-              bossOfficeGapY: 20,
-              bossOfficeWidth: 136,
-              bossOfficeHeight: 92
+              bossOfficeTopY: 82,
+              bossOfficeGapY: 10,
+              bossOfficeWidth: 88,
+              bossOfficeHeight: 58
             };
       }
 
@@ -1462,6 +1483,10 @@ export function renderClientScript({
         }
 
         if (event && agent.isCurrent) {
+          if (event.type === "userMessage") {
+            return null;
+          }
+
           if (event.type === "fileChange") {
             return fileChangeDescriptor(snapshot.projectRoot, event, notificationTitle(snapshot, agent), {
               labelIconUrl: eventIconUrlForActivityType("fileChange")
@@ -1496,7 +1521,7 @@ export function renderClientScript({
               anchor: "agent",
               isFileChange: false,
               isCommand: false,
-              priority: NOTIFICATION_PRIORITY_DEFAULT,
+              priority: NOTIFICATION_PRIORITY_MESSAGE,
               linesAdded: null,
               linesRemoved: null
             };
@@ -1660,7 +1685,7 @@ export function renderClientScript({
 
       function webSearchNotificationTitle(projectRoot, query, phase = "completed") {
         const normalizedQuery = normalizeDisplayText(projectRoot, query || "Web search");
-        return (phase === "started" ? "Searching web: " : "Searched web: ") + normalizedQuery;
+        return (phase === "started" ? "Searching web for " : "Searched web for ") + normalizedQuery;
       }
 
       function shortenNotificationText(value, maxLength = 44) {
@@ -1844,7 +1869,7 @@ export function renderClientScript({
                 anchor: "agent",
                 isFileChange: false,
                 isCommand: false,
-                priority: NOTIFICATION_PRIORITY_DEFAULT,
+                priority: NOTIFICATION_PRIORITY_MESSAGE,
                 linesAdded: null,
                 linesRemoved: null
               };
@@ -1920,6 +1945,11 @@ export function renderClientScript({
             recentNotificationTimes.delete(key);
           }
         });
+        recentNotificationFingerprintTimes.forEach((timestamp, key) => {
+          if (!Number.isFinite(timestamp) || now - timestamp > NOTIFICATION_FINGERPRINT_DEDUPE_MS) {
+            recentNotificationFingerprintTimes.delete(key);
+          }
+        });
         recentToastLineTimes.forEach((timestamp, key) => {
           if (!Number.isFinite(timestamp) || now - timestamp > TOAST_LINE_DEDUPE_MS) {
             recentToastLineTimes.delete(key);
@@ -1976,6 +2006,29 @@ export function renderClientScript({
         ].join("::");
       }
 
+      function notificationFingerprint(entry) {
+        if (!entry) {
+          return null;
+        }
+        const priority = notificationPriorityValue(entry);
+        const normalizedTitle = priority >= NOTIFICATION_PRIORITY_MESSAGE
+          ? normalizeMessageToastText(entry.title || "")
+          : normalizeToastLineFingerprint(entry.title || "");
+        return [
+          entry.projectRoot || "",
+          entry.key || "",
+          entry.kindClass || "",
+          entry.label || "",
+          normalizedTitle,
+          entry.labelIconUrl || "",
+          entry.imageUrl || "",
+          entry.anchor || "agent",
+          entry.isFileChange ? "file" : "",
+          entry.isCommand ? "cmd" : "",
+          priority
+        ].join("::");
+      }
+
       function toastLineDedupeKey(entry, line) {
         const normalizedLine = normalizeToastLineFingerprint(line);
         if (!normalizedLine) {
@@ -2010,6 +2063,23 @@ export function renderClientScript({
           return;
         }
         recentToastLineTimes.set(dedupeKey, now);
+      }
+
+      function hasRecentlySeenNotificationFingerprint(entry, now) {
+        const fingerprint = notificationFingerprint(entry);
+        if (!fingerprint) {
+          return false;
+        }
+        const lastShownAt = recentNotificationFingerprintTimes.get(fingerprint);
+        return Number.isFinite(lastShownAt) && now - lastShownAt < NOTIFICATION_FINGERPRINT_DEDUPE_MS;
+      }
+
+      function rememberNotificationFingerprint(entry, now) {
+        const fingerprint = notificationFingerprint(entry);
+        if (!fingerprint) {
+          return;
+        }
+        recentNotificationFingerprintTimes.set(fingerprint, now);
       }
 
       function stackableNotificationLifetimeMs(entry, lineCount) {
@@ -2133,6 +2203,10 @@ export function renderClientScript({
         const priority = Number.isFinite(entry.priority) ? entry.priority : NOTIFICATION_PRIORITY_DEFAULT;
         trimRecentNotificationTimes(now);
 
+        if (hasRecentlySeenNotificationFingerprint({ ...entry, priority }, now)) {
+          return false;
+        }
+
         if (hasActiveHigherPriorityNotification(priority, now)) {
           return false;
         }
@@ -2144,6 +2218,7 @@ export function renderClientScript({
         if (entry.isCommand) {
           const changed = mergeCommandNotification({ ...entry, priority }, now);
           if (changed) {
+            rememberNotificationFingerprint({ ...entry, priority }, now);
             triggerWorkstationFileChangeEffect(entry);
           }
           notifications = notifications.slice(-24);
@@ -2153,6 +2228,7 @@ export function renderClientScript({
 
         const stacked = mergeStackableNotification({ ...entry, priority }, now);
         if (stacked) {
+          rememberNotificationFingerprint({ ...entry, priority }, now);
           triggerWorkstationFileChangeEffect(entry);
           notifications = notifications.slice(-24);
           scheduleNotificationPrune();
@@ -2185,6 +2261,7 @@ export function renderClientScript({
           stackKey: notificationStackKey({ ...entry, priority }),
           expiresAt: now + stackableNotificationLifetimeMs({ ...entry, priority }, 1)
         });
+        rememberNotificationFingerprint({ ...entry, priority }, now);
         triggerWorkstationFileChangeEffect(entry);
         if (initialToastLines.length > 0) {
           rememberToastLine({ ...entry, priority }, initialToastLines[initialToastLines.length - 1], now);
@@ -2435,7 +2512,13 @@ export function renderClientScript({
             if (!agent) {
               continue;
             }
-            if (!agent.isCurrent && agent.state !== "waiting" && agent.state !== "blocked") {
+            if (
+              !agent.isCurrent
+              && agent.state !== "waiting"
+              && agent.state !== "blocked"
+              && event.kind !== "message"
+              && !(event.kind === "tool" && event.itemType === "webSearch")
+            ) {
               continue;
             }
             const key = agentKey(snapshot.projectRoot, agent);
@@ -2685,11 +2768,6 @@ export function renderClientScript({
 
       function computerSpriteForAgent(agent, mirrored) {
         return pixelOffice.props.workstation;
-      }
-
-      function roomSkyHtml(roomPixelWidth, compact) {
-        const scale = fitSpriteToWidth(pixelOffice.props.sky, roomPixelWidth - 16, compact ? 0.62 : 0.74, compact ? 0.86 : 1.08);
-        return renderSprite(pixelOffice.props.sky, 8, 8, scale, "office-sprite", "z-index:1; opacity:0.94;");
       }
 
       function buildLeadClusters(occupants) {
@@ -3340,8 +3418,6 @@ export function renderClientScript({
       }
 
       function renderIntegratedRecArea(snapshot, primaryRoomId, waitingAgents, restingAgents, compact, roomPixelWidth) {
-        const leftWindowScale = compact ? 0.82 : 0.96;
-        const rightWindowScale = compact ? 0.82 : 0.96;
         const sofaScale = compact ? 1.18 : 1.42;
         const shelfScale = compact ? 0.96 : 1.12;
         const coolerScale = compact ? 1.18 : 1.36;
@@ -3349,12 +3425,8 @@ export function renderClientScript({
         const counterScale = compact ? 0.88 : 1.02;
         const baseY = compact ? 42 : 54;
         const walkwayY = compact ? 62 : 78;
-        const leftWindowX = compact ? 52 : 76;
-        const rightWindowX = roomPixelWidth - (compact ? 86 : 108);
         const entranceDecor = renderRoomEntranceDecor(roomPixelWidth, compact, { plants: true });
         const facilityHtml = [
-          renderSprite(pixelOffice.props.windowLeft, leftWindowX, compact ? 16 : 20, leftWindowScale, "office-sprite", "z-index:2; opacity:0.92;"),
-          renderSprite(pixelOffice.props.windowRight, rightWindowX, compact ? 16 : 20, rightWindowScale, "office-sprite", "z-index:2; opacity:0.92;"),
           entranceDecor.html,
           renderSprite(pixelOffice.props.vending, compact ? 10 : 14, baseY - (compact ? 2 : 4), vendingScale, "office-sprite", "z-index:3;"),
           renderSprite(pixelOffice.props.cooler, compact ? 38 : 48, baseY + (compact ? 8 : 10), coolerScale, "office-sprite", "z-index:3;"),
@@ -3556,7 +3628,7 @@ export function renderClientScript({
             }
           });
 
-          const decor = [roomSkyHtml(roomPixelWidth, compact)];
+          const decor = [];
           if (!isPrimaryRoom) {
             decor.push(entranceDecor.html);
           }
@@ -3642,19 +3714,40 @@ export function renderClientScript({
         return \`<div class="terminal-shell">\${html}</div>\`;
       }
 
+      function renderWorkspaceFloor(snapshot, options = {}) {
+        const counts = countsForSnapshot(snapshot);
+        const compact = options.compact === true;
+        const title = escapeHtml(projectLabel(snapshot.projectRoot));
+        const titleAttr = escapeHtml(snapshot.projectRoot);
+        const summary = \`\${counts.total} agents · \${counts.active} active · \${counts.waiting} waiting · \${counts.blocked} blocked · \${counts.cloud} cloud\`;
+        const notes = snapshot.notes.join(" | ");
+        const body = state.view === "terminal"
+          ? renderTerminalSnapshot(snapshot)
+          : renderRoomScene(snapshot, {
+            showHint: false,
+            compact,
+            liveOnly: state.activeOnly,
+            focusMode: options.focusMode === true
+          });
+        const actionHtml = options.action
+          ? \`<button class="tower-floor-open" data-action="\${escapeHtml(options.action.type)}"\${options.action.projectRoot ? \` data-project-root="\${escapeHtml(options.action.projectRoot)}"\` : ""}>\${escapeHtml(options.action.label)}</button>\`
+          : "";
+        return \`<section class="tower-floor\${compact ? " compact" : ""}" data-project-root="\${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label"><div class="tower-floor-title" title="\${titleAttr}">\${title}</div></div><div class="tower-floor-trailing"><div class="tower-floor-meta">\${escapeHtml(summary)}</div>\${actionHtml}</div></div><div class="tower-floor-body">\${notes ? \`<div class="tower-floor-note">\${escapeHtml(notes)}</div>\` : ""}\${body}</div></section>\`;
+      }
+
       function renderWorkspaceScroll(projects) {
         if (projects.length === 0) {
           return '<div class="empty">No tracked workspaces right now.</div>';
         }
 
-        return \`<div class="workspace-scroll">\${projects.map((snapshot) => {
-          const counts = countsForSnapshot(snapshot);
-          const body = state.view === "terminal"
-            ? renderTerminalSnapshot(snapshot)
-            : renderRoomScene(snapshot, { showHint: false, compact: true, liveOnly: state.activeOnly });
-          const notes = snapshot.notes.join(" | ");
-          return \`<section class="workspace-card compact"><div class="workspace-head"><div class="workspace-title"><strong title="\${escapeHtml(snapshot.projectRoot)}">\${escapeHtml(projectLabel(snapshot.projectRoot))}</strong><div class="muted">\${counts.total} agents · \${counts.active} active · \${counts.waiting} waiting · \${counts.blocked} blocked · \${counts.cloud} cloud</div>\${notes ? \`<div class="muted">\${escapeHtml(notes)}</div>\` : ""}</div><button data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-action="select-project">Open</button></div>\${body}</section>\`;
-        }).join("")}</div>\`;
+        return \`<div class="workspace-tower">\${projects.map((snapshot) => renderWorkspaceFloor(snapshot, {
+          compact: true,
+          action: {
+            type: "select-project",
+            label: "Focus",
+            projectRoot: snapshot.projectRoot
+          }
+        })).join("")}</div>\`;
       }
 
       function renderFleetTerminal(fleet) {
@@ -3845,6 +3938,7 @@ export function renderClientScript({
           }
 
           const focusMode = wrapper.dataset.sceneMode === "focus";
+          const towerMode = wrapper.closest(".tower-floor-body") instanceof HTMLElement;
           const availableWidth = Math.max(wrapper.clientWidth - (focusMode ? 0 : 4), 1);
           const wrapperRect = wrapper.getBoundingClientRect();
           const viewportRemaining = Math.max(window.innerHeight - wrapperRect.top - (focusMode ? 0 : 20), 1);
@@ -3853,9 +3947,15 @@ export function renderClientScript({
             : Math.max(
               Math.min(
                 viewportRemaining,
-                window.innerHeight * (wrapper.classList.contains("compact") ? 0.34 : 0.68)
+                window.innerHeight * (
+                  towerMode
+                    ? (wrapper.classList.contains("compact") ? 0.52 : 0.72)
+                    : (wrapper.classList.contains("compact") ? 0.34 : 0.68)
+                )
               ),
-              wrapper.classList.contains("compact") ? 180 : 220
+              wrapper.classList.contains("compact")
+                ? (towerMode ? 240 : 180)
+                : 220
             );
           if (focusMode) {
             const coverScale = Math.max(availableWidth / rawWidth, availableHeight / rawHeight);
@@ -3866,6 +3966,24 @@ export function renderClientScript({
             wrapper.style.height = \`\${Math.max(1, Math.round(availableHeight))}px\`;
             grid.style.zoom = "";
             grid.style.transform = \`translate(-50%, -50%) scale(\${boundedCoverScale})\`;
+            wrapper.dataset.sceneFitted = "true";
+            return;
+          }
+
+          if (towerMode) {
+            const scale = availableWidth / rawWidth;
+            const boundedScale = Number.isFinite(scale) && scale > 0
+              ? Math.min(Math.max(scale, 0.2), 3.5)
+              : 1;
+
+            wrapper.style.height = \`\${Math.max(220, Math.round(rawHeight * boundedScale))}px\`;
+            if (canZoom) {
+              grid.style.zoom = String(boundedScale);
+              grid.style.transform = "";
+            } else {
+              grid.style.zoom = "";
+              grid.style.transform = \`scale(\${boundedScale})\`;
+            }
             wrapper.dataset.sceneFitted = "true";
             return;
           }
@@ -4004,6 +4122,8 @@ export function renderClientScript({
         terminalViewButton.classList.toggle("active", state.view === "terminal");
         setConnection(state.connection);
         syncWorkspaceFullscreenUi();
+        syncFleetBackdrop();
+        syncSkyParallax();
 
         setHtmlIfChanged(heroSummary, renderHeroSummary(counts));
 
@@ -4049,11 +4169,14 @@ export function renderClientScript({
               centerContent,
               state.view === "terminal"
                 ? renderTerminalSnapshot(snapshot)
-                : renderRoomScene(snapshot, {
-                  liveOnly: state.activeOnly,
-                  showHint: !state.workspaceFullscreen,
-                  focusMode: state.workspaceFullscreen
-                }),
+                : \`<div class="workspace-tower workspace-tower-single">\${renderWorkspaceFloor(snapshot, {
+                  compact: false,
+                  focusMode: state.workspaceFullscreen,
+                  action: {
+                    type: "toggle-workspace-focus",
+                    label: state.workspaceFullscreen ? "Close" : "Expand"
+                  }
+                })}</div>\`,
               { preserveScroll: true }
             )
             : false;
@@ -4127,6 +4250,11 @@ export function renderClientScript({
         const action = target.dataset.action;
         if (action === "select-project" && target.dataset.projectRoot) {
           setSelection(target.dataset.projectRoot);
+          return;
+        }
+
+        if (action === "toggle-workspace-focus") {
+          toggleWorkspaceFullscreen();
           return;
         }
 
@@ -4219,6 +4347,7 @@ export function renderClientScript({
       if (!screenshotMode) {
         window.addEventListener("online", () => setConnection("reconnecting"));
         window.addEventListener("offline", () => setConnection("offline"));
+        window.addEventListener("scroll", syncSkyParallax, { passive: true });
       }
       document.addEventListener("keydown", (event) => {
         if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
@@ -4238,6 +4367,7 @@ export function renderClientScript({
         }
       });
       window.addEventListener("resize", () => {
+        syncSkyParallax();
         fitScenes();
         renderNotifications();
       });

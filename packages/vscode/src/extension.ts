@@ -143,7 +143,7 @@ class OfficeViewProvider implements vscode.WebviewViewProvider, vscode.Disposabl
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex Agents Office</title>
+    <title>Agents Office Tower</title>
     <style>
       :root {
         color-scheme: dark;
@@ -344,7 +344,7 @@ class OfficeViewProvider implements vscode.WebviewViewProvider, vscode.Disposabl
       <section class="panel">
         <div class="toolbar">
           <div>
-            <div><strong>Codex Agents Office</strong></div>
+            <div><strong>Agents Office Tower</strong></div>
             <div id="scene-meta" class="meta">Loading…</div>
           </div>
           <div class="toolbar-actions">

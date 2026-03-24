@@ -26,10 +26,12 @@ export async function startWebServer(argv: string[] = process.argv.slice(2)): Pr
     });
   });
 
+  const mode = options.explicitProjects ? "pinned" : "fleet";
+  const scope = options.explicitProjects
+    ? options.projects.map((project) => project.root).join(", ")
+    : `autodiscover (seed ${options.projects.map((project) => project.root).join(", ")})`;
   console.log(
-    `Codex Agents Office web listening on http://${options.host}:${options.port} pid=${meta.pid} build=${meta.buildAt} for ${options.projects
-      .map((project) => project.root)
-      .join(", ")}`
+    `Agents Office Tower web listening on http://${options.host}:${options.port} pid=${meta.pid} build=${meta.buildAt} mode=${mode} scope=${scope}`
   );
 
   const shutdown = () => {

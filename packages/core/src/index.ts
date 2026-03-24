@@ -3,6 +3,7 @@ export * from "./appearance";
 export * from "./app-server";
 export * from "./cloud";
 export * from "./claude";
+export * from "./cursor";
 export * from "./live-monitor";
 export * from "./presence";
 export * from "./project-paths";

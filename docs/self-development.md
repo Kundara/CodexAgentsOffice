@@ -35,6 +35,7 @@ A good iteration improves at least one of these:
 
 - Codex desktop session visibility may still be incomplete depending on app-server exposure.
 - Claude support still falls back to transcript inference when no project-local hook sidecars are configured.
+- Cursor support currently covers official background agents only; it does not yet discover local Cursor sessions or Cursor-only workspaces by itself.
 - PixelOffice workstation composition still needs refinement and stricter prefab rules.
 - Most Codex event types now reach the snapshot as explicit events, but many of them still share the same notification/motion treatment.
 - Room empty states are still visually heavier than ideal.
@@ -47,6 +48,7 @@ A good iteration improves at least one of these:
 - `npm run typecheck`
 - browser render for default map mode
 - browser render for terminal mode
+- verify default `web --port 4181` launch stays in fleet mode and does not pin to the current cwd
 - browser render for explicit `web /abs/project/path` launch
 - `demo preview` creates a disposable workspace, serves it, and removes it when the run ends
 - verify workspace tabs show real Codex workspaces
@@ -60,12 +62,15 @@ A good iteration improves at least one of these:
 - verify the browser session panel exposes the durable approval/input "needs you" queue
 - verify Claude-derived sessions are visibly marked as inferred in hover/session detail
 - verify Claude hook-backed sessions are visibly marked as typed rather than inferred when `.codex-agents/claude-hooks/<session-id>.jsonl` exists
+- verify Cursor background agents appear only for repos whose normalized `remote.origin.url` matches the selected project
+- verify Cursor API-backed sessions are visibly marked as typed rather than inferred in hover/session detail
 
 ## Near-term roadmap
 
 - map more app-server `turn/*` and `item/*` events into explicit character motion
 - make started/completed/interrupted/failed turn phases visually distinct beyond shared toast styling
 - add direct approval/input action affordances from the browser queue back into Codex
+- decide whether Cursor local CLI/history is strong enough for an official local-session adapter
 - tighten the workstation prefab using only the intended PixelOffice station slices
 - improve side-facing avatar placement and interaction poses
 - add stronger state-specific animation for blocked, waiting, and validating work

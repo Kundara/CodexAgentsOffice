@@ -72,7 +72,7 @@ export function renderIconAuditHtml(): string {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex Agents Office Icon Audit</title>
+    <title>Agents Office Tower Icon Audit</title>
     <style>
       :root {
         color-scheme: light;

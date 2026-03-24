@@ -162,7 +162,7 @@ export interface AgentActivityEvent {
   linesRemoved?: number;
 }
 
-export type AgentProvenanceSource = "codex" | "claude" | "cloud" | "presence";
+export type AgentProvenanceSource = "codex" | "claude" | "cloud" | "cursor" | "presence";
 export type AgentConfidence = "typed" | "inferred";
 
 // Stores live approval/input waits from app-server.
@@ -209,7 +209,7 @@ export interface DashboardEvent {
 export interface DashboardAgent {
   id: string;
   label: string;
-  source: "local" | "cloud" | "presence" | "claude";
+  source: "local" | "cloud" | "cursor" | "presence" | "claude";
   sourceKind: string;
   parentThreadId: string | null;
   depth: number;

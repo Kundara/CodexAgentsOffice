@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 
 import { ensureAgentAppearance } from "./appearance";
 import type { DiscoveredProject } from "./project-paths";
-import type { AgentActivityEvent, ActivityState, AgentConfidence, DashboardAgent } from "./types";
+import type { AgentActivityEvent, ActivityState, AgentConfidence, DashboardAgent, NeedsUserState } from "./types";
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LOG_HEAD_BYTES = 4096;
@@ -30,6 +30,9 @@ interface ClaudeActivitySummary {
   activityEvent: AgentActivityEvent | null;
   gitBranch: string | null;
   confidence: AgentConfidence;
+  needsUser: NeedsUserState | null;
+  latestMessage: string | null;
+  isOngoing: boolean;
 }
 
 function trimTrailingSlash(value: string): string {
@@ -301,6 +304,16 @@ function claudeHooksFilePath(projectRoot: string, sessionId: string): string {
   return join(projectRoot, ".codex-agents", "claude-hooks", `${sessionId}.jsonl`);
 }
 
+function stringValue(record: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function claudeToolSummary(input: {
   sessionId: string;
   model: string | null;
@@ -331,7 +344,10 @@ function claudeToolSummary(input: {
         isImage: isImagePath(primaryPath ?? null)
       },
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: !input.failed
     };
   }
 
@@ -358,7 +374,10 @@ function claudeToolSummary(input: {
         isImage: false
       },
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: !input.failed
     };
   }
 
@@ -372,7 +391,10 @@ function claudeToolSummary(input: {
       paths: toolPaths.length > 0 ? toolPaths : [input.fallbackCwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: !input.failed
     };
   }
 
@@ -386,14 +408,17 @@ function claudeToolSummary(input: {
       paths: [input.fallbackCwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: !input.failed
     };
   }
 
   return null;
 }
 
-function summariseClaudeHookRecord(input: {
+export function summariseClaudeHookRecord(input: {
   sessionId: string;
   model: string | null;
   fallbackCwd: string;
@@ -412,6 +437,9 @@ function summariseClaudeHookRecord(input: {
   const updatedAt = new Date(recordTimestampMs(input.record, input.fallbackUpdatedAt)).toISOString();
   const toolName = typeof input.record.tool_name === "string" ? input.record.tool_name : "";
   const toolInput = asRecord(input.record.tool_input) ?? {};
+  const requestId =
+    stringValue(input.record, "request_id", "requestId")
+    ?? `${input.sessionId}:${hookEventName}:${updatedAt}`;
 
   if (hookEventName === "PermissionRequest") {
     const detail =
@@ -428,7 +456,17 @@ function summariseClaudeHookRecord(input: {
       paths: extractToolPaths(toolInput).length > 0 ? extractToolPaths(toolInput) : [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: {
+        kind: "approval",
+        requestId,
+        reason: stringValue(input.record, "reason", "message") ?? shorten(detail, 88),
+        command: stringValue(toolInput, "command", "cmd") ?? undefined,
+        cwd,
+        grantRoot: extractToolPaths(toolInput)[0] ?? undefined
+      },
+      latestMessage: null,
+      isOngoing: true
     };
   }
 
@@ -446,7 +484,91 @@ function summariseClaudeHookRecord(input: {
       paths: [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: {
+        kind: "input",
+        requestId,
+        reason: shorten(detail, 88),
+        cwd
+      },
+      latestMessage: null,
+      isOngoing: true
+    };
+  }
+
+  if (hookEventName === "UserPromptSubmit") {
+    const detail = stringValue(input.record, "prompt", "message", "text") ?? "Updated plan";
+    const paths = extractPathsFromText(detail);
+    return {
+      label: labelFromModel(input.model, input.sessionId),
+      sourceKind: sourceKindFromModel(input.model),
+      state: "planning",
+      detail: shorten(detail, 88),
+      updatedAt,
+      paths: paths.length > 0 ? paths : [cwd],
+      activityEvent: {
+        type: "userMessage",
+        action: "said",
+        path: paths[0] ?? cwd,
+        title: shorten(detail, 88),
+        isImage: false
+      },
+      gitBranch: input.gitBranch,
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: true
+    };
+  }
+
+  if (hookEventName === "SessionStart") {
+    return {
+      label: labelFromModel(input.model, input.sessionId),
+      sourceKind: sourceKindFromModel(input.model),
+      state: "planning",
+      detail: "Session started",
+      updatedAt,
+      paths: [cwd],
+      activityEvent: null,
+      gitBranch: input.gitBranch,
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: true
+    };
+  }
+
+  if (hookEventName === "SessionEnd") {
+    return {
+      label: labelFromModel(input.model, input.sessionId),
+      sourceKind: sourceKindFromModel(input.model),
+      state: "done",
+      detail: "Session ended",
+      updatedAt,
+      paths: [cwd],
+      activityEvent: null,
+      gitBranch: input.gitBranch,
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: false
+    };
+  }
+
+  if (hookEventName === "PreCompact") {
+    return {
+      label: labelFromModel(input.model, input.sessionId),
+      sourceKind: sourceKindFromModel(input.model),
+      state: "thinking",
+      detail: "Compacting context",
+      updatedAt,
+      paths: [cwd],
+      activityEvent: null,
+      gitBranch: input.gitBranch,
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: true
     };
   }
 
@@ -463,7 +585,10 @@ function summariseClaudeHookRecord(input: {
       paths: [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: true
     };
   }
 
@@ -480,7 +605,10 @@ function summariseClaudeHookRecord(input: {
       paths: [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: false
     };
   }
 
@@ -498,7 +626,10 @@ function summariseClaudeHookRecord(input: {
       paths: [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: false
     };
   }
 
@@ -512,7 +643,10 @@ function summariseClaudeHookRecord(input: {
       paths: [cwd],
       activityEvent: null,
       gitBranch: input.gitBranch,
-      confidence: "typed"
+      confidence: "typed",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: false
     };
   }
 
@@ -617,7 +751,7 @@ async function scanClaudeProjectDirs(): Promise<ClaudeProjectDir[]> {
   return projects.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-function summariseClaudeSession(
+export function summariseClaudeSession(
   sessionId: string,
   fallbackCwd: string,
   records: Array<Record<string, unknown>>,
@@ -686,7 +820,10 @@ function summariseClaudeSession(
       paths: paths.length > 0 ? paths : [fallbackCwd],
       activityEvent: null,
       gitBranch,
-      confidence: "inferred"
+      confidence: "inferred",
+      needsUser: null,
+      latestMessage: null,
+      isOngoing: true
     };
   }
 
@@ -716,7 +853,10 @@ function summariseClaudeSession(
             }
           : null,
       gitBranch,
-      confidence: "inferred"
+      confidence: "inferred",
+      needsUser: null,
+      latestMessage: text,
+      isOngoing: ageMs <= RECENT_DONE_WINDOW_MS
     };
   }
 
@@ -729,7 +869,10 @@ function summariseClaudeSession(
     paths: [fallbackCwd],
     activityEvent: null,
     gitBranch,
-    confidence: "inferred"
+    confidence: "inferred",
+    needsUser: null,
+    latestMessage: null,
+    isOngoing: false
   };
 }
 
@@ -786,7 +929,7 @@ export async function loadClaudeAgents(projectRoot: string, limit = 12): Promise
       parentThreadId: null,
       depth: 0,
       isCurrent: false,
-      isOngoing: false,
+      isOngoing: summary.isOngoing,
       statusText: "claude",
       role: "claude",
       nickname: null,
@@ -800,7 +943,7 @@ export async function loadClaudeAgents(projectRoot: string, limit = 12): Promise
       stoppedAt: null,
       paths: summary.paths,
       activityEvent: summary.activityEvent,
-      latestMessage: summary.activityEvent?.type === "agentMessage" ? summary.activityEvent.title : null,
+      latestMessage: summary.latestMessage,
       threadId: null,
       taskId: null,
       resumeCommand: null,
@@ -812,7 +955,7 @@ export async function loadClaudeAgents(projectRoot: string, limit = 12): Promise
       },
       provenance: "claude",
       confidence: summary.confidence,
-      needsUser: null,
+      needsUser: summary.needsUser,
       liveSubscription: "readOnly"
     });
   }

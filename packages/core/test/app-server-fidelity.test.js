@@ -10,7 +10,7 @@ const {
   shouldMarkThreadLiveFromAppServerNotification,
   shouldMarkThreadStoppedFromAppServerNotification
 } = require("../dist/live-monitor.js");
-const { buildDashboardSnapshotFromState } = require("../dist/snapshot.js");
+const { buildDashboardSnapshotFromState, parentThreadIdForThread } = require("../dist/snapshot.js");
 const { isCurrentWorkloadAgent } = require("../dist/workload.js");
 
 function sampleThread() {
@@ -187,6 +187,32 @@ test("tool call server requests become typed tool events", () => {
   assert.equal(event.detail, "browser_snapshot");
 });
 
+test("web search completion events summarize action payloads", () => {
+  const event = buildDashboardEventFromAppServerMessage(
+    { projectRoot: "/mnt/f/AI/CodexAgentsOffice" },
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thr_123",
+        turnId: "turn_9",
+        item: {
+          id: "item_web",
+          type: "webSearch",
+          action: {
+            type: "openPage",
+            url: "https://developers.openai.com/codex/app-server#events"
+          }
+        }
+      }
+    }
+  );
+
+  assert.equal(event.kind, "tool");
+  assert.equal(event.phase, "completed");
+  assert.equal(event.itemId, "item_web");
+  assert.equal(event.detail, "https://developers.openai.com/codex/app-server#events");
+});
+
 test("thread rereads synthesize assistant message events for desktop replies", () => {
   const thread = {
     ...sampleThread(),
@@ -215,10 +241,11 @@ test("thread rereads synthesize assistant message events for desktop replies", (
 
   assert.ok(event);
   assert.equal(event.kind, "message");
-  assert.equal(event.method, "item/agentMessage/delta");
+  assert.equal(event.method, "thread/read/agentMessage");
   assert.equal(event.threadId, "thr_123");
   assert.equal(event.itemId, "item_msg_1");
-  assert.equal(event.confidence, "inferred");
+  assert.equal(event.phase, "completed");
+  assert.equal(event.confidence, "typed");
   assert.equal(event.detail, "Preview bridge reply from the desktop thread.");
 });
 
@@ -240,7 +267,85 @@ test("snapshot carries typed needs-user and live subscription metadata", async (
   assert.equal(agent.liveSubscription, "subscribed");
 });
 
-test("fresh local thinking agents do not remain current without an ongoing turn", () => {
+test("fresh local thinking agents do not remain current when they are only read-only", () => {
+  const now = Date.parse("2026-03-24T00:00:00.000Z");
+  const agent = {
+    id: "thr_live",
+    label: "Live worker",
+    source: "local",
+    sourceKind: "vscode",
+    parentThreadId: null,
+    depth: 0,
+    isCurrent: false,
+    isOngoing: false,
+    statusText: "idle",
+    role: null,
+    nickname: null,
+    isSubagent: false,
+    state: "thinking",
+    detail: "Reply updated",
+    cwd: "/mnt/f/Unity/ChickenCoop",
+    roomId: "root",
+    appearance: { id: "fern", label: "Fern", body: "#7fbf5b", accent: "#eef8e6", shadow: "#476d31" },
+    updatedAt: "2026-03-23T23:59:20.000Z",
+    stoppedAt: null,
+    paths: ["/mnt/f/Unity/ChickenCoop"],
+    activityEvent: null,
+    latestMessage: "Still working",
+    threadId: "thr_live",
+    taskId: null,
+    resumeCommand: "codex resume thr_live",
+    url: null,
+    git: null,
+    provenance: "codex",
+    confidence: "typed",
+    needsUser: null,
+    liveSubscription: "readOnly"
+  };
+
+  assert.equal(isCurrentWorkloadAgent(agent, now), false);
+});
+
+test("fresh read-only local planning agents remain current for a short lag window", () => {
+  const now = Date.parse("2026-03-24T00:00:00.000Z");
+  const agent = {
+    id: "thr_plan",
+    label: "Fresh child",
+    source: "local",
+    sourceKind: "subAgent",
+    parentThreadId: "thr_parent",
+    depth: 1,
+    isCurrent: false,
+    isOngoing: false,
+    statusText: "idle",
+    role: "worker",
+    nickname: null,
+    isSubagent: true,
+    state: "planning",
+    detail: "Inspect client-script.ts",
+    cwd: "/mnt/f/AI/CodexAgentsOffice",
+    roomId: "root",
+    appearance: { id: "fern", label: "Fern", body: "#7fbf5b", accent: "#eef8e6", shadow: "#476d31" },
+    updatedAt: "2026-03-23T23:59:45.000Z",
+    stoppedAt: null,
+    paths: ["/mnt/f/AI/CodexAgentsOffice/packages/web/src/client-script.ts"],
+    activityEvent: null,
+    latestMessage: null,
+    threadId: "thr_plan",
+    taskId: null,
+    resumeCommand: "codex resume thr_plan",
+    url: null,
+    git: null,
+    provenance: "codex",
+    confidence: "typed",
+    needsUser: null,
+    liveSubscription: "readOnly"
+  };
+
+  assert.equal(isCurrentWorkloadAgent(agent, now), true);
+});
+
+test("fresh subscribed local thinking agents remain current for a short live window", () => {
   const now = Date.parse("2026-03-24T00:00:00.000Z");
   const agent = {
     id: "thr_live",
@@ -276,7 +381,23 @@ test("fresh local thinking agents do not remain current without an ongoing turn"
     liveSubscription: "subscribed"
   };
 
-  assert.equal(isCurrentWorkloadAgent(agent, now), false);
+  assert.equal(isCurrentWorkloadAgent(agent, now), true);
+});
+
+test("parentThreadIdForThread extracts ancestor ids from subagent metadata", () => {
+  const thread = {
+    ...sampleThread(),
+    source: {
+      subAgent: {
+        thread_spawn: {
+          parent_thread_id: "thr_parent",
+          depth: 1
+        }
+      }
+    }
+  };
+
+  assert.equal(parentThreadIdForThread(thread), "thr_parent");
 });
 
 test("active local threads remain current even when the last update is stale", async () => {
@@ -379,6 +500,42 @@ test("recently finished local threads stay current for a short grace window", as
   assert.equal(agent.isCurrent, true);
 });
 
+test("recently finished local threads stay current even when live monitor bookkeeping has not set stoppedAt yet", async () => {
+  const recentDoneThread = {
+    ...sampleThread(),
+    status: { type: "idle" },
+    updatedAt: Math.floor((Date.now() - 2000) / 1000),
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            type: "agentMessage",
+            text: "Wrapped up the change.",
+            phase: "final_answer"
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    threads: [recentDoneThread],
+    events: [],
+    stoppedAtByThreadId: new Map(),
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "done");
+  assert.equal(agent.stoppedAt, null);
+  assert.equal(agent.isCurrent, true);
+});
+
 test("explicit stop tracking keeps an ongoing quiet thread current", async () => {
   const ongoingQuietThread = {
     ...sampleThread(),
@@ -448,6 +605,170 @@ test("quiet local threads without ongoing tracking are not kept current forever"
   assert.ok(agent);
   assert.equal(agent.isOngoing, false);
   assert.equal(agent.isCurrent, false);
+});
+
+test("completed commentary replies do not stay in thinking state once the turn is done", async () => {
+  const completedCommentaryThread = {
+    ...sampleThread(),
+    status: { type: "idle" },
+    updatedAt: Math.floor((Date.now() - 10_000) / 1000),
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            type: "agentMessage",
+            text: "Wrapped up the reply.",
+            phase: "commentary"
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    threads: [completedCommentaryThread],
+    events: [],
+    stoppedAtByThreadId: new Map(),
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "done");
+  assert.equal(agent.isCurrent, false);
+});
+
+test("interrupted commentary replies stay in thinking state while the subscribed thread is still fresh", async () => {
+  const interruptedCommentaryThread = {
+    ...sampleThread(),
+    status: { type: "notLoaded" },
+    updatedAt: Math.floor((Date.now() - 10_000) / 1000),
+    turns: [
+      {
+        id: "turn_1",
+        status: "interrupted",
+        error: null,
+        items: [
+          {
+            type: "agentMessage",
+            text: "Checking the next part of the state transition.",
+            phase: "commentary"
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    threads: [interruptedCommentaryThread],
+    events: [],
+    subscribedThreadIds: new Set(["thr_123"]),
+    stoppedAtByThreadId: new Map(),
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "thinking");
+  assert.equal(agent.isCurrent, true);
+});
+
+test("fresh user prompts stay planning-current before the next turn starts", async () => {
+  const freshPromptThread = {
+    ...sampleThread(),
+    status: { type: "idle" },
+    updatedAt: Math.floor((Date.now() - 10_000) / 1000),
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            type: "userMessage",
+            content: [
+              {
+                text: "Check why the desk agent disappeared"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    threads: [freshPromptThread],
+    events: [],
+    subscribedThreadIds: new Set(["thr_123"]),
+    stoppedAtByThreadId: new Map(),
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "planning");
+  assert.equal(agent.isCurrent, true);
+});
+
+test("fresh completed reply events keep final reply activity without reactivating the desk", async () => {
+  const quietThread = {
+    ...sampleThread(),
+    status: { type: "idle" },
+    updatedAt: Math.floor((Date.now() - 10_000) / 1000),
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            type: "agentMessage",
+            text: "Done.",
+            phase: "final_answer"
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    threads: [quietThread],
+    events: [
+      {
+        id: "evt_msg",
+        source: "codex",
+        confidence: "typed",
+        threadId: "thr_123",
+        createdAt: new Date().toISOString(),
+        method: "thread/read/agentMessage",
+        turnId: "turn_1",
+        itemId: "item_msg",
+        kind: "message",
+        phase: "completed",
+        title: "Reply completed",
+        detail: "Final reply text",
+        path: "/mnt/f/AI/CodexAgentsOffice"
+      }
+    ],
+    subscribedThreadIds: new Set(["thr_123"]),
+    stoppedAtByThreadId: new Map(),
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "done");
+  assert.equal(agent.isCurrent, false);
+  assert.equal(agent.activityEvent?.type, "agentMessage");
+  assert.equal(agent.detail, "Final reply text");
 });
 
 test("explicitly stopped threads leave only after the stop grace window", async () => {

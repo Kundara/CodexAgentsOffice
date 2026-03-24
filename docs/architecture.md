@@ -24,15 +24,19 @@ The detailed hook inventory now lives in [docs/integration-hooks.md](/mnt/f/AI/C
 
    `~/.claude/projects/*.jsonl` is a usable secondary source for project discovery and recent Claude activity. It is not equivalent to Codex app-server: the data is transcript-like and requires inference. That makes it suitable as a best-effort adapter layer, not as the primary truth source.
 
-4. Per-project room config
+4. Cursor background agents
+
+   Cursor exposes an official background-agent API with account-level agent status, target URLs, conversation history, webhooks, and model listing. The current adapter matches those agents back onto the selected project through normalized git remote URLs, so it is official and typed, but still weaker than Codex local app-server visibility.
+
+5. Per-project room config
 
    Each project can define its own spatial hierarchy in `.codex-agents/rooms.xml`. Rooms map to directory prefixes so the same session can move between rooms as its working files change.
 
-5. Per-project appearance roster
+6. Per-project appearance roster
 
    New sessions get a deterministic random appearance. Overrides are stored in `.codex-agents/agents.json`, which locks their look until changed.
 
-6. Codex subagent roles
+7. Codex subagent roles
 
    Codex ships with built-in subagents such as `default`, `worker`, and `explorer`, and custom agents can define `nickname_candidates` for more readable spawned names. The visual layer groups booths by the underlying role, while still showing the friendlier label when available.
 
@@ -52,6 +56,7 @@ The live browser path now uses a hybrid approach:
 - watched thread JSONL paths trigger quick re-reads when a local session changes
 - reread desktop rollout threads can synthesize message notifications from the newest assistant text when the live subscription path is degraded
 - streamed `item/agentMessage/delta` notifications are intentionally opted out on the observer connection; reply toasts prefer full reply items or reread thread messages
+- non-final commentary messages on interrupted desktop turns are still treated as active work so subscribed agents do not briefly vacate their desk between commentary updates
 - periodic discovery still runs so newly created sessions appear without a page refresh
 
 In fleet mode, every discovered workspace now keeps a live `ProjectLiveMonitor`. Selection in the UI only changes what is centered in the browser; it does not rebuild the live monitor set.
@@ -82,18 +87,20 @@ Sources:
 
 - Browser mode
   - fleet view across multiple configured project roots
+  - fleet map renders as a continuous tower of workspace floors instead of a stack of separate cards
   - deep-linkable single-project room view through `?project=<abs-path>`
   - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
   - live SSE updates for browser clients
   - all discovered workspaces stay live-monitored at once
-  - map and terminal-style views through `?view=map|terminal`
-  - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
-  - local threads remain seated while the thread is still ongoing, even if they pause between visible events or the latest turn already looks done
-  - once a thread actually stops, it remains seated for a short 5-second grace window so final replies are still readable
-  - after that grace window, only recent top-level lead sessions cool down into the rec area; finished subagents despawn instead of idling there
+- map and terminal-style views through `?view=map|terminal`
+- live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
+- local threads remain seated while the thread is still ongoing, even if they pause between visible events or the latest turn already looks done
+- once a thread actually stops, it remains seated for a short 5-second grace window so final replies are still readable
+- after that grace window, only recent top-level lead sessions cool down into the rec area; finished subagents despawn instead of idling there
+- lead sessions with more than one active subagent now use a slimmer left-side lead lane with a distinct floor treatment and horizontal separators, instead of a large boxed office
 - session panel includes a durable cross-project "needs you" queue for approval/input waits
   these entries now come from typed request hooks, not from regexes over session detail
-  - session cards expose provenance/confidence so Codex-native, Claude transcript, and Claude hook-backed state stay distinguishable
+  - session cards expose provenance/confidence so Codex-native, Claude transcript, Claude hook-backed, and Cursor API-backed state stay distinguishable
   - snapshot-only rendering through `?screenshot=1`
   - session-card hover/focus dims unrelated agents so the visible thread cluster for that session stands out in the map
   - HTTP endpoints for snapshot refresh, room scaffolding, and appearance cycling
@@ -101,6 +108,7 @@ Sources:
   - auto-generated room activity based on the currently mapped agent set
   - repeated workstation rows for repeated Codex agent roles
   - workstation-anchored file-change notifications for current agents, showing filename-first copy and available `+/-` line deltas
+  - shared fleet-only sky backdrop with parallax pixel-cloud layers behind the tower, while individual rooms no longer paint their own cloud mural
 - hover/session detail surfaces for longer text instead of large scene overlays
 
 ### Web package composition
@@ -196,6 +204,8 @@ Current mapping:
   workstation-anchored create / edit / delete / move toasts, with filename-first copy, optional `+/-` line deltas, and image preview when possible
 - `turn/*`
   turn started / finished / interrupted / failed status transitions
+- `webSearch`
+  dedicated web-search toast only when a native Codex `webSearch` event reaches the observer; desktop-side search activity that only surfaces as commentary cannot yet be reconstructed into a typed search toast
 - subagent spawn and completion
   parent-linked spawn/finish notifications and motion updates
 - exact app-server method icons
@@ -217,9 +227,9 @@ The active office view currently favors an open station language over enclosed c
 
 - mirrored two-seat workstation pods define the primary desk language
 - workstation slots are pinned to a fixed floor grid instead of being repacked when new agents appear
-- desk columns start around one-fifth of the room width, leaving room for a boss-office lane on the left when needed
-- each workstation column is split into 2 fixed cubicles, and each cubicle holds 3 tightly stacked workstation rows
-- role grouping prefers to keep the same agent types inside the same cubicle before spilling into a new cubicle
+- desk columns start around one-fifth of the room width, leaving room for a compact lead lane on the left when needed
+- each workstation column now uses a single visible cubicle stack with 3 tightly stacked workstation rows so active desks stay inside a standard room height
+- role grouping prefers to keep the same agent types inside the same visible workstation stack before spilling into a new column
 - a pod collapses to a single centered seat when only one live agent occupies it
 - newly occupied seats use a short retro blink reveal so the workstation appears before the worker settles
 - avatars themselves no longer flash on enter or exit; only the workstation reveal animates, and removals disappear immediately once the thread leaves current workload
@@ -227,7 +237,7 @@ The active office view currently favors an open station language over enclosed c
 - seated agents flip with the workstation direction and align to the desk/chair reach point
 - lead-session arrivals and all departures use the center-top room entrance as the path anchor so workers visibly leave through the doorway
 - entering subagents split off from a nearby position around their parent, blink briefly in place, then move to their assigned desk or wall-side slot
-- lead sessions with more than one spawned subagent move into a dedicated left-side boss-office lane with a distinct floor treatment
+- lead sessions with more than one spawned subagent move into a dedicated left-side lead lane with a distinct floor treatment and open separators instead of a boxed wall
 - hovering a boss reveals arrow lines from that office to the related spawned subagents
 - chairs and seated reach points sit slightly outward from the desk so the monitor relationship reads cleanly
 - workstation computers currently use the single complete desk cut, avoiding the broken narrow pseudo-monitor asset
@@ -249,6 +259,18 @@ Claude support uses a deliberately weaker contract than Codex:
 - Claude agents are rendered in the same room model, but with explicit provenance/confidence so transcript inference and hook-backed state do not pretend to have Codex-grade app-server coverage
 
 This is useful because it broadens observability across the machine, but it should remain visually and architecturally secondary to the official Codex path.
+
+## Secondary Cursor support
+
+Cursor support currently uses the official background-agent API instead of local transcript scraping:
+
+- the adapter calls Cursor's account-level background-agent API when `CURSOR_API_KEY` is configured
+- agents are matched to the selected project by normalized git `remote.origin.url`
+- Cursor agents are rendered in the same room and session model with `confidence = typed`
+- the current integration surfaces typed status, summary, branch, repo, and target URL data
+- Cursor does not currently provide Codex-style local live thread subscriptions here, so the integration is closer to a richer cloud-task feed than to local Codex app-server visibility
+
+This makes Cursor a useful third official source without pretending that it offers Codex-grade local observability.
 
 ## Asset pipeline
 

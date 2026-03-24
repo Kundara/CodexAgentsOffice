@@ -4,9 +4,11 @@ import { ensureAgentAppearance } from "./appearance";
 import { withAppServerClient } from "./app-server";
 import { loadClaudeAgents } from "./claude";
 import { listCloudTasks } from "./cloud";
+import { loadCursorAgents } from "./cursor";
 import { loadFreshPresenceAgents } from "./presence";
 import { findRoomForPaths, loadRoomConfig } from "./room-config";
 import { isCurrentWorkloadAgent } from "./workload";
+import { summarizeWebSearch } from "./web-search";
 import type {
   AgentActivityEvent,
   ActivityState,
@@ -22,9 +24,10 @@ import type {
 } from "./types";
 
 const DONE_WINDOW_MS = 15 * 60 * 1000;
-const COMMENTARY_ACTIVE_WINDOW_MS = 30 * 1000; // Keeps fresh commentary visibly active at desks.
+const USER_PROMPT_ACTIVE_WINDOW_MS = 30 * 1000;
 const EVENT_ACTIVITY_WINDOW_MS = 90 * 1000;
 const SNAPSHOT_EVENT_WINDOW_MS = 2 * 60 * 1000;
+const DEFAULT_LOCAL_THREAD_LIMIT = 24;
 
 function shorten(text: string, maxLength: number): string {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -232,6 +235,10 @@ function parseThreadSourceMeta(thread: CodexThread): {
   };
 }
 
+export function parentThreadIdForThread(thread: CodexThread): string | null {
+  return parseThreadSourceMeta(thread).parentThreadId;
+}
+
 function inferThreadAgentRole(thread: CodexThread, sourceKind: string): string | null {
   if (sourceKind === "subAgent") {
     const previewRole = extractPromptRole(thread.preview);
@@ -434,7 +441,7 @@ export function summariseThread(thread: CodexThread): {
       };
     }
     case "webSearch": {
-      const query = typeof item.query === "string" ? item.query : "Web search";
+      const query = summarizeWebSearch(item);
       return {
         state: "scanning",
         detail: query,
@@ -608,10 +615,12 @@ export function summariseThread(thread: CodexThread): {
     case "agentMessage":
       {
         const message = describeAgentMessage(item);
-        const ageMs = Date.now() - thread.updatedAt * 1000;
-        const commentaryIsFresh = item.phase === "commentary" && ageMs <= COMMENTARY_ACTIVE_WINDOW_MS;
+        const messagePhase = typeof item.phase === "string" ? item.phase : null;
+        const isProvisionalReply =
+          lastTurn.status !== "completed"
+          && messagePhase !== "final_answer";
         return {
-          state: treatAsInProgress || commentaryIsFresh ? "thinking" : "done",
+          state: treatAsInProgress || isProvisionalReply ? "thinking" : "done",
           detail: message.detail,
           paths: message.paths.length > 0 ? message.paths : [thread.cwd],
           activityEvent: {
@@ -626,8 +635,10 @@ export function summariseThread(thread: CodexThread): {
     case "userMessage": {
       const text = extractTextContent(item.content)[0] ?? "Assigned work";
       const paths = extractPathsFromText(text);
+      const ageMs = Date.now() - thread.updatedAt * 1000;
+      const promptIsFresh = ageMs <= USER_PROMPT_ACTIVE_WINDOW_MS;
       return {
-        state: treatAsInProgress ? "planning" : "idle",
+        state: treatAsInProgress || promptIsFresh ? "planning" : "idle",
         detail: shorten(text, 88),
         paths: paths.length > 0 ? paths : [thread.cwd],
         activityEvent: {
@@ -721,10 +732,6 @@ function applyRecentActivityEvent(
     return summary;
   }
 
-  if (preferredEvent.kind === "message") {
-    return summary;
-  }
-
   if (summary.state === "waiting" || summary.state === "blocked") {
     return summary;
   }
@@ -738,12 +745,37 @@ function applyRecentActivityEvent(
     ? Array.from(new Set([preferredEvent.path, ...summary.paths.filter(Boolean)]))
     : summary.paths;
 
+  if (preferredEvent.kind === "message") {
+    return {
+      state: summary.state,
+      detail: preferredEvent.detail || summary.detail,
+      paths: nextPaths,
+      activityEvent
+    };
+  }
+  const commandText = preferredEvent.command ?? preferredEvent.detail ?? preferredEvent.title;
+  const nextState =
+    preferredEvent.kind === "fileChange"
+      ? (
+        preferredEvent.phase === "failed" ? "blocked"
+        : preferredEvent.phase === "started" || preferredEvent.phase === "updated" ? "editing"
+        : summary.state
+      )
+      : preferredEvent.kind === "command"
+        ? (
+          preferredEvent.phase === "failed" ? "blocked"
+          : preferredEvent.phase === "started" || preferredEvent.phase === "updated"
+            ? (looksLikeValidationCommand(commandText) ? "validating" : "running")
+            : summary.state
+        )
+        : summary.state;
+
   return {
-    state: summary.state,
+    state: nextState,
     detail:
       preferredEvent.kind === "fileChange"
         ? preferredEvent.path ? `Edited ${preferredEvent.path}` : preferredEvent.title
-        : preferredEvent.command ?? preferredEvent.detail ?? preferredEvent.title,
+        : commandText,
     paths: nextPaths,
     activityEvent
   };
@@ -775,10 +807,30 @@ async function buildLocalAgents(
 ): Promise<CodexThread[]> {
   try {
     return await withAppServerClient(async (client) => {
-      const threads = await client.listThreads({
+      const allThreads = await client.listThreads({
         cwd: projectRoot,
-        limit: localLimit
+        limit: Math.max(localLimit * 4, 40)
       });
+      const availableThreadsById = new Map(allThreads.map((thread) => [thread.id, thread]));
+      const trackedThreads = new Map(allThreads.slice(0, localLimit).map((thread) => [thread.id, thread]));
+      const pendingParents = [...trackedThreads.values()];
+      while (pendingParents.length > 0) {
+        const thread = pendingParents.shift();
+        if (!thread) {
+          continue;
+        }
+        const parentThreadId = parentThreadIdForThread(thread);
+        if (!parentThreadId || trackedThreads.has(parentThreadId)) {
+          continue;
+        }
+        const parentThread = availableThreadsById.get(parentThreadId);
+        if (!parentThread) {
+          continue;
+        }
+        trackedThreads.set(parentThread.id, parentThread);
+        pendingParents.push(parentThread);
+      }
+      const threads = [...trackedThreads.values()];
       if (!readThreads) {
         return threads;
       }
@@ -936,6 +988,19 @@ export async function buildDashboardSnapshotFromState(input: {
     });
   }
 
+  try {
+    const cursorAgents = await loadCursorAgents(projectRoot);
+    for (const cursorAgent of cursorAgents) {
+      agents.push({
+        ...cursorAgent,
+        roomId: findRoomForPaths(roomConfig, projectRoot, cursorAgent.paths)
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    notes.push(`Cursor background agents unavailable: ${message}`);
+  }
+
   for (const agent of agents) {
     agent.isCurrent = isCurrentWorkloadAgent(agent);
   }
@@ -964,7 +1029,7 @@ export async function buildDashboardSnapshot(
 
   const threads = await buildLocalAgents(
     projectRoot,
-    options.localLimit ?? 10,
+    options.localLimit ?? DEFAULT_LOCAL_THREAD_LIMIT,
     notes,
     options.readThreads !== false
   );

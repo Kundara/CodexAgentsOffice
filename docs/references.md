@@ -24,6 +24,25 @@
 - [Automate workflows with hooks](https://code.claude.com/docs/en/automate-workflows-with-hooks)
   Quickstart examples for wiring command hooks and project-local hook scripts.
 
+## Cursor
+
+- [Cursor Background Agents](https://docs.cursor.com/en/background-agents)
+  Product-level overview for remote background agents, follow-ups, takeover, and supported model constraints.
+- [Cursor Background Agent API Overview](https://docs.cursor.com/background-agent/api/overview)
+  Official API entrypoint for listing agents, reading status, conversations, and webhook integration.
+- [Cursor List Agents](https://docs.cursor.com/background-agent/api/list-agents)
+  Primary endpoint for agent id, repo/ref, status, branch, summary, and target URLs.
+- [Cursor Agent Conversation](https://docs.cursor.com/background-agent/api/agent-conversation)
+  Official conversation-history endpoint for a single background agent.
+- [Cursor Webhooks](https://docs.cursor.com/background-agent/api/webhooks)
+  Status-change webhook contract and signing headers.
+- [Cursor List Models](https://docs.cursor.com/background-agent/api/list-models)
+  Supported model identifiers for background-agent creation.
+- [Cursor CLI](https://docs.cursor.com/cli/using)
+  Official local CLI surface for listing and resuming prior Cursor Agent conversations.
+- [Cursor API Keys](https://docs.cursor.com/advanced/api-keys)
+  BYOK model and account-level API-key behavior.
+
 ## Visual / asset references
 
 - [PixelOffice asset pack](https://2dpig.itch.io/)

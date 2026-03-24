@@ -1,6 +1,6 @@
 {
   "name": "@codex-agents-office/vscode",
-  "displayName": "Codex Agents Office",
+  "displayName": "Agents Office Tower",
   "description": "Room-based activity view for Codex local sessions and cloud tasks.",
   "version": "0.1.0",
   "publisher": "local",
@@ -39,15 +39,15 @@
     "commands": [
       {
         "command": "codexAgentsOffice.refresh",
-        "title": "Codex Agents Office: Refresh"
+        "title": "Agents Office Tower: Refresh"
       },
       {
         "command": "codexAgentsOffice.openRoomsXml",
-        "title": "Codex Agents Office: Open Rooms XML"
+        "title": "Agents Office Tower: Open Rooms XML"
       },
       {
         "command": "codexAgentsOffice.scaffoldRoomsXml",
-        "title": "Codex Agents Office: Scaffold Rooms XML"
+        "title": "Agents Office Tower: Scaffold Rooms XML"
       }
     ]
   },

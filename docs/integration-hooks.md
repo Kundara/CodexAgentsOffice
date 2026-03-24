@@ -4,7 +4,7 @@
 
 This document answers two questions:
 
-1. What signals can Codex Agents Office read from Codex and Claude today?
+1. What signals can Codex Agents Office read from Codex, Claude, and Cursor today?
 2. How does each signal get represented in this project?
 
 The goal is practical transparency. This is not a generic event catalog. It is the list of hooks this codebase can already ride, plus the places where we are still leaving signal on the table.
@@ -16,9 +16,9 @@ Everything eventually lands in the shared `DashboardSnapshot` and `DashboardAgen
 The important normalized agent fields are:
 
 - `source`
-  `local`, `cloud`, `presence`, or `claude`
+  `local`, `cloud`, `cursor`, `presence`, or `claude`
 - `sourceKind`
-  where the session came from, such as `cli`, `vscode`, `subAgent`, or `claude:<model>`
+  where the session came from, such as `cli`, `vscode`, `subAgent`, `claude:<model>`, or `cursor:<model>`
 - `parentThreadId`
   parent Codex thread when the agent is a spawned subagent
 - `state`
@@ -30,7 +30,7 @@ The important normalized agent fields are:
 - `activityEvent`
   optional event object used for visual notifications
 - `provenance`
-  whether the visible state comes from typed Codex data, inferred Claude data, cloud tasks, or synthetic presence
+  whether the visible state comes from typed Codex data, typed Cursor API data, inferred Claude data, cloud tasks, or synthetic presence
 - `confidence`
   whether the visible state is typed truth or inferred best effort
 - `resumeCommand`
@@ -197,7 +197,7 @@ Current item-to-state mapping:
 | --- | --- | --- |
 | `fileChange` | `editing` or `blocked` | desk worker, file-change notification, room mapping from changed paths |
 | `commandExecution` | `running`, `validating`, or `blocked` | desk worker, command notification |
-| `webSearch` | `scanning` | active worker, no explicit notification |
+| `webSearch` | `scanning` | active worker, typed web-search toast when the observer receives the event |
 | `imageView` | `scanning` | active worker, image-view icon coverage and viewing summary |
 | `mcpToolCall` | `scanning` or `blocked` | active worker, detail text names `server.tool` |
 | `dynamicToolCall` | `scanning` or `blocked` | active worker, tool-call summary |
@@ -217,6 +217,20 @@ Mapped in:
 
 - `packages/core/src/snapshot.ts`
 - `packages/web/src/client-script.ts`
+
+### Web search visibility
+
+Mapped in:
+
+- `packages/core/src/live-monitor.ts`
+- `packages/core/src/snapshot.ts`
+- `packages/web/src/client-script.ts`
+
+Current behavior:
+
+- when Codex app-server emits a native `webSearch` item or event, it maps to `state = scanning`
+- typed `webSearch` events render a dedicated browser toast instead of a generic message toast
+- if the observer path only sees commentary messages and no native search item, the office cannot currently reconstruct a typed web-search toast from that Codex desktop activity alone
 
 What we read from Codex:
 
@@ -431,7 +445,7 @@ How this project uses that surface:
 
 - we do not scrape Claude internals directly from the hook stream
 - instead, we support a project-owned bridge that writes hook JSONL sidecars into `.codex-agents/claude-hooks/<session-id>.jsonl`
-- when those sidecars exist, Claude agents can surface typed permission, input, tool, subagent, and stop state with `confidence = typed`
+- when those sidecars exist, Claude agents can surface typed permission, input, tool, subagent, stop, user-prompt, session-start/end, and compacting state with `confidence = typed`
 - when they do not exist, Claude falls back to transcript inference with `confidence = inferred`
 
 ### Claude transcript inference rules
@@ -460,6 +474,10 @@ When a project-local Claude hook sidecar exists, the loader can map these offici
 | --- | --- | --- |
 | `PermissionRequest` | `blocked` | typed approval-needed state from Claude hook input |
 | `Elicitation` | `waiting` | typed waiting-for-input state |
+| `UserPromptSubmit` | `planning` | typed user-prompt state with `userMessage` activity |
+| `SessionStart` | `planning` | typed session-start state |
+| `SessionEnd` | `done` | typed session-ended state |
+| `PreCompact` | `thinking` | typed context-compacting state |
 | `PreToolUse` / `PostToolUse` with edit or write tools | `editing` | file-change style notification and room mapping from paths |
 | `PreToolUse` / `PostToolUse` with bash or shell tools | `running` or `validating` | command-style notification |
 | `PostToolUseFailure` | `blocked` | failed command/tool state |
@@ -472,6 +490,7 @@ When a project-local Claude hook sidecar exists, the loader can map these offici
 
 What we synthesize:
 
+- `userMessage`
 - `fileChange`
 - `commandExecution`
 - `agentMessage`
@@ -488,6 +507,64 @@ What Claude still does not provide here:
 - Codex app-server style live push stream into this process without a user-configured hook bridge
 - Codex-grade parent/subagent hierarchy with stable parent thread ids in the shared snapshot
 
+## Cursor Background Agents
+
+Cursor support uses the official background-agent API as a typed secondary source.
+
+Primary code path:
+
+- `packages/core/src/cursor.ts`
+
+### Cursor project matching
+
+What we read:
+
+- project git `remote.origin.url`
+- Cursor background-agent `source.repository`
+
+How we use it:
+
+- normalize both repo URLs into a comparable HTTPS form
+- match Cursor background agents onto the currently selected project
+- avoid transcript scraping or private local storage parsing
+
+### Official Cursor surface
+
+Official docs:
+
+- [Cursor background agents](https://docs.cursor.com/en/background-agents)
+- [Cursor background-agent API overview](https://docs.cursor.com/background-agent/api/overview)
+
+What Cursor exposes:
+
+- `GET /v0/agents` for agent ids, status, summary, repo/ref, branch, and target URLs
+- agent conversation history
+- status-change webhooks
+- model listing for background-agent creation
+
+How this project uses that surface:
+
+- reads the official Cursor API when `CURSOR_API_KEY` is configured
+- matches agents by normalized repository URL
+- maps agent status into shared workload state
+- renders Cursor agents with `confidence = typed`
+- keeps them read-only because this project is observing, not driving Cursor agent execution
+
+### Cursor state mapping
+
+| Cursor status | State | Representation |
+| --- | --- | --- |
+| `CREATING` / `RUNNING` | `running` | active typed Cursor work item |
+| `FINISHED` | `done` | recently completed Cursor task |
+| `ERROR` | `blocked` | typed failure state |
+| `EXPIRED` | `idle` | no longer active |
+
+What Cursor does not yet provide here:
+
+- Codex-style local live thread subscriptions
+- stable room mapping from typed file paths
+- automatic workspace discovery for Cursor-only projects without an explicit local repo context
+
 ## Representation In This Project
 
 ### Shared snapshot
@@ -502,6 +579,7 @@ The snapshot builder merges:
 - cloud tasks
 - optional synthetic presence entries
 - Claude sessions from transcript inference or optional hook sidecars
+- Cursor background agents matched by normalized repository URL
 
 Then it:
 

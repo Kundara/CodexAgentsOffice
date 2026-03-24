@@ -12,17 +12,36 @@ export function renderHtml(options: ServerOptions): string {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Codex Agents Office</title>
+    <title>Agents Office Tower</title>
     <style>${CLIENT_STYLES}</style>
   </head>
   <body>
+    <div id="fleet-sky-backdrop" class="fleet-sky-backdrop" aria-hidden="true">
+      <div class="fleet-sky-layer fleet-sky-glow"></div>
+      <div class="fleet-sky-layer fleet-sky-bands"></div>
+      <div class="fleet-cloud-layer fleet-cloud-layer-far">
+        <div class="pixel-cloud cloud-a" style="left:6%; top:180px; width:168px; height:84px;"></div>
+        <div class="pixel-cloud cloud-b" style="left:68%; top:220px; width:184px; height:92px;"></div>
+        <div class="pixel-cloud cloud-c" style="left:28%; top:360px; width:208px; height:98px;"></div>
+      </div>
+      <div class="fleet-cloud-layer fleet-cloud-layer-mid">
+        <div class="pixel-cloud cloud-c" style="left:12%; top:300px; width:196px; height:94px;"></div>
+        <div class="pixel-cloud cloud-a" style="left:57%; top:420px; width:184px; height:90px;"></div>
+        <div class="pixel-cloud cloud-b" style="left:81%; top:200px; width:148px; height:74px;"></div>
+      </div>
+      <div class="fleet-cloud-layer fleet-cloud-layer-near">
+        <div class="pixel-cloud cloud-b" style="left:4%; top:500px; width:212px; height:104px;"></div>
+        <div class="pixel-cloud cloud-a" style="left:38%; top:240px; width:232px; height:110px;"></div>
+        <div class="pixel-cloud cloud-c" style="left:74%; top:460px; width:244px; height:118px;"></div>
+      </div>
+    </div>
     <div class="page">
       <section class="hero">
         <div class="hero-top">
           <div class="hero-copy">
-            <div class="muted">Codex activity observer</div>
+            <div class="muted">Codex + Claude + Cursor workspace observer</div>
             <div class="hero-title-row">
-              <h1>Codex Agents Office</h1>
+              <h1>Agents Office Tower</h1>
               <div id="hero-summary" class="hero-summary"></div>
             </div>
             <div id="stamp" class="muted">Loading…</div>

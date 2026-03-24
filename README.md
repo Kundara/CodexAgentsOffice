@@ -2,7 +2,7 @@
 
 <div align="center">
 
-### The office view for real Codex work
+### The office view for real Codex, Claude, and Cursor work
 
 Turn live Codex activity into a browser office, terminal snapshot, and VS Code panel that show who is working, which parent sessions are leading, which subagents are blocked or waiting, and where that work belongs in the project.
 
@@ -51,11 +51,12 @@ The browser surface is the primary product view.
 It supports:
 
 - fleet summaries across multiple projects
+- a continuous fleet tower where each workspace renders as a full-width floor instead of a separate card
 - deep links into one project with `?project=/abs/project/path`
 - office and terminal-style rendering with `?view=map` and `?view=terminal`
 - live agents plus the 4 most recent lead sessions for each workspace
 - a durable cross-project `Needs You` queue built from typed Codex approval and input requests
-- provenance/confidence detail in session cards so Codex-native, Claude transcript, and Claude hook-backed entries do not read the same
+- provenance/confidence detail in session cards so Codex-native, Claude transcript, Claude hook-backed, and Cursor API-backed entries do not read the same
 - static screenshot rendering through `?screenshot=1`
 
 ### Terminal
@@ -82,6 +83,7 @@ It rides the same normalized snapshot, including event-native notifications, app
 - Node.js and npm
 - local Codex CLI access if you want live Codex session visibility
 - optional Claude local logs if you want best-effort secondary discovery
+- optional `CURSOR_API_KEY` if you want Cursor background-agent visibility for the currently opened repo
 - optional Aseprite CLI if you want to inspect source art files
 
 ### Install and build
@@ -109,12 +111,15 @@ npx codex-agents-office web --port 4181
 ```
 
 Open [http://127.0.0.1:4181](http://127.0.0.1:4181).
+This is the default fleet-mode launch and should be the normal deploy path.
 
 Pin the server to one project when needed:
 
 ```bash
 npx codex-agents-office web /abs/project/path --port 4181
 ```
+
+When debugging a stale browser, check [http://127.0.0.1:4181/api/server-meta](http://127.0.0.1:4181/api/server-meta) and confirm `explicitProjects` is `false` for normal fleet deploys.
 
 ### Run the terminal view
 
@@ -159,6 +164,27 @@ It prefers official Codex surfaces first:
 
 Claude local session logs are supported as a secondary source for discovery and best-effort recent activity inference. When a project writes Claude hook sidecars into `.codex-agents/claude-hooks/<session-id>.jsonl`, Claude sessions can also surface typed permission, tool, subagent, and stop state without pretending to be Codex app-server.
 
+Cursor background agents are supported as an additional official source when `CURSOR_API_KEY` is set. The current adapter matches Cursor agents to the selected project by normalized git `remote.origin.url`, then surfaces typed remote status, summary, branch, and target URL data from Cursor's background-agent API.
+
+### Source capability matrix
+
+The UI renders all three sources in the same office, but they do not expose the same event fidelity:
+
+| Capability | Codex | Claude | Cursor |
+| --- | --- | --- | --- |
+| Workspace discovery | Yes, official local discovery | Yes, from `~/.claude/projects` | No, matched onto an already-known local repo |
+| Current activity summary | Yes, typed thread + turn state | Yes, inferred from transcript or typed from hook sidecars | Yes, typed background-agent status + summary |
+| Message/reply visibility | Yes, typed agent messages and turn lifecycle | Partial, transcript/head-tail sampling or hook-backed prompt/session events | Partial, summary/conversation API rather than a live local reply stream |
+| File-change events | Yes, typed file-change events and paths | Partial, inferred from tool use or typed from hook sidecars | No typed file-path event stream |
+| Command/tool events | Yes, typed command execution events | Partial, inferred from transcript or typed from hook sidecars | No command/tool event stream |
+| Web-search visibility | Partial, only when Codex exposes a native `webSearch` item on the observer path | No dedicated typed web-search surface | No |
+| Approval / input waits | Yes, typed request events | Partial, only when Claude hook sidecars exist | No |
+| Subagent / delegation visibility | Yes, typed hierarchy and lifecycle | Partial, hook-backed start/stop exists but hierarchy is weaker | No |
+| Resume / open affordance | Yes, local resume command and thread URL when available | No native resume/open affordance in this project | Partial, target URL / PR URL when Cursor exposes them |
+| Live push into this observer | Yes, app-server notifications | No direct push here; polled transcript and optional hook sidecars | No direct local push here; API polling today |
+
+Codex web-search toasts only appear when the Codex observer actually receives a native `webSearch` item or event. Desktop-side search helpers that do not surface through app-server or the rollout observer path are not yet visible as typed web-search toasts here.
+
 The normalized snapshot is then rendered into:
 
 - desks for active work
@@ -168,7 +194,7 @@ The normalized snapshot is then rendered into:
 - fixed workstation slots
   desk columns are pinned instead of repacked when new agents appear, with role-biased cubicles and tighter back-to-back workstation rows
 - boss offices on demand
-  lead sessions with multiple subagents move into a separate left-side office lane with a distinct floor treatment
+  lead sessions with multiple subagents move into a slimmer left-side lead lane with its own floor treatment and horizontal separators, instead of a large boxed office
 - rec-area placement for waiting, resting, and the 4 most recent lead sessions
 - hover cards and session panels for longer detail
 - boss hover relationship lines
@@ -179,9 +205,10 @@ The normalized snapshot is then rendered into:
   Command notifications render as a tiny terminal-style window with monospace command text and a blinking cursor.
   Each agent keeps one command window toast at a time; new commands append to the bottom, keep only the last 3 lines, and extend the toast lifetime.
   read-like shell actions such as `sed`, `cat`, `rg`, `ls`, `find`, and `tree` now collapse into short summary toasts like `Read workload.ts` or `Exploring 2 files` instead of echoing the raw shell command.
-- explicit provenance/confidence labels so Codex-native state and Claude transcript or hook-derived state do not look equivalent
+- explicit provenance/confidence labels so Codex-native state, Claude transcript or hook-derived state, and Cursor API-backed state do not look equivalent
 
 Fleet mode now keeps every discovered workspace live instead of rebuilding monitor state around the currently opened tab.
+The browser fleet map now renders those workspaces as stacked tower floors over a shared sky backdrop with parallax pixel clouds, while single-project focus stays available through selection or `?project=...`.
 
 ## Project layout
 
@@ -248,7 +275,7 @@ The main gap is richer event-to-motion mapping. The project now carries more typ
 - [`docs/architecture.md`](docs/architecture.md)
   System design, scene model, and rendering approach.
 - [`docs/integration-hooks.md`](docs/integration-hooks.md)
-  Exact Codex and Claude hooks and how they map into the product.
+  Exact Codex, Claude, and Cursor integration surfaces and how they map into the product.
 - [`docs/self-development.md`](docs/self-development.md)
   Project-quality bar and current iteration priorities.
 - [`docs/references.md`](docs/references.md)

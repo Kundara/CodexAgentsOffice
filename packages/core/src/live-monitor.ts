@@ -10,7 +10,12 @@ import {
 import { listCloudTasks } from "./cloud";
 import { canonicalizeProjectPath, filterThreadsForProject } from "./project-paths";
 import { getRoomsFilePath } from "./room-config";
-import { buildDashboardSnapshotFromState, filterProjectCloudTasks, isOngoingThread } from "./snapshot";
+import {
+  buildDashboardSnapshotFromState,
+  filterProjectCloudTasks,
+  isOngoingThread,
+  parentThreadIdForThread
+} from "./snapshot";
 import type {
   CloudTask,
   CodexThread,
@@ -18,6 +23,7 @@ import type {
   DashboardSnapshot,
   NeedsUserState
 } from "./types";
+import { summarizeWebSearch } from "./web-search";
 import { RECENT_DONE_GRACE_MS } from "./workload";
 
 const DISCOVERY_INTERVAL_MS = 4000;
@@ -34,6 +40,7 @@ const MAX_RECENT_EVENTS = 64;
 const APP_SERVER_SUBSCRIPTION_TIMEOUT_MS = 25000;
 const ROLLOUT_TAIL_BYTES = 512 * 1024;
 const STOPPED_THREAD_REMOVAL_BUFFER_MS = 1000;
+const DEFAULT_LOCAL_THREAD_LIMIT = 24;
 
 interface PendingUserRequest extends NeedsUserState {
   threadId: string;
@@ -387,22 +394,22 @@ export function buildThreadReadAgentMessageEvent(
   return {
     id: buildEventId({
       projectRoot: context.projectRoot,
-      method: "item/agentMessage/delta",
+      method: "thread/read/agentMessage",
       threadId: thread.id,
       turnId: latestMessage.turnId,
       itemId: latestMessage.itemId,
       path
     }),
     source: "codex",
-    confidence: "inferred",
+    confidence: "typed",
     threadId: thread.id,
     createdAt: context.createdAt ?? new Date().toISOString(),
-    method: "item/agentMessage/delta",
+    method: "thread/read/agentMessage",
     turnId: latestMessage.turnId,
     itemId: latestMessage.itemId,
     kind: "message",
-    phase: "updated",
-    title: "Reply updated",
+    phase: "completed",
+    title: "Reply completed",
     detail: shorten(latestMessage.text),
     path
   };
@@ -536,7 +543,7 @@ function buildEventFromItem(
         phase === "failed" ? "Web search failed"
         : phase === "completed" ? "Web search completed"
         : "Web search started",
-      detail: shorten(asString(item.query) ?? "Web search")
+      detail: shorten(summarizeWebSearch(item))
     });
   }
 
@@ -674,19 +681,8 @@ export function buildDashboardEventFromAppServerMessage(
     case "item/started":
     case "item/completed":
       return buildEventFromItem(context, method, params);
-    case "item/agentMessage/delta": {
-      const messageDelta = asString(params.delta) ?? asString(params.textDelta);
-      if (!isMeaningfulAgentText(messageDelta)) {
-        return null;
-      }
-      return eventBase(context, method, params, {
-        itemId: extractItemId(params),
-        kind: "message",
-        phase: "updated",
-        title: "Reply streaming",
-        detail: shorten(messageDelta)
-      });
-    }
+    case "item/agentMessage/delta":
+      return null;
     case "item/plan/delta":
       return eventBase(context, method, params, {
         itemId: extractItemId(params),
@@ -1161,7 +1157,7 @@ export class ProjectLiveMonitor extends EventEmitter {
   constructor(options: ProjectLiveMonitorOptions) {
     super();
     this.projectRoot = options.projectRoot;
-    this.localLimit = options.localLimit ?? 10;
+    this.localLimit = options.localLimit ?? DEFAULT_LOCAL_THREAD_LIMIT;
     this.includeCloud = options.includeCloud !== false;
     this.roomConfigPath = getRoomsFilePath(this.projectRoot);
   }
@@ -1277,23 +1273,52 @@ export class ProjectLiveMonitor extends EventEmitter {
 
     try {
       const allThreads = await this.client.listThreads({
-        limit: Math.max(this.localLimit * 2, 20)
+        limit: Math.max(this.localLimit * 4, 40)
       });
       const projectThreads = filterThreadsForProject(this.projectRoot, allThreads);
       const projectThreadsById = new Map(projectThreads.map((thread) => [thread.id, thread]));
-      const listedThreads = projectThreads.slice(0, this.localLimit);
-      const trackedThreads = [
-        ...listedThreads,
-        ...Array.from(this.threads.keys())
-          .filter((threadId) => !listedThreads.some((thread) => thread.id === threadId))
-          .map((threadId) => projectThreadsById.get(threadId))
-          .filter((thread): thread is CodexThread => Boolean(thread))
-      ];
+      const trackedThreads = new Map(
+        projectThreads.slice(0, this.localLimit).map((thread) => [thread.id, thread])
+      );
+      const pendingAncestors = [...trackedThreads.values()];
+      while (pendingAncestors.length > 0) {
+        const thread = pendingAncestors.shift();
+        if (!thread) {
+          continue;
+        }
+        const parentThreadId = parentThreadIdForThread(thread);
+        if (!parentThreadId || trackedThreads.has(parentThreadId)) {
+          continue;
+        }
+        let parentThread = projectThreadsById.get(parentThreadId) ?? this.threads.get(parentThreadId) ?? null;
+        if (!parentThread) {
+          try {
+            parentThread = await this.client.readThread(parentThreadId);
+          } catch {
+            parentThread = null;
+          }
+        }
+        if (!parentThread) {
+          continue;
+        }
+        projectThreadsById.set(parentThread.id, parentThread);
+        trackedThreads.set(parentThread.id, parentThread);
+        pendingAncestors.push(parentThread);
+      }
+      for (const threadId of Array.from(this.threads.keys())) {
+        if (trackedThreads.has(threadId)) {
+          continue;
+        }
+        const knownThread = projectThreadsById.get(threadId);
+        if (knownThread) {
+          trackedThreads.set(threadId, knownThread);
+        }
+      }
       this.clearMatchingNote("Local Codex app-server unavailable:");
-      const listedIds = new Set(trackedThreads.map((thread) => thread.id));
+      const listedIds = new Set(trackedThreads.keys());
 
       await Promise.all(
-        trackedThreads.map(async (listedThread) => {
+        [...trackedThreads.values()].map(async (listedThread) => {
           const known = this.threads.get(listedThread.id);
           if (!known || known.updatedAt !== listedThread.updatedAt || known.path !== listedThread.path) {
             await this.refreshThread(listedThread.id);
@@ -1555,7 +1580,7 @@ export class ProjectLiveMonitor extends EventEmitter {
         notification.method === "thread/closed"
         || (notification.method === "thread/status/changed" && statusType === "notLoaded")
       ) {
-        this.subscribedThreadIds.delete(threadId);
+        this.scheduleThreadSubscriptions();
       }
     }
 

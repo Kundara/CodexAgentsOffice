@@ -4,6 +4,8 @@ const ACTIVE_LOCAL_WINDOW_MS = 20 * 60 * 1000;
 const WAITING_LOCAL_WINDOW_MS = 45 * 60 * 1000;
 const ACTIVE_PRESENCE_WINDOW_MS = 3 * 60 * 1000;
 const ACTIVE_CLOUD_WINDOW_MS = 8 * 60 * 60 * 1000;
+const ACTIVE_SUBSCRIBED_LOCAL_WINDOW_MS = 90 * 1000;
+const ACTIVE_FRESH_LOCAL_WINDOW_MS = 30 * 1000;
 export const RECENT_DONE_GRACE_MS = 5 * 1000;
 
 const TERMINAL_CLOUD_STATUSES = new Set([
@@ -26,6 +28,18 @@ export function isTerminalCloudStatus(status: string | null | undefined): boolea
 function parseUpdatedAt(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function isLiveLocalState(state: string): boolean {
+  return [
+    "editing",
+    "running",
+    "validating",
+    "scanning",
+    "thinking",
+    "planning",
+    "delegating"
+  ].includes(state);
 }
 
 export function isCurrentCloudTask(task: CloudTask, now = Date.now()): boolean {
@@ -60,6 +74,22 @@ export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()):
       || agent.state === "waiting"
       || agent.state === "blocked"
       || agent.needsUser !== null
+    ) {
+      return true;
+    }
+    if (agent.state === "done") {
+      return now - updatedAt <= RECENT_DONE_GRACE_MS;
+    }
+    if (
+      isLiveLocalState(agent.state)
+      && now - updatedAt <= ACTIVE_FRESH_LOCAL_WINDOW_MS
+    ) {
+      return true;
+    }
+    if (
+      agent.liveSubscription === "subscribed"
+      && isLiveLocalState(agent.state)
+      && now - updatedAt <= ACTIVE_SUBSCRIBED_LOCAL_WINDOW_MS
     ) {
       return true;
     }
