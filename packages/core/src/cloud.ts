@@ -1,9 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import type { CloudTask } from "./types";
-
-const execFileAsync = promisify(execFile);
+import { execCodex } from "./codex-command";
 
 interface RawCloudTask {
   id: string;
@@ -27,7 +23,7 @@ interface RawCloudListResponse {
 }
 
 export async function listCloudTasks(limit = 12): Promise<CloudTask[]> {
-  const { stdout } = await execFileAsync("codex", ["cloud", "list", "--json", "--limit", String(limit)]);
+  const { stdout } = await execCodex(["cloud", "list", "--json", "--limit", String(limit)]);
   const parsed = JSON.parse(stdout) as RawCloudListResponse;
   return (parsed.tasks ?? []).map((task) => ({
     id: task.id,

@@ -53,7 +53,7 @@ Primary code path:
 
 Current use:
 
-- spawns `codex app-server`
+- resolves a runnable Codex command, then spawns `codex app-server`
 - initializes a JSON-RPC-like session
 - opts into `experimentalApi`
 - opts out of streamed `item/agentMessage/delta` notifications so browser reply toasts can prefer full-message state
@@ -73,6 +73,14 @@ Important note:
 - the observer does not answer approval/input requests; it only visualizes them
 
 This means app-server is now both the main truth source and the first-class local event bus for browser notifications.
+
+Resolution details:
+
+- prefer `CODEX_CLI_PATH` when explicitly set
+- otherwise prefer `codex` on `PATH`
+- on macOS, fall back to the bundled Codex app binary in `/Applications/Codex.app/Contents/Resources/codex` or `~/Applications/Codex.app/Contents/Resources/codex` when present
+- on Windows, the desktop app does not currently give this project a reliable app-server fallback by itself, so a runnable `codex` command is still required for native Codex visibility
+- on Windows+WSL, a WSL-side Codex CLI still needs a shared `CODEX_HOME` with the Windows app if you expect the observer to see the same local session history
 
 ### `thread/list`
 
@@ -367,6 +375,7 @@ Why it matters:
 Implemented in:
 
 - `packages/core/src/cloud.ts`
+- `packages/core/src/codex-command.ts`
 - `packages/core/src/snapshot.ts`
 
 What we read:
@@ -378,6 +387,11 @@ What we read:
 - updated time
 - environment label
 - file/line change summary
+
+Resolution details:
+
+- `cloud list` uses the same Codex-command resolution path as `app-server`
+- app-only installs without a runnable Codex executable still cannot provide cloud task visibility here
 
 How we use it:
 

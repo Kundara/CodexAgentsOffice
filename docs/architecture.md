@@ -14,6 +14,8 @@ The detailed hook inventory now lives in [docs/integration-hooks.md](/mnt/f/AI/C
 
    Official docs describe `thread/start`, `thread/list`, `thread/read`, and a live notification stream for `turn/*`, `item/*`, approvals, command execution, and file changes. That makes it the best local integration surface for CLI, IDE, and app-originated threads.
 
+   In this codebase, that still means we need a runnable Codex executable. We prefer `codex` on `PATH`, allow `CODEX_CLI_PATH` overrides, and on macOS can fall back to the Codex app bundle binary. A desktop app install by itself is not automatically enough on every platform, and Windows+WSL setups also need a shared `CODEX_HOME` if the observer is expected to see Windows app sessions.
+
    Source: [App Server](https://developers.openai.com/codex/app-server)
 
 2. `codex cloud list --json`

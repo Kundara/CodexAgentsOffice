@@ -38,7 +38,8 @@ Codex Agents Office turns those signals into a live observability surface instea
 ### Requirements
 
 - Node.js and npm
-- local Codex CLI access if you want live Codex session visibility
+- a runnable Codex command if you want live Codex session visibility
+  The normal path is Codex CLI on `PATH`. On macOS, Codex Agents Office also falls back to the bundled app binary in `/Applications/Codex.app/Contents/Resources/codex` when the CLI is absent. On Windows, the desktop app alone is not yet a reliable substitute for a runnable `codex` command.
 - optional Claude local logs if you want secondary discovery
 - optional `CURSOR_API_KEY` if you want Cursor background-agent visibility
 
@@ -104,6 +105,9 @@ It prefers official surfaces first:
 - `codex cloud list --json` for cloud and web tasks
 - `.codex-agents/rooms.xml` for room layout and path mapping
 - `.codex-agents/agents.json` for persistent appearance overrides
+
+If `codex` is not on `PATH`, set `CODEX_CLI_PATH` to a runnable Codex executable.
+On Windows+WSL, make sure the observer and the Codex app share the same `CODEX_HOME`; otherwise WSL-side discovery can miss Windows app sessions entirely.
 
 Claude local logs and Cursor background agents are supported as secondary sources, but the product is designed to treat Codex-native signals as the primary truth when they exist.
 

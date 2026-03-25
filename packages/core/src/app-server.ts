@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { platform } from "node:process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type { CodexThread } from "./types";
+import { spawnCodexProcess } from "./codex-command";
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -88,17 +88,19 @@ export class CodexAppServerClient {
   private notificationListeners = new Set<(message: AppServerNotification) => void>();
   private serverRequestListeners = new Set<(message: AppServerServerRequest) => void>();
 
-  private constructor() {
-    const codexCommand = platform === "win32" ? "codex.cmd" : "codex";
-    this.child = spawn(codexCommand, ["app-server"], {
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-
+  private constructor(child: ChildProcessWithoutNullStreams) {
+    this.child = child;
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");
     this.child.stdout.on("data", (chunk) => this.onStdout(chunk));
     this.child.stderr.on("data", (chunk) => {
       this.stderr += chunk;
+    });
+    this.child.on("error", (error) => {
+      for (const pending of this.pending.values()) {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      this.pending.clear();
     });
     this.child.on("exit", (code, signal) => {
       const reason =
@@ -118,7 +120,8 @@ export class CodexAppServerClient {
   }
 
   static async create(): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient();
+    const { child } = await spawnCodexProcess(["app-server"]);
+    const client = new CodexAppServerClient(child);
     await client.request("initialize", {
       clientInfo: {
         name: "codex_agents_office",

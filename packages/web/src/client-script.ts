@@ -53,6 +53,7 @@ export function renderClientScript({
       const recentToastLineTimes = new Map();
       const NOTIFICATION_TTL_MS = 2400;
       const MESSAGE_NOTIFICATION_TTL_MS = 4600;
+      const TOAST_FLOAT_ANIMATION_MS = 3300;
       const COMMAND_NOTIFICATION_BASE_TTL_MS = 2600;
       const COMMAND_NOTIFICATION_LINE_TTL_MS = 1200;
       const FILE_CHANGE_COMPUTER_FX_MS = 330;
@@ -1649,6 +1650,15 @@ export function renderClientScript({
         return Number(entry.createdAt) + notificationLifetimeMs(entry);
       }
 
+      function toastAnimationDelay(entry, now = Date.now()) {
+        const createdAt = Number(entry && entry.createdAt);
+        if (!Number.isFinite(createdAt)) {
+          return "0ms";
+        }
+        const elapsed = Math.max(0, Math.min(TOAST_FLOAT_ANIMATION_MS, now - createdAt));
+        return "-" + Math.round(elapsed) + "ms";
+      }
+
       function notificationSemanticKey(projectRoot, key, descriptor) {
         return [
           projectRoot,
@@ -2636,6 +2646,12 @@ export function renderClientScript({
             const nextStyle = \`left:\${Math.round(left)}px; top:\${Math.round(top)}px;\`;
             if (toast.getAttribute("style") !== nextStyle) {
               toast.setAttribute("style", nextStyle);
+            }
+            if (!entry.isCommand) {
+              const nextAnimationDelay = toastAnimationDelay(entry);
+              if (toast.style.animationDelay !== nextAnimationDelay) {
+                toast.style.animationDelay = nextAnimationDelay;
+              }
             }
 
             const statsHtml =
