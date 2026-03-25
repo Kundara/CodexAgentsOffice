@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import type { DashboardSnapshot } from "@codex-agents-office/core";
 
-import type { FleetResponse, ProjectDescriptor, ServerMeta, ServerOptions } from "./server-types";
+import type { FleetResponse, LanStatus, ProjectDescriptor, ServerMeta, ServerOptions } from "./server-types";
 
 const SERVER_ENTRY = resolve(__dirname, "server.js");
 const SERVER_STARTED_AT = new Date().toISOString();
@@ -13,6 +13,8 @@ function createStartupSnapshot(project: ProjectDescriptor): DashboardSnapshot {
   const generatedAt = new Date().toISOString();
   return {
     projectRoot: project.root,
+    projectLabel: project.label,
+    projectIdentity: null,
     generatedAt,
     rooms: {
       version: 1,
@@ -40,7 +42,16 @@ export function buildFleetResponse(
   };
 }
 
-export function buildServerMeta(options: ServerOptions, projects = options.projects): ServerMeta {
+export function buildServerMeta(
+  options: ServerOptions,
+  projects = options.projects,
+  lan: LanStatus = {
+    enabled: options.lan.enabled,
+    peerId: null,
+    discoveryPort: options.lan.enabled ? options.lan.discoveryPort : null,
+    peers: []
+  }
+): ServerMeta {
   return {
     pid: process.pid,
     startedAt: SERVER_STARTED_AT,
@@ -49,6 +60,7 @@ export function buildServerMeta(options: ServerOptions, projects = options.proje
     host: options.host,
     port: options.port,
     explicitProjects: options.explicitProjects,
-    projects
+    projects,
+    lan
   };
 }

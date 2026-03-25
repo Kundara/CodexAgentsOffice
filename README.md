@@ -18,6 +18,7 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 ## What you get
 
 - Browser office view with fleet mode and single-project focus.
+- Opt-in LAN peer mode that can merge remote work into the same local project view.
 - Terminal snapshot and watch mode.
 - VS Code activity-bar panel.
 - Current-workload-first scene with subtle recent history.
@@ -71,6 +72,14 @@ Fleet mode is the default. For a focused single-project run:
 ```bash
 npm start -- /abs/project/path --port 4181
 ```
+
+For cheap same-Wi-Fi visibility across matching clones:
+
+```bash
+npm start -- --lan --lan-key office-demo
+```
+
+`--lan` enables UDP peer discovery and widens the default bind host to `0.0.0.0` unless you explicitly pass `--host`. Remote agents are merged only when the peer snapshot reports the same git remote identity as the local project.
 
 Optional dev check:
 

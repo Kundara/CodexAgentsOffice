@@ -97,6 +97,12 @@ export function renderClientScript({
 
       const projectMetaByRoot = new Map(configuredProjects.map((project) => [project.root, project]));
       function projectInfo(projectRoot) {
+        if (state.fleet && Array.isArray(state.fleet.projects)) {
+          const liveProject = state.fleet.projects.find((project) => project.projectRoot === projectRoot);
+          if (liveProject && liveProject.projectLabel) {
+            return { root: projectRoot, label: liveProject.projectLabel };
+          }
+        }
         return projectMetaByRoot.get(projectRoot) || {
           root: projectRoot,
           label: projectRoot.split(/[\\\\/]/).filter(Boolean).pop() || projectRoot
@@ -1351,6 +1357,14 @@ export function renderClientScript({
           : titleCaseWords(agent.provenance) + " typed";
       }
 
+      function agentNetworkLabel(agent) {
+        if (!agent || !agent.network) {
+          return "";
+        }
+        const location = agent.network.peerHost ? \` @ \${agent.network.peerHost}\` : "";
+        return \`LAN \${agent.network.peerLabel}\${location}\`;
+      }
+
       function agentHoverSourceLabel(agent, summarySource) {
         if (summarySource === "user") {
           return agent.confidence === "inferred" ? "User inferred" : "User typed";
@@ -1801,6 +1815,7 @@ export function renderClientScript({
         const meta = [
           titleCaseWords(agentKindLabel(snapshot, agent)),
           agentHoverSourceLabel(agent, summary.source),
+          agentNetworkLabel(agent),
           lead ? \`with \${lead}\` : "",
           formatUpdatedAt(agent.updatedAt)
         ].filter(Boolean).join(" · ");
@@ -4025,12 +4040,16 @@ export function renderClientScript({
 
         const sorted = [...snapshot.agents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         return renderNeedsAttention([snapshot]) + sorted.map((agent) => {
-          const appearanceAction = \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+          const appearanceAction = agent.network
+            ? ""
+            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const description = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
             || \`[\${agent.state}]\`;
-          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div class="session-card-header"><strong class="session-card-title">\${escapeHtml(agent.label)}</strong><div class="card-actions">\${appearanceAction}</div></div><div class="muted session-card-description" title="\${escapeHtml(description)}">\${escapeHtml(description)}</div></article>\`;
+          const sourceLabel = agentNetworkLabel(agent);
+          const fullDescription = sourceLabel ? \`\${sourceLabel} · \${description}\` : description;
+          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div class="session-card-header"><strong class="session-card-title">\${escapeHtml(agent.label)}</strong><div class="card-actions">\${appearanceAction}</div></div><div class="muted session-card-description" title="\${escapeHtml(fullDescription)}">\${escapeHtml(fullDescription)}</div></article>\`;
         }).join("");
       }
 
@@ -4045,12 +4064,15 @@ export function renderClientScript({
 
         entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
         return renderNeedsAttention(projects) + entries.map(({ snapshot, agent }) => {
-          const appearanceAction = \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+          const appearanceAction = agent.network
+            ? ""
+            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
             || \`[\${agent.state}]\`;
-          const description = \`\${projectLabel(snapshot.projectRoot)} · \${detail}\`;
+          const sourceLabel = agentNetworkLabel(agent);
+          const description = projectLabel(snapshot.projectRoot) + " · " + (sourceLabel ? sourceLabel + " · " : "") + detail;
           return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div class="session-card-header"><strong class="session-card-title">\${escapeHtml(agent.label)}</strong><div class="card-actions">\${appearanceAction}</div></div><div class="muted session-card-description" title="\${escapeHtml(description)}">\${escapeHtml(description)}</div></article>\`;
         }).join("");
       }

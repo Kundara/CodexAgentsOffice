@@ -29,6 +29,16 @@ function matchesMethod(context: RequestContext, ...methods: string[]): boolean {
   return methods.includes(requestMethod(context));
 }
 
+function isAuthorizedLanRequest(context: RequestContext): boolean {
+  if (!context.options.lan.enabled) {
+    return false;
+  }
+  if (!context.options.lan.key) {
+    return true;
+  }
+  return context.request.headers["x-codex-agents-office-key"] === context.options.lan.key;
+}
+
 async function handleAssetRoute(context: RequestContext): Promise<boolean> {
   if (!matchesMethod(context, "GET", "HEAD") || !context.url.pathname.startsWith("/assets/")) {
     return false;
@@ -110,7 +120,29 @@ async function handleServerMetaRoute(context: RequestContext): Promise<boolean> 
     return false;
   }
 
-  sendJson(context.response, 200, buildServerMeta(context.options, await context.service.getProjects()));
+  sendJson(context.response, 200, buildServerMeta(context.options, await context.service.getProjects(), context.service.getLanStatus()));
+  return true;
+}
+
+async function handleLanFleetRoute(context: RequestContext): Promise<boolean> {
+  if (!matchesMethod(context, "GET") || context.url.pathname !== "/api/lan/fleet") {
+    return false;
+  }
+  if (!isAuthorizedLanRequest(context)) {
+    sendJson(context.response, context.options.lan.enabled ? 403 : 404, { error: "LAN access unavailable" });
+    return true;
+  }
+
+  sendJson(context.response, 200, await context.service.getLanExportFleet());
+  return true;
+}
+
+async function handleLanStatusRoute(context: RequestContext): Promise<boolean> {
+  if (!matchesMethod(context, "GET") || context.url.pathname !== "/api/lan") {
+    return false;
+  }
+
+  sendJson(context.response, 200, context.service.getLanStatus());
   return true;
 }
 
@@ -187,6 +219,8 @@ const ROUTES: RouteHandler[] = [
   handleIconAuditRoute,
   handleFleetRoute,
   handleServerMetaRoute,
+  handleLanFleetRoute,
+  handleLanStatusRoute,
   handleProjectFileRoute,
   handleEventsRoute,
   handleAppearanceRoute,

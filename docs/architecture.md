@@ -100,6 +100,7 @@ Sources:
   - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
   - live SSE updates for browser clients
   - all discovered workspaces stay live-monitored at once
+  - optional LAN federation can discover nearby peers over UDP broadcast and merge their agent state into matching local projects
 - map and terminal-style views through `?view=map|terminal`
 - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
 - local threads remain seated while the thread is still ongoing, even if they pause between visible events or the latest turn already looks done
@@ -136,7 +137,9 @@ The web package now separates transport, lifecycle, and rendering concerns inste
 - `packages/web/src/server-metadata.ts`
   Builds startup fleet placeholders and the shared `/api/server-meta` payload shape.
 - `packages/web/src/fleet-live-service.ts`
-  Owns `ProjectLiveMonitor` instances, refreshes the active project set, publishes fleet snapshots, exposes the live bound project list for `/api/server-meta`, and fans them out over SSE. Fleet-wide cloud task polling also lives here now so `codex cloud list` runs once per fleet refresh cycle instead of once per project monitor, with shared backoff when the upstream cloud surface rate-limits.
+  Owns `ProjectLiveMonitor` instances, refreshes the active project set, publishes fleet snapshots, exposes the live bound project list for `/api/server-meta`, merges matching LAN peer state into local projects, and fans them out over SSE. Fleet-wide cloud task polling also lives here now so `codex cloud list` runs once per fleet refresh cycle instead of once per project monitor, with shared backoff when the upstream cloud surface rate-limits.
+- `packages/web/src/lan-peer-service.ts`
+  Advertises the local web listener over UDP broadcast, tracks nearby peers that share the same optional LAN key, and fetches their local-only fleet payloads so remote agents can be merged without re-export loops.
 - `packages/web/src/router.ts`
   Maps routes to handlers for HTML, static assets, project image previews, fleet/meta APIs, refresh, appearance cycling, and room scaffolding. In fleet mode, the meta route now reports the live project set from `FleetLiveService`, not just the startup seed options.
 - `packages/web/src/render-html.ts`

@@ -164,6 +164,49 @@ test("stale Claude hook-backed live states decay to done instead of staying ongo
   assert.equal(summary.activityEvent, null);
 });
 
+test("hook-backed Claude sessions still surface assistant reply text", () => {
+  const now = Date.now();
+  const toolTimestamp = new Date(now - 60 * 1000).toISOString();
+  const replyTimestamp = new Date(now - 30 * 1000).toISOString();
+  const summary = summariseClaudeSession(
+    "session-123",
+    "/mnt/f/AI/CodexAgentsOffice",
+    [
+      {
+        type: "assistant",
+        timestamp: replyTimestamp,
+        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        message: {
+          model: "claude-sonnet-4-5",
+          content: [
+            {
+              type: "text",
+              text: "Finished the pass and updated the renderer."
+            }
+          ]
+        }
+      }
+    ],
+    now,
+    [
+      {
+        hook_event_name: "PostToolUse",
+        timestamp: toolTimestamp,
+        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        tool_name: "Bash",
+        tool_input: {
+          command: "npm test",
+          cwd: "/mnt/f/AI/CodexAgentsOffice"
+        }
+      }
+    ]
+  );
+
+  assert.equal(summary.latestMessage, "Finished the pass and updated the renderer.");
+  assert.equal(summary.activityEvent?.type, "agentMessage");
+  assert.equal(summary.state, "thinking");
+});
+
 test("Claude SDK sidecar hooks append typed hook records per session", async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "claude-hooks-"));
   const hooks = createClaudeSdkSidecarHooks({

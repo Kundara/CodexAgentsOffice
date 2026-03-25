@@ -7,7 +7,9 @@ import { listCloudTasks } from "./cloud";
 import { loadCursorAgents } from "./cursor";
 import { loadOpenClawAgents } from "./openclaw";
 import { loadFreshPresenceAgents } from "./presence";
+import { resolveProjectIdentity } from "./project-identity";
 import { findRoomForPaths, loadRoomConfig } from "./room-config";
+import { projectLabelFromRoot } from "./project-paths";
 import { isCurrentWorkloadAgent } from "./workload";
 import { summarizeWebSearch } from "./web-search";
 import type {
@@ -856,6 +858,8 @@ export async function buildDashboardSnapshotFromState(input: {
   ongoingThreadIds?: Set<string>;
 }): Promise<DashboardSnapshot> {
   const projectRoot = input.projectRoot;
+  const projectLabel = projectLabelFromRoot(projectRoot);
+  const projectIdentity = await resolveProjectIdentity(projectRoot);
   const roomConfig = await loadRoomConfig(projectRoot);
   const notes = [...(input.notes ?? [])];
   const agents: DashboardAgent[] = [];
@@ -923,7 +927,8 @@ export async function buildDashboardSnapshotFromState(input: {
       provenance: "codex",
       confidence: "typed",
       needsUser: input.needsUserByThreadId?.get(thread.id) ?? null,
-      liveSubscription: input.subscribedThreadIds?.has(thread.id) ? "subscribed" : "readOnly"
+      liveSubscription: input.subscribedThreadIds?.has(thread.id) ? "subscribed" : "readOnly",
+      network: null
     });
   }
 
@@ -961,7 +966,8 @@ export async function buildDashboardSnapshotFromState(input: {
       provenance: "cloud",
       confidence: "typed",
       needsUser: null,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     });
   }
 
@@ -977,7 +983,8 @@ export async function buildDashboardSnapshotFromState(input: {
       provenance: "presence",
       confidence: "typed",
       needsUser: null,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     });
   }
 
@@ -1021,6 +1028,8 @@ export async function buildDashboardSnapshotFromState(input: {
 
   return {
     projectRoot,
+    projectLabel,
+    projectIdentity,
     generatedAt: new Date().toISOString(),
     rooms: roomConfig,
     agents,

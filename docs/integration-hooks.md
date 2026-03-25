@@ -702,6 +702,7 @@ The snapshot builder merges:
 - Claude sessions from transcript inference or optional hook sidecars
 - OpenClaw gateway sessions matched by configured workspace root
 - Cursor background agents matched by normalized repository URL
+- LAN-imported remote agents only after the web layer matches the remote snapshot's git-backed project identity to a local project
 
 Then it:
 
@@ -748,8 +749,10 @@ How it works:
 
 - the browser loads the initial page shell from `render-html.ts`
 - `/api/fleet` provides the current normalized snapshot
+- `/api/lan/fleet` exposes the local-only fleet payload for peer federation so imported LAN agents are not echoed back to other peers
 - `/api/events` streams live fleet updates over SSE
 - `FleetLiveService` owns project monitors and publishes fresh fleet payloads to connected browser clients
+- `LanPeerService` advertises and discovers nearby peers over lightweight UDP broadcast and lets `FleetLiveService` merge matching remote agents into the same project floor
 - browser-side rendering and event reaction live in `client-script.ts`
 
 - server-sent events from `/api/events`

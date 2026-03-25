@@ -9,6 +9,7 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Added
 
+- Added an opt-in LAN peer mode for the web server that discovers nearby listeners over UDP broadcast and merges remote agents into matching local projects when clones share the same git remote.
 - Added this changelog and a repo-level maintenance policy for tracking notable additions, fixes, and behavior changes.
 - Added a grid-first scene layout foundation in the web renderer with explicit tile-based scene configuration and scene grid helpers aligned to the `16px` PixelOffice unit.
 - Added persisted browser scene settings and local furniture layout overrides, including a user-facing text-scale control for the office view.
@@ -19,6 +20,7 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Changed
 
+- Expanded the shared snapshot shape with git-backed project identity metadata and per-agent LAN provenance so imported network state stays distinct from local session state.
 - Reworked the office renderer around internal scene settings, grid-based placement, and reusable scene render state instead of looser ad hoc layout math.
 - Expanded Cursor integration to treat agents as cloud work, support paginated agent fetches, and normalize repository identity across direct repo URLs and PR or merge-request URLs.
 - Updated the main docs to describe the new grid-first renderer direction, minimal viewer controls, and the Windows Codex runtime fallback path.
@@ -41,3 +43,4 @@ Entries stay under the active version until an explicit version bump is requeste
 - Removed the generic `OK` speech bubble from idle and validating avatars so the office scene does not imply a separate approval or success state that is not otherwise modeled.
 - Fixed Claude typed hook handling so official events such as `FileChanged`, `Notification`, `TeammateIdle`, `Setup`, and compaction transitions map into normalized office states instead of dropping back to transcript-only inference.
 - Fixed stale Claude hook-backed live states so quiet Claude chats age into done/idle instead of holding a workstation indefinitely after activity stops.
+- Fixed Claude hook-backed sessions so assistant reply text from transcripts or Agent SDK session messages still surfaces in the UI instead of only showing user prompts and tool-state updates.

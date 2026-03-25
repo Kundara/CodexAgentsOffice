@@ -9,6 +9,7 @@ export * from "./cursor";
 export * from "./live-monitor";
 export * from "./openclaw";
 export * from "./presence";
+export * from "./project-identity";
 export * from "./project-paths";
 export * from "./room-config";
 export * from "./snapshot";

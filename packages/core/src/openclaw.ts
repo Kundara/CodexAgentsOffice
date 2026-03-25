@@ -831,7 +831,8 @@ export async function loadOpenClawAgents(projectRoot: string): Promise<Dashboard
       provenance: "openclaw",
       confidence: "typed",
       needsUser: null,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     });
   }
 

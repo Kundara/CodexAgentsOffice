@@ -109,6 +109,7 @@ export async function loadFreshPresenceAgents(projectRoot: string): Promise<Dash
       provenance: "presence",
       confidence: "typed",
       needsUser: null,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     }));
 }

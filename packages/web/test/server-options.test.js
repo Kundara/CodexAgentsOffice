@@ -20,3 +20,11 @@ test("web server becomes pinned only when explicit project roots are passed", ()
     ["/tmp/project-a", "/tmp/project-b"]
   );
 });
+
+test("lan mode enables discovery and widens the default host binding", () => {
+  const options = parseArgs(["--lan", "--port", "4181"]);
+
+  assert.equal(options.lan.enabled, true);
+  assert.equal(options.host, "0.0.0.0");
+  assert.equal(options.lan.discoveryPort, 41819);
+});

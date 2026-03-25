@@ -101,6 +101,79 @@ function ageClaudeSummary(summary: ClaudeActivitySummary, now = Date.now()): Cla
   };
 }
 
+function mergeClaudeAssistantTextSummary(input: {
+  base: ClaudeActivitySummary;
+  latestAssistantTextRecord: Record<string, unknown> | null;
+  fallbackUpdatedAt: number;
+  fallbackCwd: string;
+}): ClaudeActivitySummary {
+  if (!input.latestAssistantTextRecord) {
+    return input.base;
+  }
+
+  const baseUpdatedAtMs = Date.parse(input.base.updatedAt);
+  const assistantUpdatedAtMs = recordTimestampMs(input.latestAssistantTextRecord, input.fallbackUpdatedAt);
+  if (!Number.isFinite(assistantUpdatedAtMs)) {
+    return input.base;
+  }
+
+  const assistantText = extractAssistantText(input.latestAssistantTextRecord);
+  if (!assistantText) {
+    return input.base;
+  }
+
+  const textPaths = extractPathsFromText(assistantText);
+  const ageMs = Date.now() - assistantUpdatedAtMs;
+  const assistantState =
+    ageMs <= 2 * 60 * 1000 ? "thinking"
+    : ageMs <= RECENT_DONE_WINDOW_MS ? "done"
+    : "idle";
+  const mergedUpdatedAtMs =
+    Number.isFinite(baseUpdatedAtMs) ? Math.max(baseUpdatedAtMs, assistantUpdatedAtMs)
+    : assistantUpdatedAtMs;
+
+  if (assistantUpdatedAtMs >= baseUpdatedAtMs && input.base.needsUser === null && input.base.state !== "waiting" && input.base.state !== "blocked") {
+    return {
+      ...input.base,
+      state: assistantState,
+      detail: shorten(assistantText, 88),
+      updatedAt: new Date(mergedUpdatedAtMs).toISOString(),
+      paths: textPaths.length > 0 ? textPaths : input.base.paths,
+      activityEvent:
+        ageMs <= RECENT_MESSAGE_WINDOW_MS
+          ? {
+              type: "agentMessage",
+              action: "said",
+              path: textPaths[0] ?? input.fallbackCwd,
+              title: shorten(assistantText, 88),
+              isImage: false
+            }
+          : null,
+      latestMessage: assistantText,
+      isOngoing: assistantState !== "done" && assistantState !== "idle" ? input.base.isOngoing : false
+    };
+  }
+
+  if (input.base.latestMessage || input.base.activityEvent) {
+    return input.base;
+  }
+
+  return {
+    ...input.base,
+    latestMessage: assistantText,
+    activityEvent:
+      ageMs <= RECENT_MESSAGE_WINDOW_MS
+        ? {
+            type: "agentMessage",
+            action: "said",
+            path: textPaths[0] ?? input.fallbackCwd,
+            title: shorten(assistantText, 88),
+            isImage: false
+          }
+        : input.base.activityEvent
+  };
+}
+
 function trimTrailingSlash(value: string): string {
   return value.replace(/[\\/]+$/, "");
 }
@@ -1149,7 +1222,12 @@ export function summariseClaudeSession(
     .find((summary): summary is ClaudeActivitySummary => Boolean(summary));
 
   if (latestHookSummary) {
-    return ageClaudeSummary(latestHookSummary);
+    return mergeClaudeAssistantTextSummary({
+      base: ageClaudeSummary(latestHookSummary),
+      latestAssistantTextRecord,
+      fallbackUpdatedAt,
+      fallbackCwd
+    });
   }
 
   if (latestToolRecord) {
@@ -1320,7 +1398,8 @@ export async function loadClaudeAgents(projectRoot: string, limit = 12): Promise
         provenance: "claude",
         confidence: summary.confidence,
         needsUser: summary.needsUser,
-        liveSubscription: "readOnly"
+        liveSubscription: "readOnly",
+        network: null
       });
     }
     return agents;
@@ -1387,7 +1466,8 @@ export async function loadClaudeAgents(projectRoot: string, limit = 12): Promise
       provenance: "claude",
       confidence: summary.confidence,
       needsUser: summary.needsUser,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     });
   }
 

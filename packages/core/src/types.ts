@@ -80,6 +80,15 @@ export interface GitInfo {
   originUrl: string | null;
 }
 
+export interface ProjectIdentity {
+  key: string | null;
+  source: "git" | "unknown";
+  gitRoot: string | null;
+  repoUrl: string | null;
+  repoName: string | null;
+  branch: string | null;
+}
+
 export interface ThreadItem {
   type: string;
   [key: string]: unknown;
@@ -238,10 +247,20 @@ export interface DashboardAgent {
   confidence: AgentConfidence;
   needsUser: NeedsUserState | null;
   liveSubscription: "subscribed" | "readOnly";
+  network:
+    | {
+      transport: "lan";
+      peerId: string;
+      peerLabel: string;
+      peerHost: string | null;
+    }
+    | null;
 }
 
 export interface DashboardSnapshot {
   projectRoot: string;
+  projectLabel: string;
+  projectIdentity: ProjectIdentity | null;
   generatedAt: string;
   rooms: RoomConfig;
   agents: DashboardAgent[];

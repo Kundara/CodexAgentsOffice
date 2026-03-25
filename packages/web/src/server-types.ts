@@ -10,11 +10,33 @@ export interface FleetResponse {
   projects: DashboardSnapshot[];
 }
 
+export interface LanOptions {
+  enabled: boolean;
+  discoveryPort: number;
+  key: string | null;
+}
+
+export interface LanPeerDescriptor {
+  id: string;
+  label: string;
+  addresses: string[];
+  port: number;
+  seenAt: string;
+}
+
+export interface LanStatus {
+  enabled: boolean;
+  peerId: string | null;
+  discoveryPort: number | null;
+  peers: LanPeerDescriptor[];
+}
+
 export interface ServerOptions {
   host: string;
   port: number;
   projects: ProjectDescriptor[];
   explicitProjects: boolean;
+  lan: LanOptions;
 }
 
 export interface ServerMeta {
@@ -26,4 +48,5 @@ export interface ServerMeta {
   port: number;
   explicitProjects: boolean;
   projects: ProjectDescriptor[];
+  lan: LanStatus;
 }

@@ -338,7 +338,8 @@ export async function loadCursorAgents(projectRoot: string, limit = cursorAgentL
       provenance: "cursor",
       confidence: "typed",
       needsUser: null,
-      liveSubscription: "readOnly"
+      liveSubscription: "readOnly",
+      network: null
     });
   }
 

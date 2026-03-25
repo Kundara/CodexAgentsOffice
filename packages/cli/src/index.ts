@@ -26,7 +26,7 @@ function usage(): void {
 Usage:
   codex-agents-office snapshot [projectRoot] [--history]
   codex-agents-office watch [projectRoot] [--history]
-  codex-agents-office web [--port 4181] [--host 127.0.0.1] [projectRoot...]
+  codex-agents-office web [--port 4181] [--host 127.0.0.1] [--lan] [--lan-port 41819] [--lan-key <shared-key>] [projectRoot...]
   codex-agents-office demo preview [--port 4181] [--host 127.0.0.1] [--duration 75] [--keep]
   codex-agents-office aseprite inspect [file]
   codex-agents-office presence boss [projectRoot]
