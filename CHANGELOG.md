@@ -40,3 +40,4 @@ Entries stay under the active version until an explicit version bump is requeste
 - Fixed text-message toasts so they spawn from the same agent-head anchor as other agent toasts instead of starting from workstation height.
 - Removed the generic `OK` speech bubble from idle and validating avatars so the office scene does not imply a separate approval or success state that is not otherwise modeled.
 - Fixed Claude typed hook handling so official events such as `FileChanged`, `Notification`, `TeammateIdle`, `Setup`, and compaction transitions map into normalized office states instead of dropping back to transcript-only inference.
+- Fixed stale Claude hook-backed live states so quiet Claude chats age into done/idle instead of holding a workstation indefinitely after activity stops.

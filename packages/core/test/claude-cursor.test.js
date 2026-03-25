@@ -137,6 +137,33 @@ test("typed Claude notification hooks surface a recent agent message", () => {
   assert.equal(summary.latestMessage, "Analyzing renderer layout");
 });
 
+test("stale Claude hook-backed live states decay to done instead of staying ongoing forever", () => {
+  const now = Date.now();
+  const hookTimestamp = new Date(now - 5 * 60 * 1000).toISOString();
+  const summary = summariseClaudeSession(
+    "session-123",
+    "/mnt/f/AI/CodexAgentsOffice",
+    [],
+    now,
+    [
+      {
+        hook_event_name: "PostToolUse",
+        timestamp: hookTimestamp,
+        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        tool_name: "Bash",
+        tool_input: {
+          command: "npm test",
+          cwd: "/mnt/f/AI/CodexAgentsOffice"
+        }
+      }
+    ]
+  );
+
+  assert.equal(summary.state, "done");
+  assert.equal(summary.isOngoing, false);
+  assert.equal(summary.activityEvent, null);
+});
+
 test("Claude SDK sidecar hooks append typed hook records per session", async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "claude-hooks-"));
   const hooks = createClaudeSdkSidecarHooks({

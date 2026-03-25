@@ -10,6 +10,7 @@ import type { AgentActivityEvent, ActivityState, AgentConfidence, DashboardAgent
 const CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const LOG_HEAD_BYTES = 4096;
 const LOG_TAIL_BYTES = 65536;
+const RECENT_CLAUDE_HOOK_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const RECENT_MESSAGE_WINDOW_MS = 5 * 60 * 1000;
 const RECENT_DONE_WINDOW_MS = 15 * 60 * 1000;
 
@@ -48,6 +49,56 @@ interface ClaudeActivitySummary {
   needsUser: NeedsUserState | null;
   latestMessage: string | null;
   isOngoing: boolean;
+}
+
+function isTransientClaudeState(state: ActivityState): boolean {
+  return [
+    "planning",
+    "scanning",
+    "thinking",
+    "editing",
+    "running",
+    "validating",
+    "delegating"
+  ].includes(state);
+}
+
+function ageClaudeSummary(summary: ClaudeActivitySummary, now = Date.now()): ClaudeActivitySummary {
+  if (summary.needsUser !== null || summary.state === "waiting" || summary.state === "blocked") {
+    return summary;
+  }
+
+  if (!isTransientClaudeState(summary.state)) {
+    return summary;
+  }
+
+  const updatedAtMs = Date.parse(summary.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    return summary;
+  }
+
+  const ageMs = now - updatedAtMs;
+  if (ageMs <= RECENT_CLAUDE_HOOK_ACTIVE_WINDOW_MS) {
+    return summary;
+  }
+
+  if (ageMs <= RECENT_DONE_WINDOW_MS) {
+    return {
+      ...summary,
+      state: "done",
+      isOngoing: false,
+      activityEvent: null
+    };
+  }
+
+  return {
+    ...summary,
+    state: "idle",
+    detail: "Idle",
+    isOngoing: false,
+    activityEvent: null,
+    latestMessage: null
+  };
 }
 
 function trimTrailingSlash(value: string): string {
@@ -1098,7 +1149,7 @@ export function summariseClaudeSession(
     .find((summary): summary is ClaudeActivitySummary => Boolean(summary));
 
   if (latestHookSummary) {
-    return latestHookSummary;
+    return ageClaudeSummary(latestHookSummary);
   }
 
   if (latestToolRecord) {
