@@ -33,7 +33,7 @@ Codex Agents Office turns those signals into a live observability surface instea
 - **Current-workload-first rendering**
   The product is optimized for what is happening now, with recent history kept visible only where it helps the scene read cleanly.
 - **Grid-first office layout**
-  The floor renderer uses an explicit tile grid and internal layout settings so the office scene can move toward a retained 2D renderer without losing room semantics.
+  The floor renderer uses an explicit tile grid and a retained Pixi scene with HTML anchor overlays for toasts and interaction hooks.
   The base tile is fixed at `16px` so the floor grid uses the same unit as the PixelOffice sprite sheet.
 - **Minimal viewer controls**
   User-facing scene controls stay global and small; today that means a text-size setting, while prefab geometry and spacing remain internal until furniture editing exists.

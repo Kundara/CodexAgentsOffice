@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { summariseClaudeHookRecord } = require("../dist/claude.js");
+const { summariseClaudeHookRecord, summariseClaudeSession } = require("../dist/claude.js");
 const {
   cursorAgentMatchesRepository,
   normalizeRepositoryUrl,
@@ -61,6 +61,32 @@ test("typed Claude user prompt hooks become planning state with user-message act
   assert.equal(summary.activityEvent?.action, "said");
   assert.match(summary.detail, /README\.md/);
   assert.deepEqual(summary.paths, ["/mnt/f/AI/CodexAgentsOffice/README.md"]);
+});
+
+test("synthetic Claude model placeholders do not leak into agent labels", () => {
+  const summary = summariseClaudeSession(
+    "f06cc37e-5ca7-4c5e-9eba-4bf8e99e536a",
+    "/mnt/f/AI/CodexAgentsOffice",
+    [
+      {
+        type: "assistant",
+        timestamp: "2026-03-25T21:18:22.366Z",
+        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        message: {
+          model: "<synthetic>",
+          content: [
+            {
+              type: "text",
+              text: "Please run /login · API Error: 401"
+            }
+          ]
+        }
+      }
+    ],
+    Date.parse("2026-03-25T21:18:22.366Z")
+  );
+
+  assert.equal(summary.label, "Claude f06c");
 });
 
 test("cursor repository URLs normalize across ssh and https forms", () => {

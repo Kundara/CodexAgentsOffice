@@ -43,7 +43,7 @@ A good iteration improves at least one of these:
 - Room empty states are still visually heavier than ideal.
 - Live movement is still simpler than the intended office-life simulation.
 - Map and terminal browser views still share some presentation assumptions that should diverge further.
-- The office map still renders through HTML markup; the grid/settings model is in place, but the Pixi migration is not done yet.
+- The office map now renders through a retained Pixi scene; remaining work is about refining prefab composition, motion, and editor parity rather than migrating off the old HTML map path.
 
 ## Acceptance checks for future changes
 
@@ -91,7 +91,7 @@ A good iteration improves at least one of these:
 - harden seat ownership and rec-seat stability so ordinary polling never creates a visible shuffle party
 - verify live toast styling remains readable when browser zoom is reduced
 - keep command-window aggregation readable when several commands arrive quickly for the same agent
-- move the office floor to a retained Pixi scene with stable entity ids, z-order, and incremental updates instead of `innerHTML` scene replacement
+- keep the retained Pixi scene stable across scene refreshes with predictable entity ids, z-order, and incremental updates
 - keep user-facing scene controls minimal and global, starting with text scale, while prefab sizing and spacing remain internal until furniture editing exists
 - finish translating the previous office look into the tile system so the retained scene feels like the established PixelOffice floor instead of temporary placeholder geometry
 

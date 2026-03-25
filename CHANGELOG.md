@@ -23,9 +23,11 @@ Entries stay under the active version until an explicit version bump is requeste
 - Moved scene controls into a toggleable settings popup in the web header, removing the manual refresh and rooms scaffold actions from the main toolbar and hiding the toast preview trigger.
 - Changed the scene text-size slider to apply on release instead of during drag so the settings popup stays stable while adjusting scale.
 - Extracted browser toast queueing, stacking, preview, and DOM rendering from the main client script into a dedicated `toast-script` module.
+- Removed the unused DOM office-map renderer path from the web client so the browser map now runs through the retained Pixi scene only.
 
 ### Fixed
 
+- Fixed Claude agent labels so synthetic/system transcript model placeholders like `<synthetic>` no longer appear in the office UI.
 - Fixed Cursor project matching when the API only exposes GitHub pull request, GitLab merge request, or similar PR-backed repository URLs.
 - Fixed Codex runtime discovery on Windows and Windows+WSL environments where the CLI is absent but the Codex desktop app is installed.
 - Improved Cursor agent loading compatibility by tolerating auth scheme differences and multi-page API responses.

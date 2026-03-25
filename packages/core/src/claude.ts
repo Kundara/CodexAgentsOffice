@@ -670,16 +670,29 @@ function sourceKindFromModel(model: string | null): string {
   return model ? `claude:${model}` : "claude";
 }
 
-function labelFromModel(model: string | null, sessionId: string): string {
+function normalizeClaudeDisplayModel(model: string | null): string | null {
   if (!model) {
-    return `Claude ${sessionId.slice(0, 4)}`;
+    return null;
   }
 
-  const normalized = model
+  const raw = model.trim();
+  if (!raw || /^<[^>]+>$/.test(raw)) {
+    return null;
+  }
+
+  const normalized = raw
     .replace(/^claude-/i, "")
     .replace(/-\d{8}$/i, "")
     .replace(/-/g, " ")
     .trim();
+  return normalized || null;
+}
+
+function labelFromModel(model: string | null, sessionId: string): string {
+  const normalized = normalizeClaudeDisplayModel(model);
+  if (!normalized) {
+    return `Claude ${sessionId.slice(0, 4)}`;
+  }
   return `Claude ${shorten(normalized, 18)}`;
 }
 

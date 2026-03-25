@@ -269,7 +269,7 @@ The active office view currently favors an open station language over enclosed c
 - the floor is restored to the blue office-strip language from the reference art, including an upper wall-side walkway for rec facilities
 - layout constants are now expressed as internal tile-grid settings instead of only pixel literals, so boss booths, desk columns, rec-strip depth, and inter-cubicle spacing all derive from a single floor grid
 - global viewer settings are separate from internal scene settings; the first user-facing control is text scale, clamped from `0.75x` to `2.00x`, while prefab sizing and spacing stay internal
-- the current browser renderer still emits HTML, but the scene data now carries explicit grid metadata so a Pixi-based retained renderer can replace the DOM scene incrementally instead of rebuilding by `innerHTML`
+- the current browser renderer is Pixi-first for the office map, with HTML retained only for overlays, controls, and fallback terminal output
 - browser placement rules are intentionally a little stickier than raw workload freshness, because a live local thread should not visually bounce desk -> rec -> desk during short polling gaps
 
 ## Secondary Claude support
