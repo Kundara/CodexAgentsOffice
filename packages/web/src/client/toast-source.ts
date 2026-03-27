@@ -297,6 +297,7 @@ export const TOAST_SCRIPT = `
           && (
             event.itemType === "user_message"
             || event.itemType === "userMessage"
+            || userMessageMethod === "cursor/local/prompt"
             || userMessageMethod === "userMessage"
             || userMessageMethod.endsWith("/userMessage")
           );

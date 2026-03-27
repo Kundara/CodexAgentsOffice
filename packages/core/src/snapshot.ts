@@ -293,8 +293,30 @@ function turnHasFinalAnswer(turn: CodexTurn): boolean {
   return turn.items.some((item) => item.type === "agentMessage" && item.phase === "final_answer");
 }
 
+const FRESH_SPAWNED_THREAD_WINDOW_MS = 2 * 60 * 1000;
+
+function isFreshSpawnedDetachedThread(thread: CodexThread): boolean {
+  if (thread.status.type !== "notLoaded") {
+    return false;
+  }
+  if (threadTurns(thread).length > 0) {
+    return false;
+  }
+  if (thread.source !== "exec" && typeof thread.source !== "object") {
+    return false;
+  }
+  const createdAtMs = thread.createdAt * 1000;
+  if (!Number.isFinite(createdAtMs)) {
+    return false;
+  }
+  return Date.now() - createdAtMs <= FRESH_SPAWNED_THREAD_WINDOW_MS;
+}
+
 export function isOngoingThread(thread: CodexThread): boolean {
   if (thread.status.type === "active") {
+    return true;
+  }
+  if (isFreshSpawnedDetachedThread(thread)) {
     return true;
   }
   const lastTurn = threadTurns(thread).at(-1);
@@ -365,17 +387,19 @@ export function summariseThread(thread: CodexThread): {
 
   const turns = threadTurns(thread);
   const lastTurn = turns.at(-1);
+  const ageMs = Date.now() - thread.updatedAt * 1000;
+  const settledRecentState = ageMs <= DONE_WINDOW_MS ? "done" : "idle";
   if (!lastTurn) {
-    const ageMs = Date.now() - thread.updatedAt * 1000;
     const preview = shortenText(thread.preview || "", 88);
+    const freshSpawnedDetached = isFreshSpawnedDetachedThread(thread);
     const recentState = ageMs <= DONE_WINDOW_MS ? "done" : "idle";
     return {
       state:
-        thread.status.type === "active" ? "thinking"
+        thread.status.type === "active" || freshSpawnedDetached ? "thinking"
         : recentState,
       detail:
         preview
-        || (thread.status.type === "active"
+        || (thread.status.type === "active" || freshSpawnedDetached
           ? "Thinking"
           : recentState === "done"
             ? "Finished recently"
@@ -400,7 +424,6 @@ export function summariseThread(thread: CodexThread): {
 
   const item = selectRelevantItem(lastTurn.items);
   if (!item) {
-    const ageMs = Date.now() - thread.updatedAt * 1000;
     return {
       state:
         treatAsInProgress ? "thinking"
@@ -556,7 +579,7 @@ export function summariseThread(thread: CodexThread): {
     }
     case "plan":
       return {
-        state: "planning",
+        state: treatAsInProgress ? "planning" : settledRecentState,
         detail: "Updating plan",
         paths: [thread.cwd],
         activityEvent: {
@@ -569,7 +592,7 @@ export function summariseThread(thread: CodexThread): {
       };
     case "reasoning":
       return {
-        state: "thinking",
+        state: treatAsInProgress ? "thinking" : settledRecentState,
         detail: "Reasoning",
         paths: [thread.cwd],
         activityEvent: {
@@ -627,7 +650,7 @@ export function summariseThread(thread: CodexThread): {
     }
     case "contextCompaction":
       return {
-        state: "thinking",
+        state: treatAsInProgress ? "thinking" : settledRecentState,
         detail: "Compacting context",
         paths: [thread.cwd],
         activityEvent: {
@@ -680,7 +703,6 @@ export function summariseThread(thread: CodexThread): {
       break;
   }
 
-  const ageMs = Date.now() - thread.updatedAt * 1000;
   return {
     state:
       treatAsInProgress ? "thinking"

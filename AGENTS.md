@@ -131,7 +131,7 @@ node packages/web/dist/server.js --port 4181
   --window-size=920,1600 \
   --virtual-time-budget=20000 \
   --timeout=25000 \
-  --screenshot='F:\AI\CodexAgentsOffice\validate.png' \
+  --screenshot='C:\temp\codex-agents-office-validate.png' \
   'http://127.0.0.1:4181/?project=/abs/project/path&screenshot=1'
 ```
 

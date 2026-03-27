@@ -6,8 +6,9 @@ const ACTIVE_PRESENCE_WINDOW_MS = 3 * 60 * 1000;
 const ACTIVE_CLOUD_WINDOW_MS = 8 * 60 * 60 * 1000;
 const ACTIVE_SUBSCRIBED_LOCAL_WINDOW_MS = 90 * 1000;
 const ACTIVE_FRESH_LOCAL_WINDOW_MS = 30 * 1000;
-export const RECENT_DONE_GRACE_MS = 2 * 1000;
+export const RECENT_DONE_GRACE_MS = 5 * 1000;
 const SUBAGENT_DONE_GRACE_MS = 1200;
+const FUTURE_TIMESTAMP_TOLERANCE_MS = 5 * 1000;
 
 const TERMINAL_CLOUD_STATUSES = new Set([
   "ready",
@@ -22,6 +23,17 @@ const TERMINAL_CLOUD_STATUSES = new Set([
 function parseUpdatedAt(value: string): number {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function ageSince(timestamp: number, now: number): number {
+  if (!Number.isFinite(timestamp)) {
+    return Number.NaN;
+  }
+  const deltaMs = now - timestamp;
+  if (deltaMs < -FUTURE_TIMESTAMP_TOLERANCE_MS) {
+    return Number.NaN;
+  }
+  return Math.max(0, deltaMs);
 }
 
 function isLiveLocalState(state: string): boolean {
@@ -47,14 +59,18 @@ function settleDormantLocalState(
   agent: DashboardAgent,
   isCurrent: boolean
 ): DashboardAgent {
+  const stoppedAt = parseUpdatedAt(agent.stoppedAt ?? "");
   if (
     agent.source !== "local"
-    || isCurrent
     || agent.isOngoing
     || agent.statusText === "active"
     || agent.needsUser !== null
     || !isLiveLocalState(agent.state)
   ) {
+    return agent;
+  }
+
+  if (!Number.isFinite(stoppedAt) && isCurrent) {
     return agent;
   }
 
@@ -76,32 +92,28 @@ export function isTerminalCloudStatus(status: string | null | undefined): boolea
 }
 
 export function isCurrentCloudTask(task: CloudTask, now = Date.now()): boolean {
-  const updatedAt = parseUpdatedAt(task.updatedAt);
-  if (!Number.isFinite(updatedAt)) {
+  const updatedAtAgeMs = ageSince(parseUpdatedAt(task.updatedAt), now);
+  if (!Number.isFinite(updatedAtAgeMs)) {
     return false;
   }
   if (isTerminalCloudStatus(task.status)) {
     return false;
   }
-  return now - updatedAt <= ACTIVE_CLOUD_WINDOW_MS;
+  return updatedAtAgeMs <= ACTIVE_CLOUD_WINDOW_MS;
 }
 
 export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()): boolean {
-  const updatedAt = parseUpdatedAt(agent.updatedAt);
-  if (!Number.isFinite(updatedAt)) {
-    return false;
-  }
   const doneGraceMs = terminalDoneGraceMs(agent);
 
   if (agent.source === "cloud") {
-    return !isTerminalCloudStatus(agent.statusText) && now - updatedAt <= ACTIVE_CLOUD_WINDOW_MS;
+    const updatedAtAgeMs = ageSince(parseUpdatedAt(agent.updatedAt), now);
+    if (!Number.isFinite(updatedAtAgeMs)) {
+      return false;
+    }
+    return !isTerminalCloudStatus(agent.statusText) && updatedAtAgeMs <= ACTIVE_CLOUD_WINDOW_MS;
   }
 
   if (agent.source === "local") {
-    const stoppedAt = parseUpdatedAt(agent.stoppedAt ?? "");
-    if (Number.isFinite(stoppedAt)) {
-      return now - stoppedAt <= doneGraceMs;
-    }
     if (
       agent.isOngoing
       || agent.statusText === "active"
@@ -109,22 +121,43 @@ export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()):
     ) {
       return true;
     }
+
+    const updatedAtAgeMs = ageSince(parseUpdatedAt(agent.updatedAt), now);
+    if (
+      !Number.isFinite(updatedAtAgeMs)
+      && (
+        agent.activityEvent?.type === "userMessage"
+        || (
+          agent.liveSubscription === "subscribed"
+          && isLiveLocalState(agent.state)
+        )
+      )
+    ) {
+      return true;
+    }
+    if (!Number.isFinite(updatedAtAgeMs)) {
+      return false;
+    }
+    const stoppedAtAgeMs = ageSince(parseUpdatedAt(agent.stoppedAt ?? ""), now);
+    if (Number.isFinite(stoppedAtAgeMs)) {
+      return stoppedAtAgeMs <= doneGraceMs;
+    }
     if (agent.state === "waiting" || agent.state === "blocked") {
-      return now - updatedAt <= WAITING_LOCAL_WINDOW_MS;
+      return updatedAtAgeMs <= WAITING_LOCAL_WINDOW_MS;
     }
     if (agent.state === "done") {
-      return now - updatedAt <= doneGraceMs;
+      return updatedAtAgeMs <= doneGraceMs;
     }
     if (
       isLiveLocalState(agent.state)
-      && now - updatedAt <= ACTIVE_FRESH_LOCAL_WINDOW_MS
+      && updatedAtAgeMs <= ACTIVE_FRESH_LOCAL_WINDOW_MS
     ) {
       return true;
     }
     if (
       agent.liveSubscription === "subscribed"
       && isLiveLocalState(agent.state)
-      && now - updatedAt <= ACTIVE_SUBSCRIBED_LOCAL_WINDOW_MS
+      && updatedAtAgeMs <= ACTIVE_SUBSCRIBED_LOCAL_WINDOW_MS
     ) {
       return true;
     }
@@ -135,12 +168,17 @@ export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()):
     return false;
   }
 
+  const updatedAtAgeMs = ageSince(parseUpdatedAt(agent.updatedAt), now);
+  if (!Number.isFinite(updatedAtAgeMs)) {
+    return false;
+  }
+
   if (agent.state === "done") {
-    return now - updatedAt <= doneGraceMs;
+    return updatedAtAgeMs <= doneGraceMs;
   }
 
   if (agent.source === "presence") {
-    return now - updatedAt <= ACTIVE_PRESENCE_WINDOW_MS;
+    return updatedAtAgeMs <= ACTIVE_PRESENCE_WINDOW_MS;
   }
 
   const freshnessWindow =
@@ -148,7 +186,7 @@ export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()):
       ? WAITING_LOCAL_WINDOW_MS
       : ACTIVE_LOCAL_WINDOW_MS;
 
-  return now - updatedAt <= freshnessWindow;
+  return updatedAtAgeMs <= freshnessWindow;
 }
 
 export function applyCurrentWorkloadState(snapshot: DashboardSnapshot, now = Date.now()): DashboardSnapshot {

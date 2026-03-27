@@ -40,17 +40,17 @@ test("typed Claude permission hooks become approval-backed blocked state", () =>
   const summary = summariseClaudeHookRecord({
     sessionId: "session-123",
     model: "claude-sonnet-4-5",
-    fallbackCwd: "/mnt/f/AI/CodexAgentsOffice",
+    fallbackCwd: "/workspaces/CodexAgentsOffice",
     gitBranch: "main",
     fallbackUpdatedAt: Date.parse("2026-03-24T00:00:00.000Z"),
     record: {
       hook_event_name: "PermissionRequest",
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
+      cwd: "/workspaces/CodexAgentsOffice",
       request_id: "req_42",
       reason: "Need approval to run a privileged command",
       tool_input: {
         command: "npm publish",
-        cwd: "/mnt/f/AI/CodexAgentsOffice"
+        cwd: "/workspaces/CodexAgentsOffice"
       }
     }
   });
@@ -63,8 +63,8 @@ test("typed Claude permission hooks become approval-backed blocked state", () =>
     requestId: "req_42",
     reason: "Need approval to run a privileged command",
     command: "npm publish",
-    cwd: "/mnt/f/AI/CodexAgentsOffice",
-    grantRoot: "/mnt/f/AI/CodexAgentsOffice"
+    cwd: "/workspaces/CodexAgentsOffice",
+    grantRoot: "/workspaces/CodexAgentsOffice"
   });
   assert.equal(summary.isOngoing, true);
 });
@@ -73,13 +73,13 @@ test("typed Claude user prompt hooks become planning state with user-message act
   const summary = summariseClaudeHookRecord({
     sessionId: "session-123",
     model: "claude-sonnet-4-5",
-    fallbackCwd: "/mnt/f/AI/CodexAgentsOffice",
+    fallbackCwd: "/workspaces/CodexAgentsOffice",
     gitBranch: "main",
     fallbackUpdatedAt: Date.parse("2026-03-24T00:00:00.000Z"),
     record: {
       hook_event_name: "UserPromptSubmit",
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
-      prompt: "Update /mnt/f/AI/CodexAgentsOffice/README.md with Cursor support"
+      cwd: "/workspaces/CodexAgentsOffice",
+      prompt: "Update /workspaces/CodexAgentsOffice/README.md with Cursor support"
     }
   });
 
@@ -88,18 +88,18 @@ test("typed Claude user prompt hooks become planning state with user-message act
   assert.equal(summary.activityEvent?.type, "userMessage");
   assert.equal(summary.activityEvent?.action, "said");
   assert.match(summary.detail, /README\.md/);
-  assert.deepEqual(summary.paths, ["/mnt/f/AI/CodexAgentsOffice/README.md"]);
+  assert.deepEqual(summary.paths, ["/workspaces/CodexAgentsOffice/README.md"]);
 });
 
 test("synthetic Claude model placeholders do not leak into agent labels", () => {
   const summary = summariseClaudeSession(
     "f06cc37e-5ca7-4c5e-9eba-4bf8e99e536a",
-    "/mnt/f/AI/CodexAgentsOffice",
+    "/workspaces/CodexAgentsOffice",
     [
       {
         type: "assistant",
         timestamp: "2026-03-25T21:18:22.366Z",
-        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        cwd: "/workspaces/CodexAgentsOffice",
         message: {
           model: "<synthetic>",
           content: [
@@ -121,13 +121,13 @@ test("typed Claude file-change hooks become editing file-change activity", () =>
   const summary = summariseClaudeHookRecord({
     sessionId: "session-123",
     model: "claude-sonnet-4-5",
-    fallbackCwd: "/mnt/f/AI/CodexAgentsOffice",
+    fallbackCwd: "/workspaces/CodexAgentsOffice",
     gitBranch: "main",
     fallbackUpdatedAt: Date.parse("2026-03-24T00:00:00.000Z"),
     record: {
       hook_event_name: "FileChanged",
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
-      file_path: "/mnt/f/AI/CodexAgentsOffice/README.md",
+      cwd: "/workspaces/CodexAgentsOffice",
+      file_path: "/workspaces/CodexAgentsOffice/README.md",
       event: "change"
     }
   });
@@ -136,19 +136,19 @@ test("typed Claude file-change hooks become editing file-change activity", () =>
   assert.equal(summary.state, "editing");
   assert.equal(summary.activityEvent?.type, "fileChange");
   assert.equal(summary.activityEvent?.action, "edited");
-  assert.deepEqual(summary.paths, ["/mnt/f/AI/CodexAgentsOffice/README.md", "/mnt/f/AI/CodexAgentsOffice"]);
+  assert.deepEqual(summary.paths, ["/workspaces/CodexAgentsOffice/README.md", "/workspaces/CodexAgentsOffice"]);
 });
 
 test("typed Claude notification hooks surface a recent agent message", () => {
   const summary = summariseClaudeHookRecord({
     sessionId: "session-123",
     model: "claude-sonnet-4-5",
-    fallbackCwd: "/mnt/f/AI/CodexAgentsOffice",
+    fallbackCwd: "/workspaces/CodexAgentsOffice",
     gitBranch: "main",
     fallbackUpdatedAt: Date.parse("2026-03-24T00:00:00.000Z"),
     record: {
       hook_event_name: "Notification",
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
+      cwd: "/workspaces/CodexAgentsOffice",
       title: "Checkpoint",
       message: "Analyzing renderer layout",
       notification_type: "info"
@@ -166,18 +166,18 @@ test("stale Claude hook-backed live states decay to done instead of staying ongo
   const hookTimestamp = new Date(now - 5 * 60 * 1000).toISOString();
   const summary = summariseClaudeSession(
     "session-123",
-    "/mnt/f/AI/CodexAgentsOffice",
+    "/workspaces/CodexAgentsOffice",
     [],
     now,
     [
       {
         hook_event_name: "PostToolUse",
         timestamp: hookTimestamp,
-        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        cwd: "/workspaces/CodexAgentsOffice",
         tool_name: "Bash",
         tool_input: {
           command: "npm test",
-          cwd: "/mnt/f/AI/CodexAgentsOffice"
+          cwd: "/workspaces/CodexAgentsOffice"
         }
       }
     ]
@@ -194,12 +194,12 @@ test("hook-backed Claude sessions still surface assistant reply text", () => {
   const replyTimestamp = new Date(now - 30 * 1000).toISOString();
   const summary = summariseClaudeSession(
     "session-123",
-    "/mnt/f/AI/CodexAgentsOffice",
+    "/workspaces/CodexAgentsOffice",
     [
       {
         type: "assistant",
         timestamp: replyTimestamp,
-        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        cwd: "/workspaces/CodexAgentsOffice",
         message: {
           model: "claude-sonnet-4-5",
           content: [
@@ -216,11 +216,11 @@ test("hook-backed Claude sessions still surface assistant reply text", () => {
       {
         hook_event_name: "PostToolUse",
         timestamp: toolTimestamp,
-        cwd: "/mnt/f/AI/CodexAgentsOffice",
+        cwd: "/workspaces/CodexAgentsOffice",
         tool_name: "Bash",
         tool_input: {
           command: "npm test",
-          cwd: "/mnt/f/AI/CodexAgentsOffice"
+          cwd: "/workspaces/CodexAgentsOffice"
         }
       }
     ]
@@ -235,7 +235,7 @@ test("Claude session events include the latest assistant reply and file-change h
   const now = Date.now();
   const events = buildClaudeSessionEventsForTest({
     sessionId: "session-123",
-    fallbackCwd: "/mnt/f/AI/CodexAgentsOffice",
+    fallbackCwd: "/workspaces/CodexAgentsOffice",
     records: [
       {
         type: "assistant",
@@ -245,7 +245,7 @@ test("Claude session events include the latest assistant reply and file-change h
           content: [
             {
               type: "text",
-              text: "Updated /mnt/f/AI/CodexAgentsOffice/README.md"
+              text: "Updated /workspaces/CodexAgentsOffice/README.md"
             }
           ]
         }
@@ -256,8 +256,8 @@ test("Claude session events include the latest assistant reply and file-change h
       {
         hook_event_name: "FileChanged",
         timestamp: new Date(now - 1_000).toISOString(),
-        cwd: "/mnt/f/AI/CodexAgentsOffice",
-        file_path: "/mnt/f/AI/CodexAgentsOffice/README.md",
+        cwd: "/workspaces/CodexAgentsOffice",
+        file_path: "/workspaces/CodexAgentsOffice/README.md",
         event: "change"
       }
     ]
@@ -282,7 +282,7 @@ test("Claude SDK message normalization preserves top-level timestamps", () => {
       }
     },
     {
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
+      cwd: "/workspaces/CodexAgentsOffice",
       gitBranch: "main"
     }
   );
@@ -305,14 +305,14 @@ test("Claude SDK message normalization preserves top-level timestamps", () => {
       }
     },
     {
-      cwd: "/mnt/f/AI/CodexAgentsOffice",
+      cwd: "/workspaces/CodexAgentsOffice",
       gitBranch: "main"
     }
   );
 
   const summary = summariseClaudeSession(
     "session-123",
-    "/mnt/f/AI/CodexAgentsOffice",
+    "/workspaces/CodexAgentsOffice",
     [normalizedUser, normalizedAssistant],
     Date.parse("2026-03-26T10:00:02.000Z")
   );
@@ -325,7 +325,7 @@ test("synthetic Claude command wrapper user records do not override assistant re
   const now = Date.now();
   const summary = summariseClaudeSession(
     "session-123",
-    "/mnt/f/AI/CodexAgentsOffice",
+    "/workspaces/CodexAgentsOffice",
     [
       {
         type: "assistant",
@@ -422,7 +422,7 @@ test("cursor background agent statuses map into workload states", () => {
 test("cursor cloud snapshot maps conversation messages into typed activity and events", { concurrency: false }, async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-cloud-snapshot-"));
   await execFileAsync("git", ["init", projectRoot]);
-  await execFileAsync("git", ["-C", projectRoot, "remote", "add", "origin", "https://github.com/Kundara/CodexAgentsOffice.git"]);
+  await execFileAsync("git", ["-C", projectRoot, "remote", "add", "origin", "https://github.com/example-org/CodexAgentsOffice.git"]);
 
   const previousCursorApiKey = process.env.CURSOR_API_KEY;
   const previousFetch = global.fetch;
@@ -440,7 +440,7 @@ test("cursor cloud snapshot maps conversation messages into typed activity and e
             updatedAt: "2026-03-27T00:01:00.000Z",
             summary: "Implementing cursor conversation polling",
             source: {
-              repository: "https://github.com/Kundara/CodexAgentsOffice.git",
+              repository: "https://github.com/example-org/CodexAgentsOffice.git",
               ref: "main"
             },
             target: {
@@ -502,7 +502,7 @@ test("cursor cloud snapshot maps conversation messages into typed activity and e
 test("cursor cloud adapter suppresses historical conversation toasts on first refresh and emits only new messages later", { concurrency: false }, async () => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-cloud-adapter-"));
   await execFileAsync("git", ["init", projectRoot]);
-  await execFileAsync("git", ["-C", projectRoot, "remote", "add", "origin", "https://github.com/Kundara/CodexAgentsOffice.git"]);
+  await execFileAsync("git", ["-C", projectRoot, "remote", "add", "origin", "https://github.com/example-org/CodexAgentsOffice.git"]);
 
   const previousCursorApiKey = process.env.CURSOR_API_KEY;
   const previousFetch = global.fetch;
@@ -534,7 +534,7 @@ test("cursor cloud adapter suppresses historical conversation toasts on first re
             updatedAt: "2026-03-27T00:01:00.000Z",
             summary: "Implementing cursor conversation polling",
             source: {
-              repository: "https://github.com/Kundara/CodexAgentsOffice.git",
+              repository: "https://github.com/example-org/CodexAgentsOffice.git",
               ref: "main"
             },
             target: {
@@ -799,6 +799,279 @@ test("cursor local snapshot ignores stale retained composers when a new chat upd
   }
 });
 
+test("cursor local snapshot prefers the last focused composer over stale selected tab order", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-focused-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
+  const logsDir = path.join(tempRoot, "logs");
+  const workspaceDir = path.join(workspaceStorageDir, "workspace-1");
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(logsDir, "20260326T120000"), { recursive: true });
+
+  const previousWorkspaceStorageDir = process.env.CURSOR_WORKSPACE_STORAGE_DIR;
+  const previousLogsDir = process.env.CURSOR_LOGS_DIR;
+  const previousCursorUserDataDir = process.env.CURSOR_USER_DATA_DIR;
+  process.env.CURSOR_WORKSPACE_STORAGE_DIR = workspaceStorageDir;
+  process.env.CURSOR_LOGS_DIR = logsDir;
+  delete process.env.CURSOR_USER_DATA_DIR;
+
+  const now = Date.now();
+  const staleSelectedComposerId = "composer-stale-selected";
+  const focusedComposerId = "composer-focused";
+  const composerData = JSON.stringify({
+    allComposers: [
+      {
+        composerId: staleSelectedComposerId,
+        name: "Stale selected tab",
+        subtitle: "Old work",
+        createdAt: now - (2 * 60 * 60 * 1000),
+        lastUpdatedAt: now - (90 * 60 * 1000),
+        unifiedMode: "agent",
+        filesChangedCount: 0,
+        totalLinesAdded: 0,
+        totalLinesRemoved: 0,
+        hasBlockingPendingActions: false,
+        isArchived: false,
+        createdOnBranch: "main",
+        branches: []
+      },
+      {
+        composerId: focusedComposerId,
+        name: "Focused Cursor task",
+        subtitle: "Read package.json, CHANGELOG.md",
+        createdAt: now - 60_000,
+        lastUpdatedAt: now - 4_000,
+        unifiedMode: "agent",
+        filesChangedCount: 0,
+        totalLinesAdded: 0,
+        totalLinesRemoved: 0,
+        hasBlockingPendingActions: false,
+        isArchived: false,
+        createdOnBranch: "main",
+        branches: []
+      }
+    ],
+    selectedComposerIds: [staleSelectedComposerId, focusedComposerId],
+    lastFocusedComposerIds: [focusedComposerId, staleSelectedComposerId]
+  });
+  const prompts = JSON.stringify([{ text: "Read package.json, CHANGELOG.md", commandType: 4 }]);
+  const generations = JSON.stringify([
+    {
+      unixMs: now - 3_000,
+      generationUUID: "generation-focused",
+      type: "composer",
+      textDescription: "Read package.json, CHANGELOG.md"
+    }
+  ]);
+
+  try {
+    await writeFile(path.join(workspaceDir, "workspace.json"), JSON.stringify({
+      folder: pathToFileURL(projectRoot).toString()
+    }));
+    await writeFile(path.join(workspaceDir, "state.vscdb"), Buffer.from([
+      `composer.composerData${composerData}`,
+      ` aiService.prompts${prompts}`,
+      ` aiService.generations${generations}`
+    ].join("\0"), "utf8"));
+    await writeFile(path.join(logsDir, "20260326T120000", "main.log"), "");
+
+    const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+    const focusedAgent = snapshot.agents.find((agent) => agent.id === `cursor-local:${focusedComposerId}`) || null;
+    assert.ok(focusedAgent);
+    assert.equal(focusedAgent.label, "Focused Cursor task");
+    assert.equal(focusedAgent.detail, "Read package.json, CHANGELOG.md");
+    assert.notEqual(focusedAgent.state, "idle");
+    assert.equal(
+      snapshot.agents.some((agent) => agent.id === `cursor-local:${staleSelectedComposerId}`),
+      false
+    );
+    assert.equal(snapshot.events.length, 1);
+    assert.equal(snapshot.events[0].threadId, focusedComposerId);
+    assert.equal(snapshot.events[0].method, "cursor/local/prompt");
+  } finally {
+    if (typeof previousWorkspaceStorageDir === "string") {
+      process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
+    } else {
+      delete process.env.CURSOR_WORKSPACE_STORAGE_DIR;
+    }
+    if (typeof previousLogsDir === "string") {
+      process.env.CURSOR_LOGS_DIR = previousLogsDir;
+    } else {
+      delete process.env.CURSOR_LOGS_DIR;
+    }
+    if (typeof previousCursorUserDataDir === "string") {
+      process.env.CURSOR_USER_DATA_DIR = previousCursorUserDataDir;
+    } else {
+      delete process.env.CURSOR_USER_DATA_DIR;
+    }
+  }
+});
+
+test("cursor local snapshot prefers agent transcripts over stale workspace sqlite inference", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-transcript-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
+  const logsDir = path.join(tempRoot, "logs");
+  const workspaceDir = path.join(workspaceStorageDir, "workspace-1");
+  const cursorProjectsDir = path.join(tempRoot, "cursor-projects");
+  const projectSlug = projectRoot.replace(/^\/+/, "").replace(/[\\/]+/g, "-");
+  const sessionId = "11111111-2222-3333-4444-555555555555";
+  const transcriptDir = path.join(cursorProjectsDir, projectSlug, "agent-transcripts", sessionId);
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(logsDir, "20260326T120000"), { recursive: true });
+  await mkdir(transcriptDir, { recursive: true });
+
+  const previousWorkspaceStorageDir = process.env.CURSOR_WORKSPACE_STORAGE_DIR;
+  const previousLogsDir = process.env.CURSOR_LOGS_DIR;
+  const previousCursorUserDataDir = process.env.CURSOR_USER_DATA_DIR;
+  const previousCursorProjectsDir = process.env.CURSOR_PROJECTS_DIR;
+  process.env.CURSOR_WORKSPACE_STORAGE_DIR = workspaceStorageDir;
+  process.env.CURSOR_LOGS_DIR = logsDir;
+  process.env.CURSOR_PROJECTS_DIR = cursorProjectsDir;
+  delete process.env.CURSOR_USER_DATA_DIR;
+
+  const now = Date.now();
+  const composerId = "sqlite-composer";
+  const composerData = JSON.stringify({
+    allComposers: [
+      {
+        composerId,
+        name: "Old sqlite composer",
+        subtitle: "Should not win over transcript data",
+        createdAt: now - (3 * 60 * 60 * 1000),
+        lastUpdatedAt: now - (2 * 60 * 60 * 1000),
+        unifiedMode: "agent",
+        filesChangedCount: 0,
+        totalLinesAdded: 0,
+        totalLinesRemoved: 0,
+        hasBlockingPendingActions: false,
+        isArchived: false,
+        createdOnBranch: "main",
+        branches: []
+      }
+    ],
+    selectedComposerIds: [composerId],
+    lastFocusedComposerIds: [composerId]
+  });
+  const transcriptFile = path.join(transcriptDir, `${sessionId}.jsonl`);
+  const transcriptLines = [
+    JSON.stringify({
+      role: "user",
+      message: {
+        content: [
+          { type: "text", text: "<user_query>\nInspect the transcript-backed Cursor adapter\n</user_query>" }
+        ]
+      }
+    }),
+    JSON.stringify({
+      role: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Reading the transcript-backed Cursor adapter now." }
+        ]
+      }
+    })
+  ].join("\n") + "\n";
+
+  try {
+    await writeFile(path.join(workspaceDir, "workspace.json"), JSON.stringify({
+      folder: pathToFileURL(projectRoot).toString()
+    }));
+    await writeFile(path.join(workspaceDir, "state.vscdb"), Buffer.from([
+      `composer.composerData${composerData}`
+    ].join("\0"), "utf8"));
+    await writeFile(path.join(logsDir, "20260326T120000", "main.log"), "");
+    await writeFile(transcriptFile, transcriptLines);
+
+    const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+    assert.equal(snapshot.agents.length, 1);
+    assert.equal(snapshot.agents[0].id, `cursor-local:${sessionId}`);
+    assert.match(snapshot.agents[0].label, /Inspect the transcript-backed Cursor adapter/);
+    assert.equal(snapshot.agents[0].latestMessage, "Reading the transcript-backed Cursor adapter now.");
+    assert.equal(snapshot.events.length, 1);
+    assert.equal(snapshot.events[0].method, "cursor/local/agentMessage");
+    assert.equal(snapshot.events[0].detail, "Reading the transcript-backed Cursor adapter now.");
+  } finally {
+    if (typeof previousWorkspaceStorageDir === "string") {
+      process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
+    } else {
+      delete process.env.CURSOR_WORKSPACE_STORAGE_DIR;
+    }
+    if (typeof previousLogsDir === "string") {
+      process.env.CURSOR_LOGS_DIR = previousLogsDir;
+    } else {
+      delete process.env.CURSOR_LOGS_DIR;
+    }
+    if (typeof previousCursorProjectsDir === "string") {
+      process.env.CURSOR_PROJECTS_DIR = previousCursorProjectsDir;
+    } else {
+      delete process.env.CURSOR_PROJECTS_DIR;
+    }
+    if (typeof previousCursorUserDataDir === "string") {
+      process.env.CURSOR_USER_DATA_DIR = previousCursorUserDataDir;
+    } else {
+      delete process.env.CURSOR_USER_DATA_DIR;
+    }
+  }
+});
+
+test("cursor local transcript snapshot treats recent tool use as active editing work", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-transcript-edit-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const cursorProjectsDir = path.join(tempRoot, "cursor-projects");
+  const projectSlug = projectRoot.replace(/^\/+/, "").replace(/[\\/]+/g, "-");
+  const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const transcriptDir = path.join(cursorProjectsDir, projectSlug, "agent-transcripts", sessionId);
+  const transcriptFile = path.join(transcriptDir, `${sessionId}.jsonl`);
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(transcriptDir, { recursive: true });
+
+  const previousCursorProjectsDir = process.env.CURSOR_PROJECTS_DIR;
+  process.env.CURSOR_PROJECTS_DIR = cursorProjectsDir;
+
+  const transcriptLines = [
+    JSON.stringify({
+      role: "user",
+      message: {
+        content: [
+          { type: "text", text: "<user_query>\nPatch the README spacing\n</user_query>" }
+        ]
+      }
+    }),
+    JSON.stringify({
+      role: "assistant",
+      model: "claude-3.7-sonnet",
+      message: {
+        content: [
+          { type: "tool_use", name: "Edit", input: { file_path: "/tmp/project/README.md" } },
+          { type: "text", text: "Updated the README spacing." }
+        ]
+      }
+    })
+  ].join("\n") + "\n";
+
+  try {
+    await writeFile(transcriptFile, transcriptLines);
+
+    const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+    assert.equal(snapshot.agents.length, 1);
+    assert.equal(snapshot.agents[0].state, "editing");
+    assert.equal(snapshot.agents[0].isOngoing, true);
+    assert.equal(snapshot.agents[0].sourceKind, "cursor:claude-3.7-sonnet");
+    assert.equal(snapshot.agents[0].latestMessage, "Updated the README spacing.");
+    assert.equal(snapshot.events.length, 1);
+    assert.equal(snapshot.events[0].method, "cursor/local/agentMessage");
+  } finally {
+    if (typeof previousCursorProjectsDir === "string") {
+      process.env.CURSOR_PROJECTS_DIR = previousCursorProjectsDir;
+    } else {
+      delete process.env.CURSOR_PROJECTS_DIR;
+    }
+  }
+});
+
 test("cursor diagnostics report when the api key is missing", { concurrency: false }, async () => {
   const previousValue = process.env.CURSOR_API_KEY;
   const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
@@ -810,7 +1083,7 @@ test("cursor diagnostics report when the api key is missing", { concurrency: fal
   try {
     assert.equal(cursorApiKeyConfigured(), false);
     assert.equal(
-      await describeCursorAgentAvailability("/mnt/f/AI/CodexAgentsOffice"),
+      await describeCursorAgentAvailability("/workspaces/CodexAgentsOffice"),
       "Cursor background agents disabled: CURSOR_API_KEY is not configured for this process."
     );
   } finally {
@@ -900,10 +1173,10 @@ test("cursor agents match the current repo when Cursor reports a PR URL instead 
     cursorAgentMatchesRepository(
       {
         source: {
-          prUrl: "https://github.com/Kundara/CodexAgentsOffice/pull/123"
+          prUrl: "https://github.com/example-org/CodexAgentsOffice/pull/123"
         }
       },
-      "https://github.com/Kundara/CodexAgentsOffice.git"
+      "https://github.com/example-org/CodexAgentsOffice.git"
     ),
     true
   );
@@ -911,10 +1184,10 @@ test("cursor agents match the current repo when Cursor reports a PR URL instead 
     cursorAgentMatchesRepository(
       {
         target: {
-          prUrl: "https://github.com/Kundara/CodexAgentsOffice/pull/456"
+          prUrl: "https://github.com/example-org/CodexAgentsOffice/pull/456"
         }
       },
-      "git@github.com:Kundara/CodexAgentsOffice.git"
+      "git@github.com:example-org/CodexAgentsOffice.git"
     ),
     true
   );

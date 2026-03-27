@@ -57,16 +57,17 @@
   Official local CLI surface for listing and resuming prior Cursor Agent conversations.
 - [Cursor API Keys](https://cursor.com/docs/advanced/api-keys)
   BYOK model and account-level API-key behavior.
+- [Cursor community forum: recovered vanished chat](https://forum.cursor.com/t/how-i-recovered-my-vanished-cursor-chat-so-you-dont-have-to/151158)
+  Useful field report showing the split between workspace sidebar state and the global Cursor conversation database when local chat history goes missing.
+- [AgentBase Cursor message history notes](https://github.com/AgentOrchestrator/AgentBase/blob/5c26fc2935d4db34b801267af5994a14170f4f3f/docs/CURSOR_MESSAGE_HISTORY.md)
+  Community reverse-engineering notes covering `agent-transcripts`, workspace `ItemTable`, and global `cursorDiskKV` storage layers.
 
 ## Visual / asset references
 
 - [PixelOffice asset pack](https://2dpig.itch.io/)
   Source style reference for the office visuals used in this repo.
-- Local asset pack:
-  - `/mnt/c/Users/kunda/Downloads/PixelOffice/PixelOfficeAssets.png`
-  - `/mnt/c/Users/kunda/Downloads/PixelOffice/PixelOfficeAssets.aseprite`
-  - `/mnt/c/Users/kunda/Downloads/PixelOffice/PixelOffice.png`
-  - `/mnt/c/Users/kunda/Downloads/PixelOffice/LargePixelOffice.png`
+- Local source assets are intentionally not listed here with machine-specific paths.
+  Keep any downloaded PixelOffice source files outside the repo and document them with repo-relative notes only if they become part of the shipped workflow.
 
 ## Aseprite
 

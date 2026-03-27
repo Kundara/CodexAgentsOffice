@@ -4,11 +4,11 @@
 
 Render Codex work as a room-based "agent office" without depending on private internals. The current pass keeps the official Codex integration surface and renders active workload as room-based office stations built from PixelOffice assets.
 
-Behavior and renderer expectations now live in [docs/spec.md](/mnt/f/AI/CodexAgentsOffice/docs/spec.md). This file stays focused on system structure and module boundaries.
+Behavior and renderer expectations now live in [docs/spec.md](./spec.md). This file stays focused on system structure and module boundaries.
 
 ## Codex hook strategy
 
-The detailed hook inventory now lives in [docs/integration-hooks.md](/mnt/f/AI/CodexAgentsOffice/docs/integration-hooks.md). This file stays focused on architecture and product shape.
+The detailed hook inventory now lives in [docs/integration-hooks.md](./integration-hooks.md). This file stays focused on architecture and product shape.
 
 1. `codex app-server`
 
@@ -65,6 +65,7 @@ The live browser path now uses a hybrid approach:
 - reread desktop rollout threads can synthesize message notifications from the newest assistant text when the live subscription path is degraded
 - streamed `item/agentMessage/delta` notifications are intentionally opted out on the observer connection; reply toasts prefer full reply items or reread thread messages
 - non-final commentary messages on interrupted desktop turns are still treated as active work so subscribed agents do not briefly vacate their desk between commentary updates
+- completed process-only items such as `reasoning` or `contextCompaction` now settle out of synthetic `thinking` once the turn is done, so finished desktop threads do not keep reading as active
 - periodic discovery still runs so newly created sessions appear without a page refresh
 
 In fleet mode, every discovered workspace now keeps a live `ProjectLiveMonitor`. Selection in the UI only changes what is centered in the browser; it does not rebuild the live monitor set.
@@ -105,7 +106,8 @@ Sources:
 - map and terminal-style views through `?view=map|terminal`
 - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
 - local threads remain seated while the thread is still ongoing, even if they pause between visible events or the latest turn already looks done
-- once a thread actually stops, it remains seated for a short 2-second grace window so final replies are still readable
+- once a top-level thread actually stops, it keeps its workstation for a short 5-second cooldown so the final reply remains readable before it cools into rec-area visibility
+- stale local `notLoaded` sessions no longer occupy desks just because they are still recent; workstation seating now requires true ongoing work or the explicit stop cooldown
 - after that grace window, only recent top-level lead sessions cool down into the rec area; finished subagents despawn instead of idling there
 - lead sessions with more than one active subagent now use a slimmer left-side lead lane with a distinct floor treatment and horizontal separators, instead of a large boxed office
 - session panel includes a durable cross-project "needs you" queue for approval/input waits
@@ -311,14 +313,17 @@ This is useful because it broadens observability across the machine, but it shou
 
 Cursor support now has two paths:
 
-- a local inferred adapter that reads Cursor workspace storage and recent logs for repos opened in the local Cursor app
+- a local inferred adapter that prefers Cursor agent transcripts under `~/.cursor/projects/*/agent-transcripts/*.jsonl`, then falls back to workspace storage and recent logs for older/local-only state
 - the official cloud-agent API when `CURSOR_API_KEY` is configured or a saved app-level Cursor API key exists
 
 The local inferred adapter:
 
+- discovers Cursor project transcript folders from `~/.cursor/projects/<project-slug>/agent-transcripts`
+- reads transcript JSONL directly for Cursor Agent sessions so recent local prompts and replies come from the actual chat transcript instead of only from workspace sidebar metadata
 - discovers recent Cursor workspaces from `User/workspaceStorage/*/workspace.json`
-- parses `state.vscdb` / `state.vscdb.backup` directly to recover composer, prompt, generation, and background-composer state even when SQLite page boundaries fragment the stored JSON
+- falls back to parsing `state.vscdb` / `state.vscdb.backup` directly to recover composer, prompt, generation, and background-composer state when transcript files are unavailable
 - infers current local Cursor work by matching the stored workspace root back onto the selected project
+- prefers `lastFocusedComposerIds` plus nearest generation timing over stale `selectedComposerIds` tab order when picking the primary local Cursor chat
 - suppresses stale retained composers so fresh workspace activity only lights up the current/recent local Cursor work instead of every old chat tab
 - renders those local sessions with `source = cursor` and `confidence = inferred`
 
@@ -326,6 +331,7 @@ The cloud typed adapter:
 
 - matches agents to the selected project by normalized git `remote.origin.url`, `source.repository`, or PR-backed repository URLs when Cursor reports `source.prUrl` or `target.prUrl`
 - polls the official agent conversation endpoint for active/recent Cursor agents so newly seen prompts and replies can flow into the shared toast/event model
+- keeps typed prompt/input history distinct from assistant/output history so only Cursor replies render as visible agent speech or text toasts
 - renders Cursor cloud agents in the same room and session model with `confidence = typed`
 - surfaces typed status, summary, branch, repo, and target URL data
 

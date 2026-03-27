@@ -51,15 +51,15 @@ test("OpenClaw terminal statuses map to done or blocked office states", () => {
 
 test("OpenClaw workspace matching uses the shared project-path normalization", () => {
   assert.equal(
-    openClawWorkspaceMatchesProject("F:\\AI\\CodexAgentsOffice", "/mnt/f/AI/CodexAgentsOffice"),
+    openClawWorkspaceMatchesProject("F:\\Projects\\CodexAgentsOffice", "/mnt/f/Projects/CodexAgentsOffice"),
     true
   );
   assert.equal(
-    openClawWorkspaceMatchesProject("/mnt/f/AI/SomewhereElse", "/mnt/f/AI/CodexAgentsOffice"),
+    openClawWorkspaceMatchesProject("/mnt/f/Projects/SomewhereElse", "/mnt/f/Projects/CodexAgentsOffice"),
     false
   );
   assert.equal(
-    openClawSessionWorkspaceLabel("/mnt/f/AI/CodexAgentsOffice"),
+    openClawSessionWorkspaceLabel("/mnt/f/Projects/CodexAgentsOffice"),
     "CodexAgentsOffice"
   );
 });

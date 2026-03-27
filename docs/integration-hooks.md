@@ -63,6 +63,7 @@ Current use:
 - unsubscribes stale observer-owned subscriptions with `thread/unsubscribe`
 - parses app-server notifications
 - parses server-initiated JSON-RPC requests such as approvals and input prompts
+- summarizes `turn/plan/updated` from the documented `{ explanation?, plan }` payload and `turn/diff/updated` from the documented `{ diff }` payload
 
 Important note:
 
@@ -73,6 +74,17 @@ Important note:
 - the observer does not answer approval/input requests; it only visualizes them
 
 This means app-server is now both the main truth source and the first-class local event bus for browser notifications.
+
+Signals currently left on the table from the official app-server events page:
+
+- `thread/tokenUsage/updated`
+- `fuzzyFileSearch/sessionUpdated`
+- `fuzzyFileSearch/sessionCompleted`
+- `windowsSandbox/setupCompleted`
+
+Current stance:
+
+- these notifications are documented and valid, but they do not currently affect workload state, toast rendering, or browser office occupancy
 
 Resolution details:
 
@@ -187,7 +199,9 @@ Current-workload occupancy rules on top of that state:
 - a `notLoaded` thread still stays `isCurrent` when `thread/read` shows its latest turn is `inProgress`
 - observer-owned unload/runtime-idle transitions such as `thread/closed` or `thread/status/changed -> notLoaded` are not treated as stop signals by themselves; the monitor confirms stops from turn-terminal events plus reread thread state
 - local desk occupancy no longer uses a generic freshness fallback for non-idle summaries; if a thread is not ongoing, not waiting on the user, and not inside the stop grace window, it is no longer `isCurrent`
-- once the thread actually stops, it stays `isCurrent` for about 2 seconds so its final reply can still be read before it leaves the desk
+- once a top-level thread actually stops, it remains current and workstation-seated for about 5 seconds so final reply text can still surface before the lead cools into rec-area visibility
+- stale local `notLoaded` threads no longer keep a workstation just because they are still recent or subscribed; desk seating now requires actual ongoing work or the explicit stop grace
+- completed process-only items such as `plan`, `reasoning`, and `contextCompaction` now settle to `done` while recent and then `idle` once stale instead of leaving the thread in synthetic `planning` or `thinking`
 - non-local `idle` sessions still drop out of current-workload filtering immediately
 
 In the browser this becomes:
@@ -215,11 +229,11 @@ Current item-to-state mapping:
 | `dynamicToolCall` | `scanning` or `blocked` | active worker, tool-call summary |
 | `collabAgentToolCall` | `delegating` | active worker, delegation summary |
 | `collabToolCall` | `delegating` | active worker, subagent spawn/wait summary |
-| `plan` | `planning` | active worker, planning summary |
-| `reasoning` | `thinking` | active worker, thinking summary |
+| `plan` | `planning` or `done` | planning summary while in progress, recent finished summary once the turn completes |
+| `reasoning` | `thinking` or `done` | thinking summary while in progress, recent finished summary once the turn completes |
 | `enteredReviewMode` | `validating` | review-start summary and icon coverage |
 | `exitedReviewMode` | `thinking` or `done` | review-finished summary and icon coverage |
-| `contextCompaction` | `thinking` | compaction summary and icon coverage |
+| `contextCompaction` | `thinking` or `done` | compaction summary while active, recent finished summary once the turn completes |
 | `agentMessage` | `thinking` or `done` | message summary, live notification when subscribed, fallback notification from reread desktop threads |
 | `userMessage` | `planning` or `idle` | assigned-work summary and icon coverage |
 
@@ -328,11 +342,15 @@ What we read from Codex:
 
 How we use it:
 
-- normalize tool-call requests into typed `DashboardEvent.kind = tool`
+- normalize dynamic-tool server requests into typed `DashboardEvent.kind = tool`
 - keep dynamic tool activity visible in the local thread summary path
 - resolve toast icons from exact method-shaped asset paths such as `sprites/icons/item/tool/call.svg`
 - resolve semantic thread-item icons from `sprites/icons/thread-item/*.svg` or reused exact-method icons
 - expose a visual verification surface at `/icon-audit` so every thread-item icon can be inspected side by side
+
+Important note:
+
+- the official Codex app-server events page currently documents `item/tool/call` as the experimental client-executed dynamic-tool request path, not as an MCP-specific event
 
 ### Subagent metadata
 
@@ -641,15 +659,19 @@ Primary code path:
 
 What we read:
 
+- Cursor `~/.cursor/projects/*/agent-transcripts/*.jsonl`
 - Cursor `User/workspaceStorage/*/workspace.json`
 - Cursor `state.vscdb` and `state.vscdb.backup`
 - recent Cursor `logs/*/main.log` wakelock activity for `reason="agent-loop"`
 
 How we use it:
 
+- prefer transcript-backed local Cursor Agent sessions when project-matched `agent-transcripts` exist
+- read recent local prompts and replies from transcript JSONL so the office view reflects the real Cursor Agent chat stream
 - discover local Cursor workspaces and map them onto projects by normalized workspace root
-- parse fragmented Composer, prompt, generation, and background-composer JSON directly from raw SQLite bytes
-- infer current local Cursor session state, recent prompt text, branch, and light activity
+- fall back to fragmented Composer, prompt, generation, and background-composer JSON parsed directly from raw SQLite bytes when transcripts are unavailable
+- infer current local Cursor session state, recent prompt or reply text, branch, and light activity
+- prefer `lastFocusedComposerIds` plus generation recency over stale `selectedComposerIds` tab order when deciding which local Cursor chat is actually active
 - keep stale retained composers out of the live workload view so one new chat does not fan out into several fake active agents
 - render those sessions as read-only with `confidence = inferred`
 
@@ -687,6 +709,7 @@ How this project uses that surface:
 - reads the official Cursor API when `CURSOR_API_KEY` is configured or a Cursor API key has been saved through the web Settings popup
 - follows `GET /v0/agents` pagination through `cursor` / `nextCursor`
 - polls `GET /v0/agents/{id}/conversation` for active or recently updated agents and maps newly seen messages into typed office message events
+- keeps `user_message` and local prompt history separate from assistant/output speech so only replies surface as visible message toasts
 - authenticates against the current API surface and falls back to the older bearer form for compatibility
 - matches agents by normalized repository URL, including PR-backed repository URLs
 - maps agent status into shared workload state

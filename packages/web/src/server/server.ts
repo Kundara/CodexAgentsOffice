@@ -11,6 +11,8 @@ export async function startWebServer(argv: string[] = process.argv.slice(2)): Pr
   const service = new FleetLiveService(options.projects, options.explicitProjects);
   const meta = buildServerMeta(options, options.projects, service.getMultiplayerStatus());
 
+  await service.start();
+
   const server = createServer((request, response) => {
     void handleRequest(request, response, options, service).catch((error) => {
       sendJson(response, 500, {
@@ -32,10 +34,6 @@ export async function startWebServer(argv: string[] = process.argv.slice(2)): Pr
   console.log(
     `Agents Office Tower web listening on http://${options.host}:${options.port} pid=${meta.pid} build=${meta.buildAt} mode=${mode} scope=${scope}`
   );
-
-  void service.start().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-  });
 
   const shutdown = () => {
     void service.stop().finally(() => {

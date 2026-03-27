@@ -6,6 +6,8 @@
 
 Browser office view, terminal snapshot, and VS Code panel for current Codex, Claude, Cursor, and OpenClaw work.
 
+<img src="docs/images/tower-preview.png" alt="Agents Office Tower preview" width="520" />
+
 [Quick start](#quick-start) • [Support matrix](#support-matrix) • [How it works](#how-it-works) • [Docs](#docs)
 
 </div>
@@ -26,6 +28,12 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 - Current-workload-first scene with subtle recent history.
 - Shared model across all renderers.
 - External bundled browser assets under `packages/web/dist/client` instead of inline HTML script/style payloads.
+
+Browser workload behavior:
+
+- desks are for truly ongoing work plus a short top-level done cooldown of about 5 seconds
+- the rec area holds recent resting lead sessions, not stale active-looking placeholders
+- stale local `notLoaded` threads and completed process-only items like context compaction no longer count as active desk work after the turn has actually finished
 
 ## Support matrix
 

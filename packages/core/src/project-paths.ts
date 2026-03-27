@@ -43,7 +43,18 @@ export function canonicalizeProjectPath(input: string | null | undefined): strin
 }
 
 export function projectLabelFromRoot(projectRoot: string): string {
-  return basename(projectRoot) || projectRoot;
+  return humanizeProjectLabel(basename(projectRoot) || projectRoot);
+}
+
+export function humanizeProjectLabel(label: string): string {
+  const normalized = String(label || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
 export function sameProjectPath(left: string | null | undefined, right: string | null | undefined): boolean {

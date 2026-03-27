@@ -41,11 +41,9 @@ export class FleetLiveService {
     this.cloudTimer = setInterval(() => {
       void this.refreshSharedCloudTasks();
     }, FleetLiveService.CLOUD_REFRESH_INTERVAL_MS);
-    void (async () => {
-      await this.ensureProjectSet(true);
-      await this.refreshSharedCloudTasks();
-      await this.publish();
-    })();
+    await this.ensureProjectSet(true);
+    await this.refreshSharedCloudTasks();
+    await this.publish();
   }
 
   async stop(): Promise<void> {

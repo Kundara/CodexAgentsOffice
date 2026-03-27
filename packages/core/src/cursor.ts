@@ -84,6 +84,37 @@ interface CursorLocalWorkspaceState {
   backgroundComposer: CursorBackgroundComposerData | null;
 }
 
+interface CursorTranscriptContentPart {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+interface CursorTranscriptLine {
+  role?: string;
+  model?: string;
+  message?: {
+    model?: string;
+    content?: CursorTranscriptContentPart[];
+    usage?: Record<string, unknown>;
+  };
+  usage?: Record<string, unknown>;
+}
+
+interface CursorTranscriptSessionSummary {
+  sessionId: string;
+  filePath: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  initialPrompt: string | null;
+  latestUserText: string | null;
+  latestAssistantText: string | null;
+  latestRole: "user" | "assistant" | null;
+  latestToolState: ActivityState | null;
+  model: string | null;
+}
+
 interface CursorAgentLoopState {
   active: boolean;
   updatedAtMs: number | null;
@@ -241,6 +272,142 @@ async function cursorLogsDir(): Promise<string | null> {
 
   const logsDir = join(userDataDir, "logs");
   return await pathExists(logsDir) ? logsDir : null;
+}
+
+async function cursorProjectsDirs(): Promise<string[]> {
+  const candidates = new Set<string>();
+
+  const explicit = canonicalizeProjectPath(process.env.CURSOR_PROJECTS_DIR);
+  if (explicit) {
+    candidates.add(explicit);
+  }
+
+  const homeDir = canonicalizeProjectPath(process.env.HOME);
+  if (homeDir) {
+    candidates.add(join(homeDir, ".cursor", "projects"));
+  }
+
+  if (await pathExists("/mnt/c/Users")) {
+    try {
+      const users = await readdir("/mnt/c/Users", { withFileTypes: true });
+      for (const entry of users) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        candidates.add(`/mnt/c/Users/${entry.name}/.cursor/projects`);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const available: string[] = [];
+  for (const candidate of candidates) {
+    if (candidate && await pathExists(candidate)) {
+      available.push(candidate);
+    }
+  }
+
+  return available;
+}
+
+function cursorProjectKeyCandidates(projectRoot: string): string[] {
+  const canonicalRoot = canonicalizeProjectPath(projectRoot);
+  if (!canonicalRoot) {
+    return [];
+  }
+
+  const candidates = new Set<string>();
+  const unixStyle = canonicalRoot.replace(/^\/+/, "").replace(/[\\/]+/g, "-");
+  if (unixStyle.length > 0) {
+    candidates.add(unixStyle);
+  }
+
+  const windowsMountMatch = canonicalRoot.match(/^\/mnt\/([a-zA-Z])\/(.+)$/);
+  if (windowsMountMatch) {
+    const rest = windowsMountMatch[2].replace(/[\\/]+/g, "-");
+    candidates.add(`${windowsMountMatch[1].toLowerCase()}-${rest}`);
+    candidates.add(`${windowsMountMatch[1].toUpperCase()}-${rest}`);
+  }
+
+  return [...candidates];
+}
+
+async function cursorTranscriptDir(projectRoot: string): Promise<string | null> {
+  const projectKeys = cursorProjectKeyCandidates(projectRoot);
+  if (projectKeys.length === 0) {
+    return null;
+  }
+
+  const projectDirs = await cursorProjectsDirs();
+  for (const baseDir of projectDirs) {
+    for (const projectKey of projectKeys) {
+      const candidate = join(baseDir, projectKey, "agent-transcripts");
+      if (await pathExists(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function cursorTranscriptFiles(projectRoot: string): Promise<Array<{
+  sessionId: string;
+  filePath: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}>> {
+  const transcriptsDir = await cursorTranscriptDir(projectRoot);
+  if (!transcriptsDir) {
+    return [];
+  }
+
+  const entries = await readdir(transcriptsDir, { withFileTypes: true }).catch(() => []);
+  const files: Array<{
+    sessionId: string;
+    filePath: string;
+    createdAtMs: number;
+    updatedAtMs: number;
+  }> = [];
+
+  for (const entry of entries) {
+    const sessionId = entry.name.replace(/\.jsonl$/i, "");
+    let filePath: string | null = null;
+
+    if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      filePath = join(transcriptsDir, entry.name);
+    } else if (entry.isDirectory()) {
+      const nested = join(transcriptsDir, entry.name, `${entry.name}.jsonl`);
+      if (await pathExists(nested)) {
+        filePath = nested;
+      } else {
+        const nestedEntries = await readdir(join(transcriptsDir, entry.name), { withFileTypes: true }).catch(() => []);
+        const nestedFile = nestedEntries.find((candidate) => candidate.isFile() && candidate.name.endsWith(".jsonl")) ?? null;
+        if (nestedFile) {
+          filePath = join(transcriptsDir, entry.name, nestedFile.name);
+        }
+      }
+    }
+
+    if (!filePath) {
+      continue;
+    }
+
+    const fileStats = await stat(filePath).catch(() => null);
+    if (!fileStats?.isFile()) {
+      continue;
+    }
+
+    files.push({
+      sessionId,
+      filePath,
+      createdAtMs: fileStats.birthtimeMs || fileStats.ctimeMs || fileStats.mtimeMs,
+      updatedAtMs: fileStats.mtimeMs
+    });
+  }
+
+  return files.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
 }
 
 async function loadCursorWorkspaceEntries(limit = 50): Promise<CursorWorkspaceEntry[]> {
@@ -616,8 +783,8 @@ function orderedCursorComposers(composerData: CursorComposerData | null): Cursor
   const activeComposers = composerData.allComposers.filter((composer) => composer && composer.isArchived !== true);
   const byId = new Map(activeComposers.map((composer) => [composer.composerId, composer]));
   const orderedIds = [
-    ...(Array.isArray(composerData.selectedComposerIds) ? composerData.selectedComposerIds : []),
     ...(Array.isArray(composerData.lastFocusedComposerIds) ? composerData.lastFocusedComposerIds : []),
+    ...(Array.isArray(composerData.selectedComposerIds) ? composerData.selectedComposerIds : []),
     ...activeComposers
       .slice()
       .sort((left, right) => cursorComposerTimestamp(right) - cursorComposerTimestamp(left))
@@ -639,6 +806,30 @@ function orderedCursorComposers(composerData: CursorComposerData | null): Cursor
   }
 
   return ordered;
+}
+
+function cursorPrimaryComposerId(
+  composerData: CursorComposerData | null,
+  latestGenerationMs: number
+): string | null {
+  const composers = orderedCursorComposers(composerData);
+  if (composers.length === 0) {
+    return null;
+  }
+
+  if (Number.isFinite(latestGenerationMs) && latestGenerationMs > 0) {
+    const matchedComposer = composers
+      .map((composer) => ({
+        composer,
+        distanceMs: Math.abs(cursorComposerTimestamp(composer) - latestGenerationMs)
+      }))
+      .sort((left, right) => left.distanceMs - right.distanceMs)[0] ?? null;
+    if (matchedComposer && matchedComposer.distanceMs <= CURSOR_LOCAL_ACTIVE_WINDOW_MS) {
+      return matchedComposer.composer.composerId;
+    }
+  }
+
+  return composers[0]?.composerId ?? null;
 }
 
 async function cursorAgentLoopState(): Promise<CursorAgentLoopState> {
@@ -694,6 +885,187 @@ function cursorLocalPromptDetail(prompt: string | null, fallback: string): strin
   return fallback;
 }
 
+function cleanCursorTranscriptUserText(text: string): string | null {
+  const normalized = text
+    .replace(/<\/?user_query>/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function cleanCursorTranscriptAssistantText(text: string): string | null {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function cursorTranscriptContentText(
+  role: "user" | "assistant",
+  content: CursorTranscriptContentPart[] | undefined
+): string | null {
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const joined = content
+    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text ?? "")
+    .join(" ");
+  if (!joined.trim()) {
+    return null;
+  }
+
+  return role === "user"
+    ? cleanCursorTranscriptUserText(joined)
+    : cleanCursorTranscriptAssistantText(joined);
+}
+
+function cursorTranscriptToolState(toolName: string | null | undefined): ActivityState | null {
+  const normalized = typeof toolName === "string" ? toolName.trim().toLowerCase() : "";
+  switch (normalized) {
+    case "edit":
+    case "editfile":
+    case "edit_file":
+    case "edit_file_v2":
+    case "strreplace":
+    case "write":
+    case "writefile":
+    case "applypatch":
+    case "apply_patch":
+    case "search_replace":
+      return "editing";
+    case "shell":
+    case "run_terminal_cmd":
+    case "run_terminal_command_v2":
+      return "running";
+    case "read":
+    case "readfile":
+    case "read_file":
+    case "read_file_v2":
+    case "grep":
+    case "glob":
+    case "list":
+    case "ls":
+    case "list_dir":
+    case "list_dir_v2":
+    case "ripgrep":
+    case "ripgrep_raw_search":
+    case "semantic_search_full":
+    case "codebase_search":
+      return "scanning";
+    case "task":
+    case "task_v2":
+      return "delegating";
+    case "todowrite":
+    case "create_plan":
+      return "planning";
+    default:
+      return null;
+  }
+}
+
+function cursorTranscriptLatestToolState(content: CursorTranscriptContentPart[] | undefined): ActivityState | null {
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const state = cursorTranscriptToolState(content[index]?.name);
+    if (state) {
+      return state;
+    }
+  }
+
+  return null;
+}
+
+async function summariseCursorTranscriptSession(file: {
+  sessionId: string;
+  filePath: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}): Promise<CursorTranscriptSessionSummary | null> {
+  const raw = await readFile(file.filePath, "utf8").catch(() => null);
+  if (!raw) {
+    return null;
+  }
+
+  let initialPrompt: string | null = null;
+  let latestUserText: string | null = null;
+  let latestAssistantText: string | null = null;
+  let latestRole: "user" | "assistant" | null = null;
+  let latestToolState: ActivityState | null = null;
+  let model: string | null = null;
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    let parsed: CursorTranscriptLine | null = null;
+    try {
+      parsed = JSON.parse(line) as CursorTranscriptLine;
+    } catch {
+      continue;
+    }
+    if (!parsed) {
+      continue;
+    }
+
+    const role = parsed.role === "user" || parsed.role === "assistant" ? parsed.role : null;
+    if (!role) {
+      continue;
+    }
+
+    const content = Array.isArray(parsed.message?.content) ? parsed.message.content : [];
+    const text = cursorTranscriptContentText(role, content);
+    if (!model) {
+      const candidateModel = parsed.model ?? parsed.message?.model ?? null;
+      model = typeof candidateModel === "string" && candidateModel.trim().length > 0
+        ? candidateModel.trim()
+        : null;
+    }
+
+    if (role === "user") {
+      if (!initialPrompt && text) {
+        initialPrompt = text;
+      }
+      if (text) {
+        latestUserText = text;
+        latestRole = "user";
+      }
+      continue;
+    }
+
+    const toolState = cursorTranscriptLatestToolState(content);
+    if (text) {
+      latestAssistantText = text;
+    }
+    if (text || toolState) {
+      latestRole = "assistant";
+    }
+    if (toolState) {
+      latestToolState = toolState;
+    }
+  }
+
+  if (!initialPrompt && !latestUserText && !latestAssistantText) {
+    return null;
+  }
+
+  return {
+    sessionId: file.sessionId,
+    filePath: file.filePath,
+    createdAtMs: file.createdAtMs,
+    updatedAtMs: file.updatedAtMs,
+    initialPrompt,
+    latestUserText,
+    latestAssistantText,
+    latestRole,
+    latestToolState,
+    model
+  };
+}
+
 function cursorLocalLabel(composer: CursorComposerSummary, prompt: string | null): string {
   const name = typeof composer.name === "string" ? composer.name.trim() : "";
   if (name.length > 0) {
@@ -724,6 +1096,25 @@ function cursorLocalDetail(composer: CursorComposerSummary, prompt: string | nul
     return cursorLocalPromptDetail(prompt, "Cursor local");
   }
   return state === "idle" ? "Idle" : "Cursor local";
+}
+
+function cursorTranscriptActivityState(summary: CursorTranscriptSessionSummary, now: number): {
+  state: ActivityState;
+  isOngoing: boolean;
+} {
+  const ageMs = now - summary.updatedAtMs;
+  if (ageMs <= CURSOR_LOCAL_ACTIVE_WINDOW_MS) {
+    if (summary.latestToolState) {
+      return { state: summary.latestToolState, isOngoing: true };
+    }
+    return { state: "thinking", isOngoing: true };
+  }
+
+  if (ageMs <= CURSOR_LOCAL_DONE_WINDOW_MS) {
+    return { state: "done", isOngoing: false };
+  }
+
+  return { state: "idle", isOngoing: false };
 }
 
 function cursorLocalActivityState(input: {
@@ -767,6 +1158,34 @@ function cursorLocalActivityState(input: {
   return { state: "idle", isOngoing: false };
 }
 
+function cursorTranscriptMessageEvent(input: {
+  projectRoot: string;
+  sessionId: string;
+  role: "user" | "assistant" | null;
+  detail: string | null;
+  createdAtMs: number;
+}): DashboardEvent | null {
+  if (!input.role || !input.detail || Date.now() - input.createdAtMs > CURSOR_LOCAL_EVENT_WINDOW_MS) {
+    return null;
+  }
+
+  return {
+    id: `${input.projectRoot}::cursor-local::${input.sessionId}::${input.createdAtMs}`,
+    source: "cursor",
+    confidence: "inferred",
+    threadId: input.sessionId,
+    createdAt: new Date(input.createdAtMs).toISOString(),
+    method: input.role === "user" ? "cursor/local/userMessage" : "cursor/local/agentMessage",
+    kind: "message",
+    phase: "updated",
+    title: input.role === "user" ? "Cursor prompt" : "Cursor reply",
+    detail: cursorLocalPromptDetail(input.detail, "Cursor local"),
+    path: input.projectRoot,
+    action: "said",
+    isImage: false
+  };
+}
+
 function cursorLocalPromptEvent(
   projectRoot: string,
   composerId: string,
@@ -794,10 +1213,139 @@ function cursorLocalPromptEvent(
   };
 }
 
+async function gitCurrentBranch(projectRoot: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = stdout.trim();
+    return branch.length > 0 && branch !== "HEAD" ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadCursorTranscriptProjectSnapshotData(projectRoot: string, limit = cursorLocalSessionLimit()): Promise<{
+  agents: DashboardAgent[];
+  events: DashboardEvent[];
+}> {
+  const canonicalRoot = canonicalizeProjectPath(projectRoot);
+  if (!canonicalRoot) {
+    return { agents: [], events: [] };
+  }
+
+  const transcriptFiles = (await cursorTranscriptFiles(canonicalRoot)).slice(0, Math.max(limit, 24));
+  if (transcriptFiles.length === 0) {
+    return { agents: [], events: [] };
+  }
+
+  const summaries = (await Promise.all(transcriptFiles.map((file) => summariseCursorTranscriptSession(file))))
+    .filter((summary): summary is CursorTranscriptSessionSummary => summary !== null);
+  if (summaries.length === 0) {
+    return { agents: [], events: [] };
+  }
+
+  const now = Date.now();
+  const [originUrl, branch] = await Promise.all([
+    gitRemoteOriginUrl(canonicalRoot),
+    gitCurrentBranch(canonicalRoot)
+  ]);
+
+  const agents: DashboardAgent[] = [];
+  const events: DashboardEvent[] = [];
+  for (const summary of summaries.slice(0, limit)) {
+    const { state, isOngoing } = cursorTranscriptActivityState(summary, now);
+    if (state === "idle" && !isOngoing) {
+      continue;
+    }
+
+    const labelText = summary.initialPrompt
+      ?? summary.latestUserText
+      ?? summary.latestAssistantText
+      ?? `Cursor ${summary.sessionId.slice(0, 4)}`;
+    const detailText = summary.latestAssistantText
+      ?? summary.latestUserText
+      ?? summary.initialPrompt
+      ?? "Cursor local";
+    const activityText = summary.latestRole === "assistant"
+      ? (summary.latestAssistantText ?? detailText)
+      : (summary.latestUserText ?? summary.initialPrompt ?? detailText);
+    const updatedAt = new Date(summary.updatedAtMs || now).toISOString();
+    const appearance = await ensureAgentAppearance(canonicalRoot, `cursor-local:${summary.sessionId}`);
+    const activityEvent: AgentActivityEvent | null = activityText
+      ? {
+        type: summary.latestRole === "user" ? "userMessage" : "agentMessage",
+        action: "said",
+        path: canonicalRoot,
+        title: cursorLocalPromptDetail(activityText, "Cursor local"),
+        isImage: false
+      }
+      : null;
+
+    agents.push({
+      id: `cursor-local:${summary.sessionId}`,
+      label: cursorLocalPromptDetail(labelText, `Cursor ${summary.sessionId.slice(0, 4)}`),
+      source: "cursor",
+      sourceKind: summary.model ? `cursor:${summary.model}` : "cursor:local:agent-transcript",
+      parentThreadId: null,
+      depth: 0,
+      isCurrent: false,
+      isOngoing,
+      statusText: summary.model ?? "agent transcript",
+      role: "cursor",
+      nickname: null,
+      isSubagent: false,
+      state,
+      detail: cursorLocalPromptDetail(detailText, "Cursor local"),
+      cwd: canonicalRoot,
+      roomId: null,
+      appearance,
+      updatedAt,
+      stoppedAt: isOngoing ? null : updatedAt,
+      paths: [canonicalRoot],
+      activityEvent,
+      latestMessage: summary.latestAssistantText,
+      threadId: summary.sessionId,
+      taskId: null,
+      resumeCommand: null,
+      url: null,
+      git: {
+        sha: null,
+        branch,
+        originUrl
+      },
+      provenance: "cursor",
+      confidence: "inferred",
+      needsUser: null,
+      liveSubscription: "readOnly",
+      network: null
+    });
+
+    const event = cursorTranscriptMessageEvent({
+      projectRoot: canonicalRoot,
+      sessionId: summary.sessionId,
+      role: summary.latestRole,
+      detail: activityText,
+      createdAtMs: summary.updatedAtMs
+    });
+    if (event) {
+      events.push(event);
+    }
+  }
+
+  return {
+    agents: agents.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    events: events.sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  };
+}
+
 export async function loadCursorLocalProjectSnapshotData(projectRoot: string, limit = cursorLocalSessionLimit()): Promise<{
   agents: DashboardAgent[];
   events: DashboardEvent[];
 }> {
+  const transcriptSnapshot = await loadCursorTranscriptProjectSnapshotData(projectRoot, limit);
+  if (transcriptSnapshot.agents.length > 0) {
+    return transcriptSnapshot;
+  }
+
   const canonicalRoot = canonicalizeProjectPath(projectRoot);
   if (!canonicalRoot) {
     return { agents: [], events: [] };
@@ -830,6 +1378,7 @@ export async function loadCursorLocalProjectSnapshotData(projectRoot: string, li
     ? latestGeneration.textDescription.trim()
     : latestPrompt;
   const latestGenerationMs = latestGeneration?.unixMs ?? 0;
+  const primaryComposerId = cursorPrimaryComposerId(workspaceState.composerData, latestGenerationMs);
   const agentLoop = await cursorAgentLoopState();
   const now = Date.now();
 
@@ -837,8 +1386,8 @@ export async function loadCursorLocalProjectSnapshotData(projectRoot: string, li
   const events: DashboardEvent[] = [];
   const originUrl = await gitRemoteOriginUrl(canonicalRoot);
 
-  for (const [index, composer] of composers.entries()) {
-    const isPrimaryComposer = index === 0;
+  for (const composer of composers) {
+    const isPrimaryComposer = composer.composerId === primaryComposerId;
     const { state, isOngoing } = cursorLocalActivityState({
       composer,
       isPrimaryComposer,

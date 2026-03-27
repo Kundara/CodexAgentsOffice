@@ -78,6 +78,73 @@ function shorten(text: string, maxLength = 88): string {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
+function summarizePlanUpdate(params: Record<string, unknown>): string {
+  const explanation = asString(params.explanation);
+  if (explanation) {
+    return shorten(explanation);
+  }
+
+  const plan = Array.isArray(params.plan) ? params.plan : [];
+  const entries = plan
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .map((entry) => ({
+      step: asString(entry.step),
+      status: asString(entry.status)
+    }))
+    .filter((entry) => entry.step);
+
+  if (entries.length === 0) {
+    return "Plan";
+  }
+
+  const current =
+    entries.find((entry) => entry.status === "inProgress")
+    ?? entries.find((entry) => entry.status === "pending")
+    ?? entries.at(-1)
+    ?? null;
+
+  if (!current?.step) {
+    return "Plan";
+  }
+
+  const statusLabel =
+    current.status === "inProgress" ? "In progress"
+    : current.status === "pending" ? "Pending"
+    : current.status === "completed" ? "Completed"
+    : null;
+
+  return shorten(statusLabel ? `${statusLabel}: ${current.step}` : current.step);
+}
+
+function summarizeDiffUpdate(params: Record<string, unknown>): string {
+  const diff = asString(params.diff);
+  if (!diff) {
+    return "Diff";
+  }
+
+  const files = new Set<string>();
+  for (const line of diff.split(/\r?\n/)) {
+    const gitMatch = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    if (gitMatch) {
+      files.add(gitMatch[2] || gitMatch[1]);
+      continue;
+    }
+    const plusMatch = line.match(/^\+\+\+ b\/(.+)$/);
+    if (plusMatch && plusMatch[1] !== "/dev/null") {
+      files.add(plusMatch[1]);
+    }
+  }
+
+  if (files.size === 1) {
+    return shorten(Array.from(files)[0] || "Diff");
+  }
+  if (files.size > 1) {
+    return `${files.size} files changed`;
+  }
+  return shorten(diff);
+}
+
 function isMeaningfulAgentText(text: string | null | undefined): text is string {
   if (typeof text !== "string") {
     return false;
@@ -432,10 +499,6 @@ export function buildThreadReadAgentMessageEvent(
   };
 }
 
-function hasLoadedThreadHistory(thread: CodexThread | null): boolean {
-  return Boolean(thread && Array.isArray(thread.turns) && thread.turns.length > 0);
-}
-
 function buildEventFromItem(
   context: DashboardEventContext,
   method: string,
@@ -690,14 +753,14 @@ export function buildDashboardEventFromAppServerMessage(
         kind: "turn",
         phase: "updated",
         title: "Plan updated",
-        detail: shorten(asString(params.text) ?? "Plan")
+        detail: summarizePlanUpdate(params)
       });
     case "turn/diff/updated":
       return eventBase(context, method, params, {
         kind: "turn",
         phase: "updated",
         title: "Diff updated",
-        detail: shorten(asString(params.text) ?? "Diff")
+        detail: summarizeDiffUpdate(params)
       });
     case "item/started":
     case "item/completed":
@@ -783,8 +846,8 @@ export function buildDashboardEventFromAppServerMessage(
         itemId: extractItemId(params),
         kind: "tool",
         phase: "started",
-        title: "MCP tool call",
-        detail: shorten(asString(params.tool) ?? asString(params.name) ?? "MCP tool")
+        title: "Tool call requested",
+        detail: shorten(asString(params.tool) ?? asString(params.name) ?? "Tool")
       });
     case "serverRequest/resolved": {
       const pending = context.pendingRequest ?? null;
@@ -1161,6 +1224,7 @@ export class ProjectLiveMonitor extends EventEmitter {
   private readonly subscribedThreadIds = new Set<string>();
   private readonly ongoingThreadIds = new Set<string>();
   private readonly stoppedAtByThreadId = new Map<string, number>();
+  private readonly hydratedThreadIds = new Set<string>();
   private readonly threadRemovalTimers = new Map<string, NodeJS.Timeout>();
   private roomWatcher: FSWatcher | null = null;
   private snapshot: DashboardSnapshot | null = null;
@@ -1384,7 +1448,11 @@ export class ProjectLiveMonitor extends EventEmitter {
         }
       }
 
-      this.scheduleThreadSubscriptions();
+      if (this.snapshot === null) {
+        await this.syncThreadSubscriptions();
+      } else {
+        this.scheduleThreadSubscriptions();
+      }
       this.scheduleSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1464,7 +1532,7 @@ export class ProjectLiveMonitor extends EventEmitter {
             );
             this.subscribedThreadIds.add(threadId);
             loadedThreadIds.add(threadId);
-            this.scheduleThreadRefresh(threadId);
+            await this.refreshThread(threadId);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.addNote(`Thread subscribe failed (${threadId.slice(0, 8)}): ${message}`);
@@ -1575,6 +1643,7 @@ export class ProjectLiveMonitor extends EventEmitter {
     }
     this.ongoingThreadIds.delete(threadId);
     this.stoppedAtByThreadId.delete(threadId);
+    this.hydratedThreadIds.delete(threadId);
     this.subscribedThreadIds.delete(threadId);
   }
 
@@ -1708,6 +1777,7 @@ export class ProjectLiveMonitor extends EventEmitter {
     }
 
     try {
+      const wasHydrated = this.hydratedThreadIds.has(threadId);
       const previousThread = this.threads.get(threadId) ?? null;
       const thread = await this.client.readThread(threadId);
       this.clearMatchingNote(`Thread refresh failed (${threadId.slice(0, 8)}):`);
@@ -1720,7 +1790,7 @@ export class ProjectLiveMonitor extends EventEmitter {
       const previousMessage = previousThread ? latestThreadAgentMessage(previousThread) : null;
       const nextMessage = latestThreadAgentMessage(thread);
       if (
-        hasLoadedThreadHistory(previousThread)
+        wasHydrated
         && nextMessage
         && (
           nextMessage.itemId !== previousMessage?.itemId
@@ -1737,6 +1807,7 @@ export class ProjectLiveMonitor extends EventEmitter {
       for (const event of rolloutEvents) {
         this.pushRecentEvent(event);
       }
+      this.hydratedThreadIds.add(threadId);
       this.scheduleSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

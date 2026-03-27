@@ -44,6 +44,36 @@ It should group sessions by room and show:
 
 The VS Code panel should expose the same snapshot model as the browser and terminal views instead of inventing a separate state system.
 
+## Shared model
+
+All renderers should consume the same normalized snapshot model.
+
+- A `DashboardSnapshot` represents one tracked workspace and includes `projectRoot`, `projectLabel`, `projectIdentity`, `generatedAt`, `rooms`, `agents`, `cloudTasks`, `events`, and `notes`.
+- A `DashboardAgent` represents one visible session or agent and carries identity, currentness, room placement, state, detail text, latest useful message, resume/open affordances, provenance/confidence, and optional `needsUser` or shared-room `network` metadata.
+- A `DashboardEvent` is the normalized event log used for browser notifications and event-native state surfaces such as approvals, input waits, command/file activity, subagent events, and typed messages.
+- `needsUser` is the durable per-agent approval/input state used by the browser `Needs You` queue and waiting posture.
+- `network` marks a remote shared-room agent and should preserve peer label and peer host metadata distinctly from local sessions.
+
+Normalized activity states are:
+
+- `planning`
+- `scanning`
+- `thinking`
+- `editing`
+- `running`
+- `validating`
+- `delegating`
+- `waiting`
+- `blocked`
+- `done`
+- `idle`
+- `cloud`
+
+Normalized provenance/confidence rules are:
+
+- `provenance` identifies the source family such as `codex`, `claude`, `cloud`, `cursor`, `presence`, or `openclaw`
+- `confidence` distinguishes typed source truth from inferred best-effort state
+
 ## Source priority
 
 Prefer official Codex surfaces first:
@@ -57,14 +87,30 @@ Claude local logs and Cursor background agents are secondary inputs. They can en
 
 ## Browser behavior
 
+### Modes and controls
+
+- The browser should support both `map` and `terminal` views.
+- `?view=map|terminal` should deep-link the active browser view.
+- Selecting a workspace changes focus only; it does not change fleet monitoring scope.
+- A selected workspace can enter a focused single-workspace mode through the browser control and `?focus=1`.
+- `?screenshot=1` should disable live SSE-only behavior that would make still captures unstable and should report snapshot connection state instead of live streaming.
+- The browser header Settings popup is the home for viewer controls and machine-local integration settings.
+
+Current browser settings surfaces are:
+
+- text scale
+- a debug tile overlay toggle for layout diagnostics
+- machine-local Cursor API key save/clear controls
+- shared-room sync toggle plus `host`, `room`, and short `nickname` fields
+
 ### Workload placement
 
 - Use current workload by default.
 - Active local Codex work should occupy desks.
-- Waiting/resting agents belong in the rec area, not at desks.
-- A local thread that is still in a live work state such as `editing`, `running`, `validating`, `scanning`, `thinking`, `planning`, `delegating`, or `blocked` should keep its workstation even if short-lived freshness/current signals dip between polls.
+- Waiting/resting lead sessions belong in the rec area, not at desks.
+- A local thread that is still truly ongoing may keep its workstation through short-lived freshness/current signal dips between polls, but stale `notLoaded` locals must not hold desks just because they were recently current.
 - Workstation release should be conservative. Ordinary poll jitter, UI rerenders, debug toggles, or temporary freshness gaps must not pull a still-working agent off a desk.
-- A workstation should only be released when the thread has actually settled into a resting/finished state according to the browser placement rules.
+- A workstation should only be released when the thread has actually settled into a resting/finished state according to the browser placement rules, with the explicit post-stop cooldown described below.
 - The rec area should keep at most the 4 most recent lead sessions visible.
 - Finished subagents should despawn instead of taking rec-area slots.
 - Empty rooms should read as quiet space, not as errors.
@@ -115,6 +161,8 @@ Global user settings should currently include:
 
 - text scale for toasts, hover cards, and browser-office text
 
+Diagnostic browser controls may also exist for development visibility, such as a debug tile overlay toggle, but they should not redefine the stable layout contract.
+
 Global text scale rules:
 
 - allowed range is `0.75x` through `2.00x`
@@ -128,6 +176,15 @@ Global text scale rules:
 - Fleet mode should keep every discovered workspace live.
 - The selected workspace changes browser focus only; it does not change the monitor set.
 - `/api/server-meta` must report the live bound fleet project set, not only startup seed projects.
+
+### Shared-room behavior
+
+- Shared-room sync is an optional browser-side overlay, not the primary local transport.
+- Shared-room settings are persisted client-side and should survive browser reloads.
+- Remote workspace activity should only merge into local rendering when the remote workspace name matches a workspace that exists locally.
+- Remote shared-room agents should preserve peer labeling and peer-host context so they remain visibly distinct from local sessions.
+- Screenshot mode should disable shared-room sync.
+- `/api/multiplayer` should expose the current server multiplayer transport status even when the transport is currently disabled.
 
 ### Boss / lead behavior
 
@@ -171,9 +228,11 @@ Current-workload rules:
 - local threads stay current while the live monitor still considers them ongoing
 - `notLoaded` threads still stay current when `thread/read` shows an in-progress turn
 - observer-owned unload/runtime-idle transitions do not count as a stop by themselves
-- once a local thread actually stops, it remains desk-visible for about 2 seconds so the final reply can still be read before the avatar leaves
+- once a local top-level thread actually stops, it should keep its workstation for about 5 seconds so the last reply can still be read before cooling into rec-area idle visibility
+- stale local `notLoaded` threads that are no longer ongoing must not keep a workstation just because freshness/currentness still marks them recent
+- completed process-only items such as `plan`, `reasoning`, and `contextCompaction` should settle to `done` while recent, then age to `idle`; they must not leave a finished thread stuck in synthetic `thinking`
 - stale blocked/waiting history should not remain current forever without ongoing state or a current user need
-- browser workstation seating may be intentionally stickier than raw `isCurrent` so live local work states do not thrash between desk and rec area during polling gaps
+- browser workstation seating may be intentionally stickier than raw `isCurrent` only for truly ongoing live local work and the explicit stop cooldown, not for stale `notLoaded` summaries
 
 ## Notifications and toasts
 
@@ -202,6 +261,10 @@ Current-workload rules:
 - Treat the listener on `4181` as explicit runtime state.
 - Do not assume the browser matches the latest source tree until the server has been rebuilt and restarted.
 - `api/server-meta` is the source of truth for PID, start time, build time, fleet mode, and live bound projects.
+- `api/fleet` is the source of truth for the current normalized fleet snapshot.
+- `api/events` is the live SSE stream for browser fleet refreshes.
+- `api/settings/integrations` is the machine-local browser integration settings surface, currently used for Cursor API key storage.
+- `api/multiplayer` reports the current multiplayer transport status, even when that status is disabled or placeholder-only.
 - In fleet mode, cloud polling should run once centrally and be shared across monitors.
 - Rate limits from the cloud surface should degrade into a human-readable note plus backoff, not repeated raw per-project failure spam.
 
