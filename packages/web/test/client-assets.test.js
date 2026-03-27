@@ -18,6 +18,24 @@ test("renderHtml loads external client assets and bootstrap config", () => {
   assert.match(html, /window\.__AGENTS_OFFICE_CLIENT_CONFIG__/);
 });
 
+test("renderHtml can bootstrap a discovered fleet project list distinct from the seed options", () => {
+  const html = renderHtml(
+    {
+      host: "127.0.0.1",
+      port: 4181,
+      explicitProjects: false,
+      projects: [{ root: "/tmp/seed", label: "Seed" }]
+    },
+    [
+      { root: "/tmp/seed", label: "Seed" },
+      { root: "/tmp/discovered", label: "Discovered" }
+    ]
+  );
+
+  assert.match(html, /"root":"\/tmp\/seed","label":"Seed"/);
+  assert.match(html, /"root":"\/tmp\/discovered","label":"Discovered"/);
+});
+
 test("client runtime keeps current local desk-live work on a workstation through notLoaded transport gaps", () => {
   const runtimeSource = readFileSync(
     join(__dirname, "../src/client/runtime-source.ts"),
@@ -202,6 +220,78 @@ test("runtime source keeps running and validating workers seated at their workst
   );
 });
 
+test("runtime source preserves workstation entering-reveal flags for the Pixi flicker animation", () => {
+  const runtimeSource = readFileSync(
+    join(__dirname, "../src/client/runtime-source.ts"),
+    "utf8"
+  );
+  const navigationSource = readFileSync(
+    join(__dirname, "../src/client/runtime/navigation-source.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_WORKSTATION_REVEAL_FLAGS = patchRuntimeSectionIfPresent('),
+    "runtime source should patch workstation reveal flags into the assembled scene source without crashing when the raw fragment already drifted"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_SPRITE_REVEAL_FLAGS = (() => {'),
+    "runtime source should assemble sprite reveal flags through a tolerant patch wrapper"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_BOSS_OFFICE_SEATING = patchRuntimeSection('),
+    "runtime source should patch the boss-office seating layout before it rewrites workstation reveal triggers"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE = (() => {'),
+    "runtime source should assemble the final scene source through a post-office reveal-trigger pass"
+  );
+  assert.ok(
+    runtimeSource.includes('return source.includes("function buildPixiSpriteDef")'),
+    "runtime source should skip the helper fallback once the raw scene source already defines buildPixiSpriteDef"
+  );
+  assert.ok(
+    runtimeSource.includes(': source + `'),
+    "runtime source should inject a fallback buildPixiSpriteDef helper when the raw scene source omits it"
+  );
+  assert.ok(
+    runtimeSource.includes('enteringReveal: options.enteringReveal === true,'),
+    "assembled scene source should preserve enteringReveal on sprite definitions"
+  );
+  assert.ok(
+    runtimeSource.includes('enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),'),
+    "desk workstation reveal should trigger when an agent newly occupies a slot, not only when the agent key is brand new"
+  );
+  assert.ok(
+    runtimeSource.includes('enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),'),
+    "office workstation reveal should share the slot-based reveal trigger"
+  );
+  assert.ok(
+    runtimeSource.includes('height: Math.max(5, Math.round(workstationHeight * 0.16)),\n                enteringReveal: options.enteringReveal === true'),
+    "assembled scene source should preserve enteringReveal on workstation glow effects"
+  );
+  assert.ok(
+    runtimeSource.includes('function shouldRevealWorkstation(projectRoot, agent, slotId) {'),
+    "assembled scene source should inject a workstation reveal helper when the raw scene literal omits one"
+  );
+  assert.ok(
+    runtimeSource.includes('const previousSceneState = renderedAgentSceneState.get(key) || null;'),
+    "workstation reveal helper should compare against the previous rendered slot state"
+  );
+  assert.ok(
+    runtimeSource.includes('return previousSlotId !== slotId;'),
+    "workstation reveal helper should blink when an agent gains or changes desk slots"
+  );
+  assert.ok(
+    navigationSource.includes('if (!screenshotMode && definition.enteringReveal === true) {\\n            sprite.visible = false;\\n          }'),
+    "Pixi navigation should hide entering-reveal sprites until the blink animation makes them visible"
+  );
+  assert.ok(
+    navigationSource.includes('renderer.animatedSprites.push({\\n              kind: \\"blink\\",\\n              nodes: enteringRevealNodes,'),
+    "Pixi navigation should enqueue a blink animation for entering workstation nodes"
+  );
+});
+
 test("workspace focus reuses compact scene geometry and grid-snapped desk starts", () => {
   const runtimeSource = readFileSync(
     join(__dirname, "../src/client/runtime-source.ts"),
@@ -235,6 +325,26 @@ test("workspace focus reuses compact scene geometry and grid-snapped desk starts
   assert.ok(
     runtimeSource.includes('tileHeight: 1'),
     "workstation footprint should occupy only the bottom row"
+  );
+});
+
+test("workspace focus lets the expanded floor fill the full panel rect", () => {
+  const stylesSource = readFileSync(
+    join(__dirname, "../src/client/styles.css"),
+    "utf8"
+  );
+
+  assert.match(
+    stylesSource,
+    /body\.workspace-focus \.workspace-tower,\n\s+body\.workspace-focus \.workspace-tower-single \{\n\s+width: 100%;\n\s+max-width: none;\n\s+min-height: 100%;\n\s+margin: 0;/
+  );
+  assert.match(
+    stylesSource,
+    /body\.workspace-focus \.tower-floor-body \{\n\s+min-height: 0;\n\s+height: 100%;\n\s+padding: 0;\n\s+overflow: hidden;/
+  );
+  assert.match(
+    stylesSource,
+    /body\.workspace-focus \.office-map-host \{\n\s+min-height: 0;\n\s+height: 100%;\n\s+overflow: hidden;/
   );
 });
 
@@ -338,6 +448,46 @@ test("runtime source limits visible rec-room resters to recent top-level leads",
   );
 });
 
+test("runtime source can borrow recent rec-room leads for an empty selected workspace", () => {
+  const runtimeSource = readFileSync(
+    join(__dirname, "../src/client/runtime-source.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_REC_FALLBACK = patchRuntimeSection('),
+    "runtime source should patch empty-project rec fallback into the layout runtime"
+  );
+  assert.ok(
+    runtimeSource.includes('function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {'),
+    "layout runtime should define an explicit empty-project recent-agent fallback helper"
+  );
+  assert.ok(
+    runtimeSource.includes('detail: projectPrefix + " · " + summary,'),
+    "fallback agents should preserve their source project label in synthesized summaries"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_SCENE_FALLBACK = patchRuntimeSection('),
+    "runtime source should patch scene-level empty-project fallback separately"
+  );
+  assert.ok(
+    runtimeSource.includes('const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);'),
+    "scene view should use the empty-project fallback when local recent leads are absent"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_UI_SOURCE_WITH_EMPTY_PROJECT_FALLBACK = patchRuntimeSection('),
+    "UI runtime should opt the selected workspace into the empty-project fallback"
+  );
+  assert.ok(
+    runtimeSource.includes('? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)'),
+    "selected workspace scene rendering should pass the fleet project list into the scene fallback"
+  );
+  assert.ok(
+    runtimeSource.includes('? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)'),
+    "selected workspace session rendering should pass the fleet project list into the session fallback"
+  );
+});
+
 test("runtime source falls back to default rec layout when saved sofa columns overlap", () => {
   const runtimeSource = readFileSync(
     join(__dirname, "../src/client/runtime-source.ts"),
@@ -353,12 +503,24 @@ test("runtime source falls back to default rec layout when saved sofa columns ov
     "rec seat placement should retain a default layout fallback"
   );
   assert.ok(
+    runtimeSource.includes('{ ...defaultLayout.sofas[0], x: sofaColumns.left * tile, y: baseY }'),
+    "saved sofa-column overrides should retain the default sofa sprite metadata for seat anchoring"
+  );
+  assert.ok(
     runtimeSource.includes('Math.abs(requestedLayout.sofas[1].x - requestedLayout.sofas[0].x) >= tile * 3'),
     "rec seat placement should reject overlapping saved sofa positions"
   );
   assert.ok(
     runtimeSource.includes(': defaultLayout;'),
     "rec seat placement should fall back to the default sofa layout when overrides collapse"
+  );
+  assert.ok(
+    runtimeSource.includes('const sofaWidth = Number(sofa?.sprite?.w) || layout.sofaWidth;'),
+    "rec seat anchors should use the real sofa sprite width when available"
+  );
+  assert.ok(
+    runtimeSource.includes('const seatOffsetRatio = seatWithinSofa === 0 ? 0.18 : 0.62;'),
+    "rec seat anchors should use centered per-sofa seat offsets"
   );
   assert.ok(
     runtimeSource.includes('const CLIENT_RUNTIME_SETTINGS_SOURCE_WITH_BOUNDED_REC_SLOTS = patchRuntimeSection('),

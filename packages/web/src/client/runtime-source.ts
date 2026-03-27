@@ -114,8 +114,81 @@ const CLIENT_RUNTIME_SCENE_SOURCE_WITH_STABLE_DESK_GEOMETRY = patchRuntimeSectio
         const deskEdgeClamp = 2;`
 );
 
-const CLIENT_RUNTIME_SCENE_SOURCE = patchRuntimeSection(
+const CLIENT_RUNTIME_SCENE_SOURCE_WITH_WORKSTATION_REVEAL_FLAGS = patchRuntimeSectionIfPresent(
   CLIENT_RUNTIME_SCENE_SOURCE_WITH_STABLE_DESK_GEOMETRY,
+  `          glow: (agent && isBusyAgent(agent) && state !== "waiting" && state !== "blocked")
+            ? {
+                x: absoluteCellX + Math.round(workstationX + workstationWidth * 0.19),
+                y: absoluteCellY + Math.round(workstationY + workstationHeight * 0.14),
+                width: Math.max(8, Math.round(workstationWidth * 0.36)),
+                height: Math.max(5, Math.round(workstationHeight * 0.16))
+              }
+            : null,`,
+  `          glow: (agent && isBusyAgent(agent) && state !== "waiting" && state !== "blocked")
+            ? {
+                x: absoluteCellX + Math.round(workstationX + workstationWidth * 0.19),
+                y: absoluteCellY + Math.round(workstationY + workstationHeight * 0.14),
+                width: Math.max(8, Math.round(workstationWidth * 0.36)),
+                height: Math.max(5, Math.round(workstationHeight * 0.16)),
+                enteringReveal: options.enteringReveal === true
+              }
+            : null,`
+);
+
+const CLIENT_RUNTIME_SCENE_SOURCE_WITH_SPRITE_REVEAL_FLAGS = (() => {
+  const source = patchRuntimeSectionIfPresent(
+    CLIENT_RUNTIME_SCENE_SOURCE_WITH_WORKSTATION_REVEAL_FLAGS,
+    `      function buildPixiSpriteDef(sprite, x, y, scale, z, options = {}) {
+        return {
+          kind: "sprite",
+          sprite: sprite.url,
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(sprite.w * scale),
+          height: Math.round(sprite.h * scale),
+          flipX: options.flipX === true,
+          alpha: options.alpha ?? 1,
+          z
+        };
+      }`,
+    `      function buildPixiSpriteDef(sprite, x, y, scale, z, options = {}) {
+        return {
+          kind: "sprite",
+          sprite: sprite.url,
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(sprite.w * scale),
+          height: Math.round(sprite.h * scale),
+          flipX: options.flipX === true,
+          enteringReveal: options.enteringReveal === true,
+          alpha: options.alpha ?? 1,
+          z
+        };
+      }`
+  );
+
+  return source.includes("function buildPixiSpriteDef")
+    ? source
+    : source + `
+
+      function buildPixiSpriteDef(sprite, x, y, scale, z, options = {}) {
+        return {
+          kind: "sprite",
+          sprite: sprite.url,
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(sprite.w * scale),
+          height: Math.round(sprite.h * scale),
+          flipX: options.flipX === true,
+          enteringReveal: options.enteringReveal === true,
+          alpha: options.alpha ?? 1,
+          z
+        };
+      }`;
+})();
+
+const CLIENT_RUNTIME_SCENE_SOURCE_WITH_BOSS_OFFICE_SEATING = patchRuntimeSection(
+  CLIENT_RUNTIME_SCENE_SOURCE_WITH_SPRITE_REVEAL_FLAGS,
   "boss office seating",
   `          officeAssignments.forEach((entry) => {
             const officeX = roomX + entry.slot.x;
@@ -167,6 +240,39 @@ const CLIENT_RUNTIME_SCENE_SOURCE = patchRuntimeSection(
               }
             );`
 );
+
+const CLIENT_RUNTIME_SCENE_SOURCE = (() => {
+  const source = patchRuntimeLiteralAll(
+    patchRuntimeLiteralAll(
+      CLIENT_RUNTIME_SCENE_SOURCE_WITH_BOSS_OFFICE_SEATING,
+      "desk workstation reveal trigger",
+      `enteringReveal: enteringAgentKeys.has(agentKey(snapshot.projectRoot, agent)),`,
+      `enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),`
+    ),
+    "office workstation reveal trigger",
+    `enteringReveal: enteringAgentKeys.has(agentKey(snapshot.projectRoot, entry.agent)),`,
+    `enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),`
+  );
+
+  return source.includes("function shouldRevealWorkstation")
+    ? source
+    : source + `
+
+      function shouldRevealWorkstation(projectRoot, agent, slotId) {
+        if (screenshotMode || !agent || typeof slotId !== "string" || slotId.length === 0) {
+          return false;
+        }
+        const key = agentKey(projectRoot, agent);
+        if (enteringAgentKeys.has(key)) {
+          return true;
+        }
+        const previousSceneState = renderedAgentSceneState.get(key) || null;
+        const previousSlotId = previousSceneState && typeof previousSceneState.slotId === "string"
+          ? previousSceneState.slotId
+          : null;
+        return previousSlotId !== slotId;
+      }`;
+})();
 
 const CLIENT_RUNTIME_SCENE_SOURCE_WITH_SMALLER_PREFABS = patchRuntimeLiteralAll(
   CLIENT_RUNTIME_SCENE_SOURCE,
@@ -672,8 +778,21 @@ const CLIENT_RUNTIME_UI_SOURCE_WITH_STABLE_INITIAL_PRESENCE = patchRuntimeSectio
             );`
 );
 
-const CLIENT_RUNTIME_UI_SOURCE_FINAL = patchRuntimeSection(
+const CLIENT_RUNTIME_UI_SOURCE_WITH_EMPTY_PROJECT_FALLBACK = patchRuntimeSection(
   CLIENT_RUNTIME_UI_SOURCE_WITH_STABLE_INITIAL_PRESENCE,
+  "empty project recent fallback",
+  `        const snapshot = selectedRawSnapshot ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT) : null;
+        const sessionSnapshot = selectedRawSnapshot ? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT) : null;`,
+  `        const snapshot = selectedRawSnapshot
+          ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)
+          : null;
+        const sessionSnapshot = selectedRawSnapshot
+          ? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)
+          : null;`
+);
+
+const CLIENT_RUNTIME_UI_SOURCE_FINAL = patchRuntimeSection(
+  CLIENT_RUNTIME_UI_SOURCE_WITH_EMPTY_PROJECT_FALLBACK,
   "single workspace compact scene",
   `renderWorkspaceFloor(snapshot, {
                   compact: false,
@@ -798,8 +917,122 @@ const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_VISIBLE_CURRENT_SCENE_AGENTS = patchRunt
       }`
 );
 
-const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_MARKDOWN = patchRuntimeSection(
+const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_REC_FALLBACK = patchRuntimeSection(
   CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_VISIBLE_CURRENT_SCENE_AGENTS,
+  "empty project rec fallback",
+  `      function viewSessionSnapshot(snapshot, recentSessionLimit = SESSION_RECENT_LEAD_LIMIT) {
+        const activeAgents = snapshot.agents.filter(isBusyAgent);
+        const recentAgents = recentSessionAgents(snapshot, recentSessionLimit);
+        return {
+          ...snapshot,
+          agents: [...activeAgents, ...recentAgents]
+        };
+      }`,
+  `      function emptyProjectNeedsRecentFallback(snapshot) {
+        return Boolean(snapshot) && !snapshot.agents.some((agent) => agent.source !== "cloud" && agent.source !== "presence");
+      }
+
+      function cloneRecentFallbackAgent(sourceSnapshot, agent) {
+        const summary = normalizeDisplayText(sourceSnapshot.projectRoot, agent.detail)
+          || latestAgentMessage(agent)
+          || "[" + String(agent.state || "idle") + "]";
+        const projectPrefix = projectLabel(sourceSnapshot.projectRoot);
+        const latestMessage = latestAgentMessage(agent);
+        return {
+          ...agent,
+          isCurrent: false,
+          isOngoing: false,
+          needsUser: null,
+          detail: projectPrefix + " · " + summary,
+          latestMessage: latestMessage ? projectPrefix + " · " + latestMessage : null
+        };
+      }
+
+      function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {
+        if (!emptyProjectNeedsRecentFallback(snapshot) || !Array.isArray(allProjects) || allProjects.length === 0) {
+          return [];
+        }
+        const seenAgentIds = new Set();
+        return allProjects
+          .flatMap((project) =>
+            project.projectRoot === snapshot.projectRoot
+              ? []
+              : project.agents
+                .filter((agent) => isFinishedLeadForRec(agent))
+                .map((agent) => cloneRecentFallbackAgent(project, agent))
+          )
+          .sort(compareAgentsByRecencyStable)
+          .filter((agent) => {
+            const agentId = String(agent && agent.id || "");
+            if (!agentId || seenAgentIds.has(agentId)) {
+              return false;
+            }
+            seenAgentIds.add(agentId);
+            return true;
+          })
+          .slice(0, Math.max(0, limit));
+      }
+
+      function viewSessionSnapshot(snapshot, recentSessionLimit = SESSION_RECENT_LEAD_LIMIT, allProjects = null) {
+        const activeAgents = snapshot.agents.filter(isBusyAgent);
+        const recentAgents = recentSessionAgents(snapshot, recentSessionLimit);
+        const fallbackAgents = recentFallbackAgentsForEmptyProject(
+          snapshot,
+          allProjects,
+          Math.min(SCENE_RECENT_LEAD_LIMIT, recentSessionLimit)
+        );
+        return {
+          ...snapshot,
+          agents: activeAgents.length > 0 || recentAgents.length > 0
+            ? [...activeAgents, ...recentAgents]
+            : fallbackAgents
+        };
+      }`
+);
+
+const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_SCENE_FALLBACK = patchRuntimeSection(
+  CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_REC_FALLBACK,
+  "empty project scene fallback",
+  `      function viewSnapshot(snapshot, recentLeadLimit = SCENE_RECENT_LEAD_LIMIT) {
+        const liveAgents = snapshot.agents.filter(isLiveSceneAgent);
+        const recentLeads = recentLeadAgents(snapshot, recentLeadLimit);
+        const seenAgentIds = new Set();
+        return {
+          ...snapshot,
+          agents: [...liveAgents, ...recentLeads].filter((agent) => {
+            const agentId = String(agent && agent.id || "");
+            if (!agentId || seenAgentIds.has(agentId)) {
+              return false;
+            }
+            seenAgentIds.add(agentId);
+            return true;
+          })
+        };
+      }`,
+  `      function viewSnapshot(snapshot, recentLeadLimit = SCENE_RECENT_LEAD_LIMIT, allProjects = null) {
+        const liveAgents = snapshot.agents.filter(isLiveSceneAgent);
+        const recentLeads = recentLeadAgents(snapshot, recentLeadLimit);
+        const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);
+        const seenAgentIds = new Set();
+        const visibleAgents = liveAgents.length > 0 || recentLeads.length > 0
+          ? [...liveAgents, ...recentLeads]
+          : fallbackAgents;
+        return {
+          ...snapshot,
+          agents: visibleAgents.filter((agent) => {
+            const agentId = String(agent && agent.id || "");
+            if (!agentId || seenAgentIds.has(agentId)) {
+              return false;
+            }
+            seenAgentIds.add(agentId);
+            return true;
+          })
+        };
+      }`
+);
+
+const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_MARKDOWN = patchRuntimeSection(
+  CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_SCENE_FALLBACK,
   "display markdown cleanup",
   `      function normalizeDisplayText(projectRoot, value) {
         const normalized = String(value || "").trim();
@@ -904,7 +1137,22 @@ const CLIENT_RUNTIME_RENDER_SOURCE_WITH_SAFE_REC_SEATS = patchRuntimeSection(
                 { id: "sofa-right", x: sofaColumns.right * sceneTileSize(compact), y: baseY }
               ]
             }
-          : recRoomSofaLayout(compact, roomPixelWidth, baseY);`,
+          : recRoomSofaLayout(compact, roomPixelWidth, baseY);
+        const seatIndex = index % 4;
+        const sofa = layout.sofas[Math.floor(seatIndex / 2)];
+        const seatWithinSofa = seatIndex % 2;
+        const avatar = avatarForAgent(agent);
+        const avatarScale = compact ? 1.25 : 1.5;
+        const avatarHeight = Math.round(avatar.h * avatarScale);
+        const x = sofa.x + Math.round(layout.sofaWidth * (seatWithinSofa === 0 ? 0.12 : 0.56));
+        const y = sofa.y - Math.round(avatarHeight * 0.28);
+        return {
+          x,
+          y,
+          flip: seatWithinSofa === 1,
+          settle: true
+        };
+      }`,
   `      function recRoomSeatSlotAt(agent, index, compact, roomPixelWidth, baseY, sofaColumns = null) {
         const tile = sceneTileSize(compact);
         const defaultLayout = recRoomSofaLayout(compact, roomPixelWidth, baseY);
@@ -912,8 +1160,8 @@ const CLIENT_RUNTIME_RENDER_SOURCE_WITH_SAFE_REC_SEATS = patchRuntimeSection(
           ? {
               sofaWidth: tile * 2,
               sofas: [
-                { id: "sofa-left", x: sofaColumns.left * tile, y: baseY },
-                { id: "sofa-right", x: sofaColumns.right * tile, y: baseY }
+                { ...defaultLayout.sofas[0], x: sofaColumns.left * tile, y: baseY },
+                { ...defaultLayout.sofas[1], x: sofaColumns.right * tile, y: baseY }
               ]
             }
           : null;
@@ -921,7 +1169,24 @@ const CLIENT_RUNTIME_RENDER_SOURCE_WITH_SAFE_REC_SEATS = patchRuntimeSection(
           requestedLayout
           && Math.abs(requestedLayout.sofas[1].x - requestedLayout.sofas[0].x) >= tile * 3
             ? requestedLayout
-            : defaultLayout;`
+            : defaultLayout;
+        const seatIndex = index % 4;
+        const sofa = layout.sofas[Math.floor(seatIndex / 2)];
+        const seatWithinSofa = seatIndex % 2;
+        const avatar = avatarForAgent(agent);
+        const avatarScale = compact ? 1.25 : 1.5;
+        const avatarHeight = Math.round(avatar.h * avatarScale);
+        const sofaWidth = Number(sofa?.sprite?.w) || layout.sofaWidth;
+        const seatOffsetRatio = seatWithinSofa === 0 ? 0.18 : 0.62;
+        const x = sofa.x + Math.round(sofaWidth * seatOffsetRatio);
+        const y = sofa.y - Math.round(avatarHeight * 0.28);
+        return {
+          x,
+          y,
+          flip: seatWithinSofa === 1,
+          settle: true
+        };
+      }`
 );
 
 const CLIENT_RUNTIME_SETTINGS_SOURCE_WITH_BOUNDED_REC_SLOTS = patchRuntimeSection(

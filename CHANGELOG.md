@@ -31,6 +31,8 @@ Entries stay under the active version until an explicit version bump is requeste
 ### Changed
 
 - Changed Codex app-server event handling so `turn/plan/updated` now summarizes the documented `{ explanation?, plan }` payload, `turn/diff/updated` summarizes the documented `{ diff }` payload, and `item/tool/call` is labeled as a generic tool-call request instead of an MCP-specific event.
+- Changed fleet startup discovery so Codex workspaces configured in `~/.codex/config.toml` now seed the live project set even before any thread has been spawned in this browser session, and fleet refresh now asks for a broad enough discovery window to keep the full configured/discovered workspace list visible.
+- Changed fleet-mode workspace visibility so autodiscovered projects now age out after 7 days without session activity, and config-only Codex roots no longer stay visible unless a session-backed source also reports recent activity for that workspace.
 - Changed `buildDashboardSnapshotFromState()` to assemble source snapshots in parallel and evaluate workload currentness against snapshot start time, fixing the stale-freshness race for recently finished local threads.
 - Changed project discovery to consult the shared adapter registry instead of hardcoding every secondary source in one discovery function.
 - Changed the web server structure to use `server/`, `render/`, and `client/` internal folders while keeping the public routes and `startWebServer` surface stable.
@@ -62,11 +64,14 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Fixed
 
+- Fixed freshly opened or otherwise empty selected workspaces staying visually blank by reusing the 4 most recent resting lead sessions as rec-room placeholders until that workspace has its own live or recent local agents.
 - Fixed Codex local state classification so completed command, file-change, and tool turns now settle to done/idle instead of remaining `running`/`validating`/`editing`, and recent command/file events no longer reactivate a thread that already finished.
 - Fixed typed Codex `Needs You` handling so approval waits surface as blocked desk work, input waits surface as waiting work, and browser workstation seating now respects those visible states instead of treating every `status.type = active` thread as desk-active.
 - Fixed browser desk motion so `running` and `validating` workers stay in the seated workstation pose, and current local desk-live work now gets a short grace window through transient `status.type = notLoaded` gaps instead of bouncing into the rec area between live updates.
+- Fixed Pixi workstation reveal flicker so newly occupied desks once again carry their `enteringReveal` flags through the assembled scene runtime, and desk returns now blink based on workstation slot transitions instead of only firing for brand-new agent keys.
 - Fixed browser scene continuity so current local threads remain visible in the map while they transition between desk and rec-area placement, and active local `idle`/`done` wobbles now get a short desk settle window instead of making the agent and workstation pop out between updates.
 - Fixed rec-room rendering so only the 4 most recent top-level resting lead sessions occupy the rec seats, preventing older hidden resters and subagents from wrapping onto duplicate sofa coordinates.
+- Fixed rec-room sofa seat anchors so resting avatars now sit on centered cushion points derived from the actual sofa sprite width instead of drifting left from older hard-coded placement offsets.
 - Fixed office map scaling so selected and focused single-workspace views now reuse the same compact scene geometry as the tower overview instead of inflating avatars and workstations with a separate prefab scale.
 - Fixed desk-pod placement so workstation pods and their internal seat cells now snap back onto the shared `16px` tile grid, matching the rec-strip furniture alignment contract.
 - Fixed Codex workstation visibility so local sessions that app-server still reports as `active` no longer fall through the browser’s `waiting/done` seating exclusions and disappear from desks while they are still live.

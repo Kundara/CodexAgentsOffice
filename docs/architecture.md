@@ -98,6 +98,7 @@ Sources:
 
 - Browser mode
   - fleet view across multiple configured project roots
+  - fleet mode only keeps autodiscovered workspaces whose session timestamps are no older than 7 days; config-only roots without recent sessions do not stay visible just because the workspace metadata is newer
   - fleet map renders as a continuous tower of workspace floors instead of a stack of separate cards
   - deep-linkable single-project room view through `?project=<abs-path>`
   - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
@@ -293,6 +294,7 @@ The active office view currently favors an open station language over enclosed c
 - the browser view no longer exposes a current/history toggle; it always shows current agents plus 4 recent lead sessions
 - rec facilities sit on the same raised upper floor band as the wall-side walkway, not in a floating inset
 - the rec strip combines vending, counter, doors, clock, plants, sofa, and shelf props inside the same scene
+- a selected workspace with no local or recent agents may temporarily reuse the 4 most recent resting lead sessions from other tracked workspaces as rec-room stand-ins, so a freshly opened floor is not completely empty before its first local thread appears
 - long task titles stay in hover cards and the session panel instead of being drawn over the map
 - the floor is restored to the blue office-strip language from the reference art, including an upper wall-side walkway for rec facilities
 - layout constants are now expressed as internal tile-grid settings instead of only pixel literals, so boss-office footprints, desk columns, rec-strip depth, and inter-cubicle spacing all derive from a single floor grid
@@ -306,6 +308,7 @@ The active office view currently favors an open station language over enclosed c
 Claude support uses a deliberately weaker contract than Codex:
 
 - project discovery merges Codex-discovered roots with roots inferred from `~/.claude/projects`
+- Codex fleet startup also seeds workspace discovery from configured roots in `~/.codex/config.toml`, so trusted Codex projects can appear before their first visible thread update
 - when the Anthropic Agent SDK is available, Claude project discovery prefers `listSessions()` and per-session `cwd` metadata before falling back to raw directory scanning
 - the snapshot builder can include recent Claude sessions for matching project roots
 - recent Claude session messages can now be read through the supported Agent SDK `getSessionMessages()` API before falling back to raw JSONL transcript sampling

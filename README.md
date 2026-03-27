@@ -31,6 +31,7 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 
 Browser workload behavior:
 
+- fleet mode only keeps autodiscovered workspaces that have had session activity within the last 7 days
 - desks are for truly ongoing work plus a short top-level done cooldown of about 5 seconds
 - local Codex sessions stay on desks while app-server still reports `status.type = "active"`, even if the latest visible item is waiting for input/approval or has already streamed a recent reply
 - the rec area holds recent resting lead sessions, not stale active-looking placeholders

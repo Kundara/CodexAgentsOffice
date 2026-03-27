@@ -10,13 +10,29 @@ import {
   scaffoldRoomsFile,
   setStoredCursorApiKey
 } from "@codex-agents-office/core";
-import type { CloudTask } from "@codex-agents-office/core";
+import type { CloudTask, DiscoveredProject } from "@codex-agents-office/core";
 
 import { buildFleetResponse } from "./server-metadata";
 import { buildProjectDescriptors } from "./server-options";
 import type { FleetResponse, IntegrationSettingsResponse, MultiplayerStatus, ProjectDescriptor } from "./server-types";
 
+export const DISCOVERED_PROJECT_FRESHNESS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function filterFreshDiscoveredProjects(
+  projects: DiscoveredProject[],
+  nowMs = Date.now(),
+  freshnessWindowMs = DISCOVERED_PROJECT_FRESHNESS_WINDOW_MS
+): DiscoveredProject[] {
+  const cutoffMs = nowMs - freshnessWindowMs;
+  return projects.filter(
+    (project) => project.count > 0
+      && Number.isFinite(project.updatedAt)
+      && (project.updatedAt * 1000) >= cutoffMs
+  );
+}
+
 export class FleetLiveService {
+  private static readonly PROJECT_DISCOVERY_LIMIT = 200;
   private static readonly PROJECT_SET_REFRESH_INTERVAL_MS = 4000;
   private static readonly CLOUD_REFRESH_INTERVAL_MS = 30000;
   private static readonly CLOUD_RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000;
@@ -167,9 +183,10 @@ export class FleetLiveService {
   }
 
   private async refreshProjectSet(): Promise<void> {
-    const discoveredProjects: ProjectDescriptor[] = this.explicitProjects
+    const rawDiscoveredProjects = this.explicitProjects
       ? []
-      : await discoverProjects(10).catch(() => []);
+      : await discoverProjects(FleetLiveService.PROJECT_DISCOVERY_LIMIT).catch(() => []);
+    const discoveredProjects = filterFreshDiscoveredProjects(rawDiscoveredProjects);
     const normalizedSeeds = this.seedProjects
       .map((project) => {
         const root = canonicalizeProjectPath(project.root);
@@ -180,7 +197,7 @@ export class FleetLiveService {
     const nextProjectRoots = this.explicitProjects
       ? normalizedSeeds.map((project) => project.root)
       : (
-        discoveredProjects.length > 0
+        rawDiscoveredProjects.length > 0
           ? discoveredProjects.map((project) => project.root)
           : normalizedSeeds.map((project) => project.root)
       );

@@ -58,7 +58,7 @@ async function handleHomeRoute(context: RequestContext): Promise<boolean> {
     return true;
   }
 
-  sendHtml(context.response, renderHtml(context.options));
+  sendHtml(context.response, renderHtml(context.options, await context.service.getProjects()));
   return true;
 }
 

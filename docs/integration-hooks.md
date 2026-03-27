@@ -120,6 +120,22 @@ How we use it:
 - detect newly active or changed local sessions
 - decide which threads need a full `thread/read`
 
+### Codex configured project discovery
+
+Used in:
+
+- `packages/core/src/project-paths.ts`
+
+What we read:
+
+- `~/.codex/config.toml`
+- configured `[projects."..."]` roots
+
+How we use it:
+
+- seed fleet startup with configured Codex workspace roots even when no recent thread has been spawned there yet
+- keep workspace tabs aligned with the user's known Codex project list instead of only the subset already exercised in the current observer session
+
 ### `thread/read`
 
 Used in:

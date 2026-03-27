@@ -184,6 +184,8 @@ Global text scale rules:
 
 - Default browser deploys should run in fleet mode.
 - Fleet mode should keep every discovered workspace live.
+- Fleet startup should include configured Codex workspaces from `~/.codex/config.toml` when available, not only workspaces that already emitted recent local thread activity.
+- Fleet mode should hide autodiscovered workspaces once their last session timestamp is more than 7 days old.
 - The selected workspace changes browser focus only; it does not change the monitor set.
 - `/api/server-meta` must report the live bound fleet project set, not only startup seed projects.
 
@@ -208,6 +210,7 @@ Global text scale rules:
 - Relationship arrows should render above offices and avatars inside the map scene, but still remain behind toasts, hover cards, and other browser chrome.
 - Relationship arrows should use smooth spline-like curves with explicit arrowheads aligned to the curve's end direction so the target is unambiguous.
 - Boss office footprint should come from internal tile settings rather than per-renderer pixel literals.
+- If the selected workspace is otherwise empty, the rec area may temporarily show up to the 4 most recent resting lead sessions from other tracked workspaces until local workspace activity exists.
 
 ### Desk spacing and grouping
 
