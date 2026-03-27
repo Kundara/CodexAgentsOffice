@@ -17,6 +17,7 @@ export interface InternalSceneSettings {
   bossLaneStartTiles: number;
   bossLaneWidthTiles: number;
   bossGapToDeskTiles: number;
+  bossOfficeTopInsetTiles: number;
   bossBoothWidthTiles: number;
   bossBoothHeightTiles: number;
   bossBoothGapTiles: number;
@@ -44,11 +45,12 @@ export const INTERNAL_SCENE_SETTINGS: InternalSceneSettings = {
   deskPodHeightTiles: 3,
   deskPodCapacity: 2,
   bossLaneStartTiles: 1,
-  bossLaneWidthTiles: 3,
+  bossLaneWidthTiles: 4,
   bossGapToDeskTiles: 1,
-  bossBoothWidthTiles: 3,
-  bossBoothHeightTiles: 2,
-  bossBoothGapTiles: 1,
+  bossOfficeTopInsetTiles: 1,
+  bossBoothWidthTiles: 4,
+  bossBoothHeightTiles: 3,
+  bossBoothGapTiles: 0,
   recAreaFurnitureRow: 1,
   recAreaWalkwayRow: 2,
   recAreaMaxDepthTiles: 2,

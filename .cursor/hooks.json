@@ -1,80 +1,56 @@
 {
   "version": 1,
   "hooks": {
-    "beforeSubmitPrompt": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "afterAgentResponse": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "afterAgentThought": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "preToolUse": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "postToolUse": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "postToolUseFailure": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "beforeShellExecution": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "afterShellExecution": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "afterFileEdit": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
-    "afterTabFileEdit": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
-    ],
     "sessionStart": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs sessionStart" }
     ],
     "sessionEnd": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs sessionEnd" }
     ],
-    "stop": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
+    "beforeSubmitPrompt": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs beforeSubmitPrompt" }
+    ],
+    "preToolUse": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs preToolUse" }
+    ],
+    "postToolUse": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs postToolUse" }
+    ],
+    "postToolUseFailure": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs postToolUseFailure" }
     ],
     "subagentStart": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs subagentStart" }
     ],
     "subagentStop": [
-      {
-        "command": "node .cursor/hooks/codex-agents-office.cjs"
-      }
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs subagentStop" }
+    ],
+    "beforeShellExecution": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs beforeShellExecution" }
+    ],
+    "beforeMCPExecution": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs beforeMCPExecution" }
+    ],
+    "afterShellExecution": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs afterShellExecution" }
+    ],
+    "afterMCPExecution": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs afterMCPExecution" }
+    ],
+    "afterFileEdit": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs afterFileEdit" }
+    ],
+    "afterAgentResponse": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs afterAgentResponse" }
+    ],
+    "afterAgentThought": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs afterAgentThought" }
+    ],
+    "stop": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs stop" }
+    ],
+    "preCompact": [
+      { "command": "node .cursor/hooks/capture-cursor-hook.mjs preCompact" }
     ]
   }
 }

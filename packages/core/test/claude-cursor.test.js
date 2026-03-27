@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
-const { execFile } = require("node:child_process");
+const { execFile, spawnSync } = require("node:child_process");
 const { mkdir, mkdtemp, readFile, writeFile } = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
@@ -591,7 +591,7 @@ test("cursor cloud adapter suppresses historical conversation toasts on first re
   }
 });
 
-test("cursor local snapshot parsing survives fragmented workspace state blobs", { concurrency: false }, async () => {
+test("cursor local snapshot ignores workspace-state inference when no typed hooks exist", { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-"));
   const projectRoot = path.join(tempRoot, "project");
   const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
@@ -668,15 +668,8 @@ test("cursor local snapshot parsing survives fragmented workspace state blobs", 
     await writeFile(path.join(logsDir, "20260326T120000", "main.log"), "");
 
     const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
-    assert.equal(snapshot.agents.length, 1);
-    assert.equal(snapshot.agents[0].source, "cursor");
-    assert.equal(snapshot.agents[0].confidence, "inferred");
-    assert.equal(snapshot.agents[0].label, "Local Cursor test");
-    assert.equal(snapshot.agents[0].state, "editing");
-    assert.equal(snapshot.agents[0].git?.branch, "main");
-    assert.equal(snapshot.events.length, 1);
-    assert.equal(snapshot.events[0].method, "cursor/local/prompt");
-    assert.match(snapshot.events[0].detail, /Inspect the local Cursor adapter/);
+    assert.equal(snapshot.agents.length, 0);
+    assert.equal(snapshot.events.length, 0);
   } finally {
     if (typeof previousWorkspaceStorageDir === "string") {
       process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
@@ -696,7 +689,7 @@ test("cursor local snapshot parsing survives fragmented workspace state blobs", 
   }
 });
 
-test("cursor local snapshot ignores stale retained composers when a new chat updates the workspace", { concurrency: false }, async () => {
+test("cursor local snapshot ignores retained workspace composers when no typed hooks exist", { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-retained-"));
   const projectRoot = path.join(tempRoot, "project");
   const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
@@ -774,12 +767,8 @@ test("cursor local snapshot ignores stale retained composers when a new chat upd
     await writeFile(path.join(logsDir, "20260326T120000", "main.log"), "");
 
     const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
-    assert.equal(snapshot.agents.length, 1);
-    assert.equal(snapshot.agents[0].id, `cursor-local:${activeComposerId}`);
-    assert.equal(snapshot.agents[0].label, "Active Cursor chat");
-    assert.equal(snapshot.agents[0].state, "editing");
-    assert.equal(snapshot.events.length, 1);
-    assert.equal(snapshot.events[0].threadId, activeComposerId);
+    assert.equal(snapshot.agents.length, 0);
+    assert.equal(snapshot.events.length, 0);
   } finally {
     if (typeof previousWorkspaceStorageDir === "string") {
       process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
@@ -799,7 +788,7 @@ test("cursor local snapshot ignores stale retained composers when a new chat upd
   }
 });
 
-test("cursor local snapshot prefers the last focused composer over stale selected tab order", { concurrency: false }, async () => {
+test("cursor local snapshot ignores focused workspace composers when no typed hooks exist", { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-focused-"));
   const projectRoot = path.join(tempRoot, "project");
   const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
@@ -877,18 +866,8 @@ test("cursor local snapshot prefers the last focused composer over stale selecte
     await writeFile(path.join(logsDir, "20260326T120000", "main.log"), "");
 
     const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
-    const focusedAgent = snapshot.agents.find((agent) => agent.id === `cursor-local:${focusedComposerId}`) || null;
-    assert.ok(focusedAgent);
-    assert.equal(focusedAgent.label, "Focused Cursor task");
-    assert.equal(focusedAgent.detail, "Read package.json, CHANGELOG.md");
-    assert.notEqual(focusedAgent.state, "idle");
-    assert.equal(
-      snapshot.agents.some((agent) => agent.id === `cursor-local:${staleSelectedComposerId}`),
-      false
-    );
-    assert.equal(snapshot.events.length, 1);
-    assert.equal(snapshot.events[0].threadId, focusedComposerId);
-    assert.equal(snapshot.events[0].method, "cursor/local/prompt");
+    assert.equal(snapshot.agents.length, 0);
+    assert.equal(snapshot.events.length, 0);
   } finally {
     if (typeof previousWorkspaceStorageDir === "string") {
       process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
@@ -908,7 +887,7 @@ test("cursor local snapshot prefers the last focused composer over stale selecte
   }
 });
 
-test("cursor local snapshot prefers agent transcripts over stale workspace sqlite inference", { concurrency: false }, async () => {
+test("cursor local snapshot ignores transcript-only state when no typed hooks exist", { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-transcript-"));
   const projectRoot = path.join(tempRoot, "project");
   const workspaceStorageDir = path.join(tempRoot, "workspaceStorage");
@@ -986,13 +965,8 @@ test("cursor local snapshot prefers agent transcripts over stale workspace sqlit
     await writeFile(transcriptFile, transcriptLines);
 
     const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
-    assert.equal(snapshot.agents.length, 1);
-    assert.equal(snapshot.agents[0].id, `cursor-local:${sessionId}`);
-    assert.match(snapshot.agents[0].label, /Inspect the transcript-backed Cursor adapter/);
-    assert.equal(snapshot.agents[0].latestMessage, "Reading the transcript-backed Cursor adapter now.");
-    assert.equal(snapshot.events.length, 1);
-    assert.equal(snapshot.events[0].method, "cursor/local/agentMessage");
-    assert.equal(snapshot.events[0].detail, "Reading the transcript-backed Cursor adapter now.");
+    assert.equal(snapshot.agents.length, 0);
+    assert.equal(snapshot.events.length, 0);
   } finally {
     if (typeof previousWorkspaceStorageDir === "string") {
       process.env.CURSOR_WORKSPACE_STORAGE_DIR = previousWorkspaceStorageDir;
@@ -1017,7 +991,7 @@ test("cursor local snapshot prefers agent transcripts over stale workspace sqlit
   }
 });
 
-test("cursor local transcript snapshot treats recent tool use as active editing work", { concurrency: false }, async () => {
+test("cursor local snapshot ignores transcript tool activity when no typed hooks exist", { concurrency: false }, async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-transcript-edit-"));
   const projectRoot = path.join(tempRoot, "project");
   const cursorProjectsDir = path.join(tempRoot, "cursor-projects");
@@ -1056,13 +1030,8 @@ test("cursor local transcript snapshot treats recent tool use as active editing 
     await writeFile(transcriptFile, transcriptLines);
 
     const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
-    assert.equal(snapshot.agents.length, 1);
-    assert.equal(snapshot.agents[0].state, "editing");
-    assert.equal(snapshot.agents[0].isOngoing, true);
-    assert.equal(snapshot.agents[0].sourceKind, "cursor:claude-3.7-sonnet");
-    assert.equal(snapshot.agents[0].latestMessage, "Updated the README spacing.");
-    assert.equal(snapshot.events.length, 1);
-    assert.equal(snapshot.events[0].method, "cursor/local/agentMessage");
+    assert.equal(snapshot.agents.length, 0);
+    assert.equal(snapshot.events.length, 0);
   } finally {
     if (typeof previousCursorProjectsDir === "string") {
       process.env.CURSOR_PROJECTS_DIR = previousCursorProjectsDir;
@@ -1070,6 +1039,214 @@ test("cursor local transcript snapshot treats recent tool use as active editing 
       delete process.env.CURSOR_PROJECTS_DIR;
     }
   }
+});
+
+test("cursor local snapshot reads typed project hook sidecars and ignores transcript noise", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-hooks-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const cursorProjectsDir = path.join(tempRoot, "cursor-projects");
+  const projectSlug = projectRoot.replace(/^\/+/, "").replace(/[\\/]+/g, "-");
+  const transcriptSessionId = "transcript-only-session";
+  const transcriptDir = path.join(cursorProjectsDir, projectSlug, "agent-transcripts", transcriptSessionId);
+  const hooksDir = path.join(projectRoot, ".codex-agents", "cursor-hooks");
+  const hookSessionId = "cursor-hook-session";
+  const transcriptFile = path.join(transcriptDir, `${transcriptSessionId}.jsonl`);
+  const hookFile = path.join(hooksDir, `${hookSessionId}.jsonl`);
+  const now = Date.now();
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(transcriptDir, { recursive: true });
+  await mkdir(hooksDir, { recursive: true });
+
+  const previousCursorProjectsDir = process.env.CURSOR_PROJECTS_DIR;
+  process.env.CURSOR_PROJECTS_DIR = cursorProjectsDir;
+
+  const transcriptLines = [
+    JSON.stringify({
+      role: "user",
+      message: {
+        content: [
+          { type: "text", text: "<user_query>\nInfer local Cursor state from transcripts\n</user_query>" }
+        ]
+      }
+    }),
+    JSON.stringify({
+      role: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Transcript fallback should not win when typed hooks exist." }
+        ]
+      }
+    })
+  ].join("\n") + "\n";
+
+  const hookLines = [
+    JSON.stringify({
+      conversation_id: hookSessionId,
+      hook_event_name: "beforeSubmitPrompt",
+      timestamp: new Date(now - 2_000).toISOString(),
+      prompt: "Wire Cursor hooks into Agents Office",
+      workspace_roots: [projectRoot],
+      model: "claude-4.5-sonnet"
+    }),
+    JSON.stringify({
+      conversation_id: hookSessionId,
+      hook_event_name: "afterFileEdit",
+      timestamp: new Date(now - 1_000).toISOString(),
+      file_path: path.join(projectRoot, "packages/core/src/cursor.ts"),
+      edits: [{ old_string: "old", new_string: "new" }],
+      workspace_roots: [projectRoot],
+      model: "claude-4.5-sonnet"
+    }),
+    JSON.stringify({
+      conversation_id: hookSessionId,
+      hook_event_name: "afterAgentResponse",
+      timestamp: new Date(now).toISOString(),
+      text: "Typed Cursor hook state is now flowing into the office view.",
+      workspace_roots: [projectRoot],
+      model: "claude-4.5-sonnet"
+    })
+  ].join("\n") + "\n";
+
+  try {
+    await writeFile(transcriptFile, transcriptLines);
+    await writeFile(hookFile, hookLines);
+
+    const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+    assert.equal(snapshot.agents.length, 1);
+    assert.equal(snapshot.agents[0].id, `cursor-local:${hookSessionId}`);
+    assert.equal(snapshot.agents[0].confidence, "typed");
+    assert.equal(snapshot.agents[0].source, "cursor");
+    assert.equal(snapshot.agents[0].sourceKind, "cursor:claude-4.5-sonnet");
+    assert.equal(snapshot.agents[0].label, "Wire Cursor hooks into Agents Office");
+    assert.equal(snapshot.agents[0].latestMessage, "Typed Cursor hook state is now flowing into the office view.");
+    assert.equal(snapshot.agents[0].state, "thinking");
+    assert.equal(snapshot.events.some((event) => event.method === "cursor/local/userMessage"), true);
+    assert.equal(snapshot.events.some((event) => event.method === "cursor/local/fileChange"), true);
+    assert.equal(snapshot.events.some((event) => event.method === "cursor/local/agentMessage"), true);
+  } finally {
+    if (typeof previousCursorProjectsDir === "string") {
+      process.env.CURSOR_PROJECTS_DIR = previousCursorProjectsDir;
+    } else {
+      delete process.env.CURSOR_PROJECTS_DIR;
+    }
+  }
+});
+
+test("cursor hook-backed local failures become typed blocked state", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-hook-failure-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const hooksDir = path.join(projectRoot, ".codex-agents", "cursor-hooks");
+  const sessionId = "cursor-hook-failure-session";
+  const hookFile = path.join(hooksDir, `${sessionId}.jsonl`);
+  const now = Date.now();
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(hooksDir, { recursive: true });
+
+  const hookLines = [
+    JSON.stringify({
+      conversation_id: sessionId,
+      hook_event_name: "postToolUseFailure",
+      timestamp: new Date(now).toISOString(),
+      tool_name: "Shell",
+      tool_input: {
+        command: "npm test"
+      },
+      cwd: projectRoot,
+      error_message: "Command timed out after 30s",
+      failure_type: "timeout",
+      model: "claude-4.5-sonnet"
+    })
+  ].join("\n") + "\n";
+
+  await writeFile(hookFile, hookLines);
+
+  const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+  assert.equal(snapshot.agents.length, 1);
+  assert.equal(snapshot.agents[0].confidence, "typed");
+  assert.equal(snapshot.agents[0].state, "blocked");
+  assert.match(snapshot.agents[0].detail, /timed out/i);
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events[0].method, "cursor/local/commandExecution");
+  assert.equal(snapshot.events[0].phase, "failed");
+});
+
+test("cursor hook snapshot ignores future-skewed stale records when newer lines are appended", { concurrency: false }, async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-hook-skew-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const hooksDir = path.join(projectRoot, ".codex-agents", "cursor-hooks");
+  const sessionId = "cursor-hook-future-skew";
+  const hookFile = path.join(hooksDir, `${sessionId}.jsonl`);
+  const now = Date.now();
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(hooksDir, { recursive: true });
+
+  const hookLines = [
+    JSON.stringify({
+      conversation_id: sessionId,
+      hook_event_name: "stop",
+      timestamp: new Date(now + 7 * 60 * 1000).toISOString(),
+      status: "completed",
+      workspace_roots: [projectRoot],
+      model: "composer-2-fast"
+    }),
+    JSON.stringify({
+      conversation_id: sessionId,
+      hook_event_name: "beforeSubmitPrompt",
+      timestamp: new Date(now - 2_000).toISOString(),
+      prompt: "fresh prompt should win over future-skewed stop",
+      workspace_roots: [projectRoot],
+      model: "composer-2-fast"
+    }),
+    JSON.stringify({
+      conversation_id: sessionId,
+      hook_event_name: "afterAgentResponse",
+      timestamp: new Date(now - 1_000).toISOString(),
+      text: "fresh response should stay visible",
+      workspace_roots: [projectRoot],
+      model: "composer-2-fast"
+    })
+  ].join("\n") + "\n";
+
+  await writeFile(hookFile, hookLines);
+
+  const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+  assert.equal(snapshot.agents.length, 1);
+  assert.equal(snapshot.agents[0].id, `cursor-local:${sessionId}`);
+  assert.equal(snapshot.agents[0].confidence, "typed");
+  assert.equal(snapshot.agents[0].state, "thinking");
+  assert.equal(snapshot.agents[0].latestMessage, "fresh response should stay visible");
+  assert.equal(snapshot.agents[0].label, "fresh prompt should win over future-skewed stop");
+});
+
+test("Cursor project hook recorder accepts utf16 payloads", { concurrency: false }, async () => {
+  const projectRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-hook-script-"));
+  const scriptPath = path.resolve(__dirname, "..", "..", "..", ".cursor", "hooks", "capture-cursor-hook.mjs");
+  const payload = JSON.stringify({
+    conversation_id: "utf16-session",
+    hook_event_name: "afterAgentResponse",
+    text: "hello from utf16"
+  });
+
+  const result = spawnSync("node", [scriptPath, "afterAgentResponse"], {
+    input: Buffer.from(payload, "utf16le"),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODEX_AGENTS_OFFICE_PROJECT_ROOT: projectRoot
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), "{}");
+
+  const outputPath = path.join(projectRoot, ".codex-agents", "cursor-hooks", "utf16-session.jsonl");
+  const raw = await readFile(outputPath, "utf8");
+  const record = JSON.parse(raw.trim());
+  assert.equal(record.conversation_id, "utf16-session");
+  assert.equal(record.hook_event_name, "afterAgentResponse");
+  assert.equal(record.text, "hello from utf16");
+  assert.equal(record.hook_source, "cursor-project-hooks");
+  assert.equal(record.project_root, projectRoot);
 });
 
 test("cursor diagnostics report when the api key is missing", { concurrency: false }, async () => {

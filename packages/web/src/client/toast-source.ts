@@ -184,6 +184,7 @@ export const TOAST_SCRIPT = `
             return null;
           }
           return {
+            id: entry && entry.id ? entry.id : null,
             text,
             title: text,
             kind: "command",
@@ -199,6 +200,7 @@ export const TOAST_SCRIPT = `
         const label = shortenNotificationText(entry && entry.label ? entry.label : "", 18);
         const text = entry && entry.isFileChange && label ? label + " " + title : title;
         return {
+          id: entry && entry.id ? entry.id : null,
           text,
           title,
           kind: "toast",
@@ -219,6 +221,7 @@ export const TOAST_SCRIPT = `
                 return null;
               }
               return {
+                id: item && item.id ? item.id : null,
                 text,
                 title: isCommandItem
                   ? text
@@ -252,6 +255,7 @@ export const TOAST_SCRIPT = `
                 return null;
               }
               return {
+                id: item && item.id ? item.id : null,
                 text,
                 title: stackableToastLineText(item && item.title ? item.title : text, notificationPriorityValue(entry)),
                 linesAdded: Number.isFinite(item && item.linesAdded) ? Number(item.linesAdded) : null,
@@ -555,6 +559,7 @@ export const TOAST_SCRIPT = `
         return [
           entry.projectRoot || "",
           entry.key || "",
+          entry.isFileChange ? (entry.id || "") : "",
           entry.kindClass || "",
           entry.label || "",
           normalizedTitle,
@@ -568,6 +573,11 @@ export const TOAST_SCRIPT = `
       }
 
       function toastLineDedupeKey(entry, line) {
+        if (entry && entry.isFileChange && line && typeof line === "object" && line.id) {
+          const scope = notificationStackKey(entry)
+            || ["toast", entry.projectRoot, entry.key, entry.kindClass || "", entry.anchor || "agent"].join("::");
+          return scope + "::id::" + line.id;
+        }
         const normalizedLine = normalizeToastLineFingerprint(toastLineDisplayText(line));
         if (!normalizedLine) {
           return null;
@@ -579,6 +589,9 @@ export const TOAST_SCRIPT = `
       }
 
       function hasEquivalentToastLine(lines, nextLine) {
+        if (nextLine && typeof nextLine === "object" && nextLine.id) {
+          return lines.some((line) => line && typeof line === "object" && line.id === nextLine.id);
+        }
         const normalizedNextLine = normalizeToastLineFingerprint(toastLineDisplayText(nextLine));
         if (!normalizedNextLine) {
           return false;

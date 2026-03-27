@@ -56,7 +56,7 @@ Current use:
 - resolves a runnable Codex command, then spawns `codex app-server`
 - initializes a JSON-RPC-like session
 - opts into `experimentalApi`
-- opts out of streamed `item/agentMessage/delta` notifications so browser reply toasts can prefer full-message state
+- keeps streamed `item/agentMessage/delta` notifications enabled so Codex reply toasts can update immediately from the typed live feed
 - requests `thread/list`
 - requests `thread/read`
 - resumes active/recent threads with `thread/resume`
@@ -147,7 +147,7 @@ How we use it:
 - generate `resumeCommand`
 - map the session into project rooms using extracted paths
 - keep read-only visibility for older threads outside the live subscription window
-- synthesize fallback assistant-message events from reread desktop rollout threads when live `thread/resume` delivery is unavailable, so normal reply text can still toast
+- synthesize fallback assistant-message events from reread desktop rollout threads only when live `thread/resume` delivery is unavailable, so read-only threads can still toast without replaying healthy subscribed sessions
 
 ### `thread/resume` / `thread/unsubscribe`
 
@@ -161,6 +161,7 @@ How we use it:
 - active threads and threads updated in the last 10 minutes are resumed on the observer connection
 - the observer keeps at most 8 project threads subscribed at once
 - subscription sync now runs in the background so the web server can render before slow desktop thread attaches finish
+- desktop-backed `thread/resume` attaches can take tens of seconds in practice, so the observer now gives subscription sync a 60-second timeout budget before degrading that thread back to `readOnly`
 - stale observer-owned subscriptions are unsubscribed
 - subscribed threads surface as `liveSubscription = subscribed`; older threads stay `readOnly`
 
@@ -196,6 +197,7 @@ Representation today:
 Current-workload occupancy rules on top of that state:
 
 - a local thread stays `isCurrent` while the live monitor still considers the thread ongoing, even if the latest turn now reads as `done`
+- browser desk seating now treats local `status = active` as authoritative for occupancy, so active Codex sessions remain on desks even when the summarized state currently reads `waiting`, `blocked`, or recent `done`
 - a `notLoaded` thread still stays `isCurrent` when `thread/read` shows its latest turn is `inProgress`
 - observer-owned unload/runtime-idle transitions such as `thread/closed` or `thread/status/changed -> notLoaded` are not treated as stop signals by themselves; the monitor confirms stops from turn-terminal events plus reread thread state
 - local desk occupancy no longer uses a generic freshness fallback for non-idle summaries; if a thread is not ongoing, not waiting on the user, and not inside the stop grace window, it is no longer `isCurrent`
@@ -309,7 +311,8 @@ What we define internally:
 
 - scene tile size and compact tile size
 - desk pod span and capacity
-- boss booth span
+- boss office footprint
+- boss office top inset
 - wall/top-band depth
 - desk-area start ratio
 - cubicle-group spacing
@@ -321,6 +324,7 @@ How we use it:
 
 - derive browser office layout from tile spans instead of free-floating per-renderer pixel literals
 - keep desk slots stable across live updates so current workload does not repack unpredictably
+- keep the left boss column compact enough for stacked offices instead of one oversized booth per lead, starting one floor tile below the floor start and running as contiguous 3-tile office slots
 - place rec-strip furniture on the first grid row and keep it within the top 2 rows of floor depth
 - treat text scale as a global viewer setting while keeping prefab geometry internal
 - keep the browser map as a retained scene host so live data updates scene entities without replacing the map subtree
@@ -649,31 +653,27 @@ How this project uses that surface:
 
 ## Cursor
 
-Cursor support now combines a local inferred adapter with the official cloud-agent API.
+Cursor support now combines a typed local hook-sidecar adapter and the official cloud-agent API.
 
 Primary code path:
 
 - `packages/core/src/cursor.ts`
 
-### Cursor local workspace adapter
+### Cursor local hook adapter
 
 What we read:
 
-- Cursor `~/.cursor/projects/*/agent-transcripts/*.jsonl`
-- Cursor `User/workspaceStorage/*/workspace.json`
-- Cursor `state.vscdb` and `state.vscdb.backup`
-- recent Cursor `logs/*/main.log` wakelock activity for `reason="agent-loop"`
+- project-owned Cursor hooks from `<project-root>/.cursor/hooks.json`
+- typed hook sidecars in `.codex-agents/cursor-hooks/<conversation-id>.jsonl`
 
 How we use it:
 
-- prefer transcript-backed local Cursor Agent sessions when project-matched `agent-transcripts` exist
-- read recent local prompts and replies from transcript JSONL so the office view reflects the real Cursor Agent chat stream
-- discover local Cursor workspaces and map them onto projects by normalized workspace root
-- fall back to fragmented Composer, prompt, generation, and background-composer JSON parsed directly from raw SQLite bytes when transcripts are unavailable
-- infer current local Cursor session state, recent prompt or reply text, branch, and light activity
-- prefer `lastFocusedComposerIds` plus generation recency over stale `selectedComposerIds` tab order when deciding which local Cursor chat is actually active
-- keep stale retained composers out of the live workload view so one new chat does not fan out into several fake active agents
-- render those sessions as read-only with `confidence = inferred`
+- treat typed Cursor local hook sidecars as the only local Cursor source
+- decode hook stdin defensively for Windows shell encodings as well as UTF-8 so project hooks keep writing sidecars in mixed Windows/WSL setups
+- map official Cursor hook events such as `beforeSubmitPrompt`, `preToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterAgentResponse`, `afterAgentThought`, `sessionStart`, `sessionEnd`, `stop`, `subagentStart`, `subagentStop`, and `preCompact`
+- surface typed local Cursor prompt, file-change, command, MCP, reasoning, and assistant-response events in the shared office model
+- age stale hook-backed live states into `done` and then `idle` instead of leaving a workstation occupied forever
+- render hook-backed sessions with `confidence = typed`
 
 ### Cursor cloud project matching
 
@@ -693,11 +693,14 @@ How we use it:
 
 Official docs:
 
+- [Cursor hooks](https://cursor.com/docs/hooks)
 - [Cursor background agents](https://cursor.com/docs/cloud-agent)
 - [Cursor cloud-agent API](https://cursor.com/docs/cloud-agent/api/endpoints)
 
 What Cursor exposes:
 
+- project and user hook configuration in `hooks.json`
+- typed local hook events for session lifecycle, prompts, tool use, shell/MCP execution, file edits, thoughts/responses, compaction, and subagent lifecycle
 - `GET /v0/agents` for agent ids, status, summary, repo/ref, branch, and target URLs
 - `GET /v0/agents/{id}/conversation` for typed `user_message` / `assistant_message` history
 - agent conversation history
@@ -730,7 +733,7 @@ What Cursor still does not provide here:
 
 - Codex-style local live thread subscriptions
 - durable typed approvals or input-wait state for local IDE sessions
-- an official local session feed equivalent to the Codex app-server
+- an official local push feed equivalent to the Codex app-server
 
 ## Representation In This Project
 

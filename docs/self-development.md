@@ -34,7 +34,7 @@ A good iteration improves at least one of these:
 
 ## Known weak spots
 
-- Codex desktop session visibility may still be incomplete depending on app-server exposure.
+- Codex desktop session visibility is much stronger now, but desktop-backed observer attaches can still be slow enough to leave a restarted server temporarily read-only before subscription settles.
 - Claude support still falls back to transcript inference when no project-local hook sidecars are configured.
 - OpenClaw support is currently workspace-path exact-match only, so broader OpenClaw workspaces do not yet project into per-repo office floors.
 - Cursor local support is inferred from workspace storage and logs rather than coming from an official local session API, so it remains weaker and less explicit than Codex app-server visibility.
@@ -62,10 +62,12 @@ A good iteration improves at least one of these:
 - verify active agents are visibly placed at workstations, not floating below them
 - verify a single active agent does not spawn an empty mirrored workstation
 - verify waiting/resting agents use the Rec Room instead of staying at desks
+- verify a local Codex thread that app-server still reports as `status.type = "active"` stays on-desk even if its summarized state currently reads waiting, blocked, or recently done
 - verify desk layout remains grid-derived and stable across live updates instead of repacking on ordinary state changes
 - verify a newly active agent takes a free desk instead of stealing an already-occupied stable seat from another live agent
 - verify resting/rec agents do not reshuffle seats on ordinary live updates
 - verify visual-only updates such as debug overlays do not trigger desk/recside movement
+- verify a restarted fleet server eventually recovers the current desktop thread to `liveSubscription = subscribed` instead of leaving it stuck in `readOnly`
 - verify rec-strip furniture starts on the first floor-grid row and does not exceed 2 tiles of depth from the top band
 - verify global text scale changes hover/toast/map text without changing room geometry or desk assignment
 - verify approval, input-wait, file-change, command-run, and turn lifecycle states have clear visible notification paths
@@ -75,6 +77,7 @@ A good iteration improves at least one of these:
 - verify OpenClaw gateway sessions appear only for projects whose normalized root matches the configured OpenClaw agent workspace
 - verify OpenClaw sessions preserve parent-child structure through the shared `parentThreadId` hierarchy
 - verify inferred local Cursor sessions appear for repos that Cursor has opened locally and are marked as inferred in hover/session detail
+- verify Cursor hook-backed local sessions are visibly marked as typed when `.codex-agents/cursor-hooks/<conversation-id>.jsonl` exists
 - verify Cursor background agents appear only for repos whose normalized `remote.origin.url` matches the selected project
 - verify Cursor API-backed sessions are visibly marked as typed rather than inferred in hover/session detail
 
@@ -83,7 +86,7 @@ A good iteration improves at least one of these:
 - map more app-server `turn/*` and `item/*` events into explicit character motion
 - make started/completed/interrupted/failed turn phases visually distinct beyond shared toast styling
 - add direct approval/input action affordances from the browser queue back into Codex
-- decide whether Cursor local CLI/history can tighten the new inferred local Cursor adapter into something closer to a durable typed session feed
+- decide whether Cursor hook sidecars should also capture `beforeReadFile` and Tab-specific events or stay focused on Agent-only workload visibility
 - decide whether OpenClaw needs broader workspace containment rules beyond exact workspace-root equality
 - tighten the workstation prefab using only the intended PixelOffice station slices
 - improve side-facing avatar placement and interaction poses

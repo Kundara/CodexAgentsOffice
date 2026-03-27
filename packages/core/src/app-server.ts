@@ -129,8 +129,7 @@ export class CodexAppServerClient {
         version: "0.1.0"
       },
       capabilities: {
-        experimentalApi: true,
-        optOutNotificationMethods: ["item/agentMessage/delta"]
+        experimentalApi: true
       }
     });
     client.notify("initialized");

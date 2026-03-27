@@ -107,7 +107,8 @@ Current browser settings surfaces are:
 
 - Use current workload by default.
 - Active local Codex work should occupy desks.
-- Waiting/resting lead sessions belong in the rec area, not at desks.
+- A local Codex session should stay on a desk whenever app-server still reports `status.type = "active"`, even if its active flags currently mean waiting for approval or user input, or the latest visible item has already reached a recent `done` summary.
+- Waiting/resting lead sessions belong in the rec area only after the session is no longer active at the app-server/runtime level.
 - A local thread that is still truly ongoing may keep its workstation through short-lived freshness/current signal dips between polls, but stale `notLoaded` locals must not hold desks just because they were recently current.
 - Workstation release should be conservative. Ordinary poll jitter, UI rerenders, debug toggles, or temporary freshness gaps must not pull a still-working agent off a desk.
 - A workstation should only be released when the thread has actually settled into a resting/finished state according to the browser placement rules, with the explicit post-stop cooldown described below.
@@ -141,7 +142,8 @@ Internal settings should include at least:
 
 - base tile size
 - compact tile size
-- boss booth size
+- boss office footprint
+- boss office top inset
 - desk pod size
 - desk pod capacity
 - desk-area start ratio
@@ -188,10 +190,16 @@ Global text scale rules:
 
 ### Boss / lead behavior
 
-- Lead sessions with active subagents can use the slimmer left lead lane.
-- This lane should stay visually lighter than a large boxed office.
+- Lead sessions with active subagents should move into a dedicated left-side boss-office column.
+- Each boss slot in that column should render as a compact office shell with the boss workstation placed inside the office footprint.
+- The boss-office column should start one floor tile below the floor start and continue contiguously to the bottom of the room.
+- In the standard room height, the default internal boss-office layout should fit four stacked bosses by using contiguous 3-tile-tall office slots with no vertical gap.
+- The boss-office column must stay compact enough for several bosses to stack vertically on the left side of the room without consuming the main desk floor.
 - Boss-to-subagent relationships may be shown on hover, but they should stay secondary to desk occupancy and scene motion.
-- Boss booth size should come from internal tile settings rather than per-renderer pixel literals.
+- Boss-to-subagent relationship arrows should only appear when the user is hovering or focusing that boss in the scene; hovering a child, a generic desk agent, or a session card should not reveal them.
+- Relationship arrows should render above offices and avatars inside the map scene, but still remain behind toasts, hover cards, and other browser chrome.
+- Relationship arrows should use smooth spline-like curves with explicit arrowheads aligned to the curve's end direction so the target is unambiguous.
+- Boss office footprint should come from internal tile settings rather than per-renderer pixel literals.
 
 ### Desk spacing and grouping
 
@@ -201,8 +209,9 @@ Global text scale rules:
 - The current internal defaults are:
   `space between cubicle groups = 1 tile`
   `space between columns = 4 tiles`
-- Single-agent occupancy may collapse to a centered seat inside the same pod footprint instead of creating an empty mirrored station.
-- Within a two-seat pod, left/right seat choice should remain stable for an already-seated agent whenever possible.
+- A single occupied two-seat pod should keep the live workstation anchored to a real seat cell on the grid instead of recentring within the whole pod footprint.
+- By default, the first occupied seat in a two-seat pod should use the left seat cell, and a newly added second seat should grow in the right seat cell.
+- Within a two-seat pod, left/right seat choice should remain stable for an already-seated agent whenever possible, including across ordinary rerenders and refreshes.
 
 ### Rec-area placement
 

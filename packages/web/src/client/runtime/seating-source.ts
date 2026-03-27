@@ -20,6 +20,9 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
           if (agent.statusText === "notLoaded") {
             return agent.isOngoing === true;
           }
+          if (agent.statusText === "active") {
+            return agent.isCurrent === true;
+          }
           if (agent.state === "done") {
             return agent.isCurrent === true;
           }
@@ -28,23 +31,13 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
           return false;
         }
         if (agent.source === "local") {
-          const updatedAt = parseAgentUpdatedAt(agent.updatedAt);
-          const recentlyLive = Number.isFinite(updatedAt)
-            && Date.now() - updatedAt <= 90 * 1000;
           if (agent.isOngoing === true) {
             return true;
           }
-          if (agent.isCurrent === true) {
-            return agent.statusText !== "notLoaded" && isDeskLiveLocalState(agent.state);
+          if (agent.isCurrent !== true) {
+            return false;
           }
-          if (
-            isDeskLiveLocalState(agent.state)
-            && agent.statusText !== "notLoaded"
-            && recentlyLive
-          ) {
-            return true;
-          }
-          return false;
+          return agent.statusText !== "notLoaded" && isDeskLiveLocalState(agent.state);
         }
         return agent.isCurrent === true;
       }

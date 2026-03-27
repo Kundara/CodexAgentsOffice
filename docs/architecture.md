@@ -61,9 +61,10 @@ The live browser path now uses a hybrid approach:
 - active and recent threads are resumed on the observer connection so the app can receive live `turn/*`, `item/*`, approval, input, and `serverRequest/resolved` events
 - observer runtime unload notifications such as `thread/closed` or `thread/status/changed -> notLoaded` are treated as subscription state, not as proof that the underlying thread resolved
 - slow desktop `thread/resume` attaches now happen in the background so the web server does not block initial rendering on them
+- desktop-backed `thread/resume` can still take tens of seconds, so the observer keeps a wider 60-second attach budget before it marks that live path degraded and falls back to read-only behavior
 - watched thread JSONL paths trigger quick re-reads when a local session changes
-- reread desktop rollout threads can synthesize message notifications from the newest assistant text when the live subscription path is degraded
-- streamed `item/agentMessage/delta` notifications are intentionally opted out on the observer connection; reply toasts prefer full reply items or reread thread messages
+- reread desktop rollout threads only synthesize message notifications from the newest assistant text when the live subscription path is degraded or read-only
+- streamed `item/agentMessage/delta` notifications stay enabled on the observer connection so Codex reply toasts can update immediately from the typed live feed
 - non-final commentary messages on interrupted desktop turns are still treated as active work so subscribed agents do not briefly vacate their desk between commentary updates
 - completed process-only items such as `reasoning` or `contextCompaction` now settle out of synthetic `thinking` once the turn is done, so finished desktop threads do not keep reading as active
 - periodic discovery still runs so newly created sessions appear without a page refresh
@@ -109,7 +110,7 @@ Sources:
 - once a top-level thread actually stops, it keeps its workstation for a short 5-second cooldown so the final reply remains readable before it cools into rec-area visibility
 - stale local `notLoaded` sessions no longer occupy desks just because they are still recent; workstation seating now requires true ongoing work or the explicit stop cooldown
 - after that grace window, only recent top-level lead sessions cool down into the rec area; finished subagents despawn instead of idling there
-- lead sessions with more than one active subagent now use a slimmer left-side lead lane with a distinct floor treatment and horizontal separators, instead of a large boxed office
+- lead sessions with active subagents now move into a compact stacked left-side boss-office column, with each boss workstation rendered inside its own small office shell
 - session panel includes a durable cross-project "needs you" queue for approval/input waits
   these entries now come from typed request hooks, not from regexes over session detail
   - session cards expose provenance/confidence so Codex-native, Claude transcript, Claude hook-backed, and Cursor API-backed state stay distinguishable
@@ -269,17 +270,18 @@ The active office view currently favors an open station language over enclosed c
 - mirrored two-seat workstation pods define the primary desk language
 - workstation slots are pinned to a fixed floor grid instead of being repacked when new agents appear
 - workstation slot ownership should be sticky across incremental scene updates; a scene rerender or non-positional refresh must not discard prior slot memory
-- desk columns start around one-fifth of the room width, leaving room for a compact lead lane on the left when needed
+- desk columns start around one-fifth of the room width, leaving room for a compact stacked boss-office column on the left when needed
 - each workstation column now uses a single visible cubicle stack with 3 tightly stacked workstation rows so active desks stay inside a standard room height
 - role grouping prefers to keep the same agent types inside the same visible workstation stack before spilling into a new column
-- a pod collapses to a single centered seat when only one live agent occupies it
+- a single occupied two-seat pod stays anchored to a real seat cell instead of collapsing to a centered pseudo-seat
+- the first occupied seat in a pod defaults to the left seat cell, and a second occupied seat expands into the right seat cell without shifting the first workstation
 - newly occupied seats use a short retro blink reveal so the workstation appears before the worker settles
 - avatars themselves no longer flash on enter or exit; only the workstation reveal animates, and removals disappear immediately once the thread leaves current workload
 - left and right seats face opposite directions inside each pod
 - seated agents flip with the workstation direction and align to the desk/chair reach point
 - lead-session arrivals and all departures use the center-top room entrance as the path anchor so workers visibly leave through the doorway
 - entering subagents split off from a nearby position around their parent, blink briefly in place, then move to their assigned desk or wall-side slot
-- lead sessions with more than one spawned subagent move into a dedicated left-side lead lane with a distinct floor treatment and open separators instead of a boxed wall
+- lead sessions with active subagents move into a dedicated left-side boss-office column; the column starts one floor tile below the floor start and uses contiguous 3-tile-tall office slots so four bosses can stack in a standard room while still reading as offices instead of rounded placeholder frames
 - hovering a boss reveals arrow lines from that office to the related spawned subagents
 - chairs and seated reach points sit slightly outward from the desk so the monitor relationship reads cleanly
 - workstation computers currently use the single complete desk cut, avoiding the broken narrow pseudo-monitor asset
@@ -290,10 +292,11 @@ The active office view currently favors an open station language over enclosed c
 - the rec strip combines vending, counter, doors, clock, plants, sofa, and shelf props inside the same scene
 - long task titles stay in hover cards and the session panel instead of being drawn over the map
 - the floor is restored to the blue office-strip language from the reference art, including an upper wall-side walkway for rec facilities
-- layout constants are now expressed as internal tile-grid settings instead of only pixel literals, so boss booths, desk columns, rec-strip depth, and inter-cubicle spacing all derive from a single floor grid
+- layout constants are now expressed as internal tile-grid settings instead of only pixel literals, so boss-office footprints, desk columns, rec-strip depth, and inter-cubicle spacing all derive from a single floor grid
 - global viewer settings are separate from internal scene settings; the first user-facing control is text scale, clamped from `0.75x` to `2.00x`, while prefab sizing and spacing stay internal
 - the current browser renderer is Pixi-first for the office map, with HTML retained only for overlays, controls, and fallback terminal output
 - browser placement rules are intentionally a little stickier than raw workload freshness, because a live local thread should not visually bounce desk -> rec -> desk during short polling gaps
+- Codex-local desk seating now also treats app-server `status.type = "active"` as the decisive occupancy signal, so an active session does not drop into the rec strip just because its summarized state temporarily reads waiting or recently done
 
 ## Secondary Claude support
 
@@ -313,19 +316,14 @@ This is useful because it broadens observability across the machine, but it shou
 
 Cursor support now has two paths:
 
-- a local inferred adapter that prefers Cursor agent transcripts under `~/.cursor/projects/*/agent-transcripts/*.jsonl`, then falls back to workspace storage and recent logs for older/local-only state
+- a local typed adapter that reads Cursor hook sidecars under `.codex-agents/cursor-hooks/*.jsonl`, with the repo-shipped project hooks defined in `.cursor/hooks.json`
 - the official cloud-agent API when `CURSOR_API_KEY` is configured or a saved app-level Cursor API key exists
 
-The local inferred adapter:
+The local typed adapter:
 
-- discovers Cursor project transcript folders from `~/.cursor/projects/<project-slug>/agent-transcripts`
-- reads transcript JSONL directly for Cursor Agent sessions so recent local prompts and replies come from the actual chat transcript instead of only from workspace sidebar metadata
-- discovers recent Cursor workspaces from `User/workspaceStorage/*/workspace.json`
-- falls back to parsing `state.vscdb` / `state.vscdb.backup` directly to recover composer, prompt, generation, and background-composer state when transcript files are unavailable
-- infers current local Cursor work by matching the stored workspace root back onto the selected project
-- prefers `lastFocusedComposerIds` plus nearest generation timing over stale `selectedComposerIds` tab order when picking the primary local Cursor chat
-- suppresses stale retained composers so fresh workspace activity only lights up the current/recent local Cursor work instead of every old chat tab
-- renders those local sessions with `source = cursor` and `confidence = inferred`
+- consumes project-owned Cursor hook sidecars written from the official Cursor Hooks surface
+- maps typed local prompt, tool, shell/MCP, file-edit, thought/response, compaction, and session lifecycle events into the shared workload model
+- keeps those sessions visibly distinct from cloud polling with `confidence = typed`
 
 The cloud typed adapter:
 
@@ -335,7 +333,7 @@ The cloud typed adapter:
 - renders Cursor cloud agents in the same room and session model with `confidence = typed`
 - surfaces typed status, summary, branch, repo, and target URL data
 
-Cursor still does not provide Codex-style local live thread subscriptions here, and the documented webhook surface only covers terminal `ERROR` / `FINISHED` status changes, so Cursor visibility remains polling-based rather than app-server-grade live streaming.
+Cursor still does not provide Codex-style local live thread subscriptions here, and the documented webhook surface only covers terminal `ERROR` / `FINISHED` cloud-agent status changes, so Cursor visibility remains hook-and-poll based rather than app-server-grade live streaming.
 
 ## Secondary OpenClaw support
 

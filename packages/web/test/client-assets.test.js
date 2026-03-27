@@ -31,6 +31,104 @@ test("client runtime does not seat notLoaded local threads at workstations just 
   );
 });
 
+test("client runtime keeps app-server active local threads on desks before waiting or done fallbacks", () => {
+  const layoutSource = readFileSync(
+    join(__dirname, "../src/client/runtime/layout-source.ts"),
+    "utf8"
+  );
+  const seatingSource = readFileSync(
+    join(__dirname, "../src/client/runtime/seating-source.ts"),
+    "utf8"
+  );
+
+  assert.match(layoutSource, /if \(agent\.statusText === \\"active\\"\) \{\\n\s+return agent\.isCurrent === true;/);
+  assert.match(seatingSource, /if \(agent\.statusText === "active"\) {\n\s+return agent\.isCurrent === true;/);
+});
+
+test("client runtime only keeps ordinary local desks for current workload", () => {
+  const layoutSource = readFileSync(
+    join(__dirname, "../src/client/runtime/layout-source.ts"),
+    "utf8"
+  );
+  const seatingSource = readFileSync(
+    join(__dirname, "../src/client/runtime/seating-source.ts"),
+    "utf8"
+  );
+
+  assert.match(layoutSource, /if \(agent\.isCurrent !== true\) \{\\n\s+return false;/);
+  assert.doesNotMatch(layoutSource, /const recentlyLive = Number\.isFinite\(updatedAt\)/);
+  assert.match(seatingSource, /if \(agent\.isCurrent !== true\) {\n\s+return false;/);
+  assert.doesNotMatch(seatingSource, /const recentlyLive = Number\.isFinite\(updatedAt\)/);
+});
+
+test("runtime source keeps desk seats stable when a second workstation appears in a pod", () => {
+  const runtimeSource = readFileSync(
+    join(__dirname, "../src/client/runtime-source.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_STABLE_DESK_SEATS = patchRuntimeSection('),
+    "runtime source should patch the raw scene source for stable desk seats"
+  );
+  assert.ok(
+    runtimeSource.includes('const leftCellX = padX;'),
+    "single-seat pods should anchor to the left seat cell"
+  );
+  assert.ok(
+    runtimeSource.includes('const seatMirrored = hasBothSides'),
+    "desk seating should preserve a stable left/right seat choice"
+  );
+  assert.ok(
+    runtimeSource.includes('const cellX = seatMirrored ? rightCellX : leftCellX;'),
+    "desk seating should derive workstation X from stable seat cells"
+  );
+  assert.ok(
+    runtimeSource.includes('mirrored: seatMirrored,'),
+    "desk visuals should propagate the stable seat choice into mirrored workstation state"
+  );
+});
+
+test("runtime source strips markdown formatting markers from display text", () => {
+  const runtimeSource = readFileSync(
+    join(__dirname, "../src/client/runtime-source.ts"),
+    "utf8"
+  );
+
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_MARKDOWN = patchRuntimeSection('),
+    "runtime source should patch display-text cleanup into the layout section"
+  );
+  assert.ok(
+    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_PATH_SCAN = patchRuntimeSection('),
+    "runtime source should patch path scanning onto the stripped display text"
+  );
+  assert.ok(
+    runtimeSource.includes('function stripDisplayMarkdown(value) {'),
+    "runtime source should define a display markdown stripper"
+  );
+  assert.ok(
+    runtimeSource.includes('.replace(/\\\\[([^\\\\]]+)\\\\]\\\\(([^)]+)\\\\)/g, "$1")'),
+    "display text cleanup should collapse markdown links to their visible label"
+  );
+  assert.ok(
+    runtimeSource.includes('.split(String.fromCharCode(96)).join("")'),
+    "display text cleanup should strip inline code markers without leaking backticks"
+  );
+  assert.ok(
+    runtimeSource.includes('const plainText = stripDisplayMarkdown(normalized);'),
+    "normalizeDisplayText should strip markdown before path cleanup"
+  );
+  assert.ok(
+    runtimeSource.includes('const next = plainText.indexOf("/mnt/", index);'),
+    "path discovery should run against stripped display text"
+  );
+  assert.ok(
+    runtimeSource.includes('output += plainText.slice(index, next) + (cleaned || wslToWindowsPath(candidate));'),
+    "path cleanup should run against stripped display text"
+  );
+});
+
 test("toast renderer keeps the message, file-change, and command toast classes and chrome", () => {
   const toastSource = readFileSync(
     join(__dirname, "../src/client/toast-source.ts"),
@@ -116,5 +214,37 @@ test("typed snapshot events still allow message toasts even when the agent is no
   assert.match(
     toastSource,
     /if \(\n?\s*!agent\.isCurrent\n?\s*&& agent\.state !== "waiting"\n?\s*&& agent\.state !== "blocked"\n?\s*&& event\.kind !== "message"\n?\s*&& !\(event\.kind === "tool" && event\.itemType === "webSearch"\)\n?\s*\) \{/,
+  );
+});
+
+test("boss relationship arrows are hover-only curved overlays with arrowheads", () => {
+  const runtimeSource = readFileSync(
+    join(__dirname, "../src/client/runtime-source.ts"),
+    "utf8"
+  );
+  const specSource = readFileSync(
+    join(__dirname, "../../../docs/spec.md"),
+    "utf8"
+  );
+
+  assert.ok(
+    runtimeSource.includes("const CLIENT_RUNTIME_NAVIGATION_SOURCE_WITH_RELATIONSHIP_LINES = patchRuntimeSection("),
+    "runtime source should patch relationship arrow rendering in the navigation section"
+  );
+  assert.ok(
+    runtimeSource.includes(".bezierCurveTo(control1X, control1Y, control2X, control2Y, line.x2, line.y2)"),
+    "relationship arrows should use curved bezier paths"
+  );
+  assert.ok(
+    runtimeSource.includes("const arrowHead = new PIXI.Graphics()"),
+    "relationship arrows should draw explicit arrowheads"
+  );
+  assert.ok(
+    runtimeSource.includes("state.hoveredRelationshipBossKey"),
+    "relationship arrows should only appear for the currently hovered boss"
+  );
+  assert.match(
+    specSource,
+    /Boss-to-subagent relationship arrows should only appear when the user is hovering or focusing that boss in the scene;/,
   );
 });

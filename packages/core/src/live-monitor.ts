@@ -38,7 +38,9 @@ const RECENT_EVENT_RETENTION_MS = 90 * 1000;
 // Desktop-backed threads can take noticeably longer to resume than simple CLI
 // sessions, and a too-short timeout drops the live item stream we need for
 // `item/agentMessage/*` notifications.
-const APP_SERVER_SUBSCRIPTION_TIMEOUT_MS = 25000;
+// Desktop-backed thread attaches can easily take 20s+ on large rollouts.
+// Keep a wider budget so live subscriptions don't flap back to read-only.
+const APP_SERVER_SUBSCRIPTION_TIMEOUT_MS = 60000;
 const CLOUD_NOTE_LEGACY_PREFIX = "Codex cloud list unavailable:";
 const CLOUD_NOTE_PREFIX = "Codex cloud ";
 const ROLLOUT_TAIL_BYTES = 512 * 1024;
@@ -766,7 +768,13 @@ export function buildDashboardEventFromAppServerMessage(
     case "item/completed":
       return buildEventFromItem(context, method, params);
     case "item/agentMessage/delta":
-      return null;
+      return eventBase(context, method, params, {
+        itemId: extractItemId(params),
+        kind: "message",
+        phase: "updated",
+        title: "Reply updated",
+        detail: shorten(asString(params.delta) ?? asString(params.textDelta) ?? "Reply")
+      });
     case "item/plan/delta":
       return eventBase(context, method, params, {
         itemId: extractItemId(params),
@@ -1778,6 +1786,7 @@ export class ProjectLiveMonitor extends EventEmitter {
 
     try {
       const wasHydrated = this.hydratedThreadIds.has(threadId);
+      const hasLiveSubscription = this.subscribedThreadIds.has(threadId);
       const previousThread = this.threads.get(threadId) ?? null;
       const thread = await this.client.readThread(threadId);
       this.clearMatchingNote(`Thread refresh failed (${threadId.slice(0, 8)}):`);
@@ -1791,6 +1800,7 @@ export class ProjectLiveMonitor extends EventEmitter {
       const nextMessage = latestThreadAgentMessage(thread);
       if (
         wasHydrated
+        && !hasLiveSubscription
         && nextMessage
         && (
           nextMessage.itemId !== previousMessage?.itemId

@@ -32,6 +32,7 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 Browser workload behavior:
 
 - desks are for truly ongoing work plus a short top-level done cooldown of about 5 seconds
+- local Codex sessions stay on desks while app-server still reports `status.type = "active"`, even if the latest visible item is waiting for input/approval or has already streamed a recent reply
 - the rec area holds recent resting lead sessions, not stale active-looking placeholders
 - stale local `notLoaded` threads and completed process-only items like context compaction no longer count as active desk work after the turn has actually finished
 
@@ -42,7 +43,7 @@ Browser workload behavior:
 | Codex runtime (`codex app-server` via CLI or app) | V | V | V | V | V |
 | Claude Agent SDK + hooks | V | basic | V | basic | X |
 | Claude local transcripts only | V | inferred | X | X | X |
-| Cursor local workspace state | V | inferred | X | X | X |
+| Cursor local hooks | V | basic | X | basic | X |
 | Cursor cloud agents | V | cloud | X | basic | V |
 | OpenClaw gateway | V | basic | X | basic | X |
 
@@ -70,7 +71,7 @@ That bootstraps the workspace if needed, rebuilds, and starts the web server on 
 - On native Windows, a WSL-installed Codex CLI is also supported through `wsl.exe` when no Windows-side `codex.cmd` is available
 - Claude local sessions for passive Claude visibility
 - Claude hooks or Agent SDK bridge for stronger typed Claude visibility
-- an installed Cursor app for inferred local Cursor visibility from workspace storage and logs
+- an installed Cursor app for local Cursor visibility
 - `CURSOR_API_KEY` or a saved Cursor API key in the web Settings popup for Cursor cloud-agent visibility
 - OpenClaw gateway access for OpenClaw visibility
 
@@ -82,7 +83,54 @@ npm start
 
 Open [http://127.0.0.1:4181](http://127.0.0.1:4181).
 
-Local Cursor workspace sessions are inferred automatically when Cursor has opened the repo on this machine. For Cursor background-agent visibility, open `Settings` in the web header and save a Cursor API key once. The server stores that key in a machine-local app settings file outside the repo, and a process-level `CURSOR_API_KEY` still overrides the saved value when both are present.
+This repo now ships project-level Cursor hooks in `.cursor/hooks.json`. When the repo is opened in a trusted Cursor workspace, those hooks append typed local session sidecars into `.codex-agents/cursor-hooks/`, and Agents Office now reads local Cursor activity from those hook sidecars only. If the hooks have not run yet, local Cursor activity will stay absent instead of falling back to transcript or workspace-storage inference. For Cursor background-agent visibility, open `Settings` in the web header and save a Cursor API key once. The server stores that key in a machine-local app settings file outside the repo, and a process-level `CURSOR_API_KEY` still overrides the saved value when both are present.
+
+#### Add Cursor hooks to another repo
+
+To make another repo visible to Agents Office through local Cursor activity:
+
+1. Create a `.cursor/` folder in that repo.
+2. Copy the exact hook files from this repo:
+   - `.cursor/hooks.json`
+   - `.cursor/hooks/capture-cursor-hook.mjs`
+3. Keep the script path the same, so every hook command still runs `node .cursor/hooks/capture-cursor-hook.mjs <event-name>`.
+4. Open that repo in a trusted Cursor workspace and send one fresh agent prompt.
+
+The committed hook config in this repo currently subscribes to:
+
+- `sessionStart`
+- `sessionEnd`
+- `beforeSubmitPrompt`
+- `preToolUse`
+- `postToolUse`
+- `postToolUseFailure`
+- `subagentStart`
+- `subagentStop`
+- `beforeShellExecution`
+- `beforeMCPExecution`
+- `afterShellExecution`
+- `afterMCPExecution`
+- `afterFileEdit`
+- `afterAgentResponse`
+- `afterAgentThought`
+- `stop`
+- `preCompact`
+
+The recorder script:
+
+- reads Cursor hook payloads from `stdin`
+- tolerates mixed shell encodings including UTF-8 and UTF-16LE
+- writes JSONL sidecars to `.codex-agents/cursor-hooks/<conversation-id>.jsonl`
+- returns neutral hook responses such as `{ "continue": true }` or `{ "permission": "allow" }` when Cursor expects one
+
+Minimal verification:
+
+1. Open the target repo in Cursor.
+2. Send one agent prompt.
+3. Confirm a fresh `.codex-agents/cursor-hooks/<conversation-id>.jsonl` file appears.
+4. Refresh Agents Office.
+
+If you want the exact committed files as the source of truth, see [`.cursor/hooks.json`](.cursor/hooks.json) and [`.cursor/hooks/capture-cursor-hook.mjs`](.cursor/hooks/capture-cursor-hook.mjs).
 
 Fleet mode is the default. For a focused single-project run:
 
@@ -153,6 +201,7 @@ Preferred sources:
 - `codex cloud list --json` for cloud and web tasks
 - Claude Agent SDK session APIs and Claude hook sidecars when available
 - Claude local transcripts as fallback
+- Cursor project hook sidecars in `.codex-agents/cursor-hooks/*.jsonl` when Cursor runs the committed `.cursor/hooks.json`
 - Cursor cloud-agent API
 - OpenClaw gateway sessions
 

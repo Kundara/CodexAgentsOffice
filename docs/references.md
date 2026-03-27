@@ -4,6 +4,8 @@
 
 - [Codex App Server](https://developers.openai.com/codex/app-server)
   Primary local integration surface for threads, turns, items, approvals, and live notifications.
+- [Codex App Server events](https://developers.openai.com/codex/app-server#events)
+  Source of truth for notification semantics such as `thread/status/changed` and the meaning of active desktop thread state while the observer is attached.
 - [Codex Cloud](https://developers.openai.com/codex/cloud)
   Supported surface for Codex web/cloud task listing.
 - [Codex IDE](https://developers.openai.com/codex/ide)
@@ -39,6 +41,8 @@
 
 ## Cursor
 
+- [Cursor Hooks](https://cursor.com/docs/hooks)
+  Official local hook lifecycle, `hooks.json` configuration, event schemas, matcher rules, and project-hook distribution model.
 - [Cursor Background Agents](https://docs.cursor.com/en/background-agents)
   Product-level overview for remote background agents, follow-ups, takeover, and supported model constraints.
 - [Cursor Cloud Agents](https://cursor.com/docs/cloud-agent)

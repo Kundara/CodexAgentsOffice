@@ -25,6 +25,7 @@ Entries stay under the active version until an explicit version bump is requeste
 - Added Windows Codex command fallback support by extracting the Microsoft Store app bundle into a local cache, with WSL path conversion support for mixed Windows/WSL setups.
 - Added an opt-in OpenClaw integration that reads official Gateway session and config surfaces, discovers recent OpenClaw workspaces, and maps matching OpenClaw sessions into the shared office snapshot model.
 - Added a Claude Agent SDK bridge in `packages/core` that can write typed Claude hook sidecars into `.codex-agents/claude-hooks/<session-id>.jsonl` for stronger session and tool correlation.
+- Added committed project-level Cursor hooks in `.cursor/hooks.json` plus a repo hook recorder script that writes typed local Cursor sidecars into `.codex-agents/cursor-hooks/<conversation-id>.jsonl`.
 - Added a root `npm start` bootstrap flow that installs if needed, rebuilds the workspace, and launches the web server on `4181`.
 
 ### Changed
@@ -35,7 +36,7 @@ Entries stay under the active version until an explicit version bump is requeste
 - Changed the web server structure to use `server/`, `render/`, and `client/` internal folders while keeping the public routes and `startWebServer` surface stable.
 - Changed Cursor API key resolution so saved app settings now backfill `CURSOR_API_KEY` for Cursor background-agent loading across snapshot and watch flows, while the process environment still takes precedence.
 - Changed Cursor documentation and settings copy to distinguish automatic local Cursor visibility from optional API-key-backed Cursor cloud/background agents.
-- Changed local Cursor session loading to prefer `~/.cursor/projects/*/agent-transcripts/*.jsonl` when available, falling back to workspace `state.vscdb` inference only for older or transcript-less sessions.
+- Changed local Cursor session loading so project hook sidecars in `.codex-agents/cursor-hooks` are now the only local Cursor source; transcript and workspace-state inference no longer drive the office view.
 - Expanded the shared snapshot shape with git-backed project identity metadata and generic remote-agent provenance so a future secured multiplayer sync path can reuse the existing model.
 - Reworked the office renderer around internal scene settings, grid-based placement, and reusable scene render state instead of looser ad hoc layout math.
 - Expanded Cursor integration to treat agents as cloud work, support paginated agent fetches, and normalize repository identity across direct repo URLs and PR or merge-request URLs.
@@ -51,6 +52,8 @@ Entries stay under the active version until an explicit version bump is requeste
 ### Docs
 
 - Documented the current official Codex app-server event coverage more precisely, including the dynamic-tool meaning of `item/tool/call` and the documented notifications we still ignore for workload rendering (`thread/tokenUsage/updated`, `fuzzyFileSearch/*`, and `windowsSandbox/setupCompleted`).
+- Updated the README and integration/architecture/reference docs to describe the new Cursor Hooks path, the committed `.cursor/hooks.json`, and the typed `.codex-agents/cursor-hooks` sidecars.
+- Expanded the README with explicit step-by-step instructions for copying the committed Cursor hook files into another repo and verifying that local sidecars are being written.
 - Updated the README and architecture/self-development docs to describe the adapter-first core layout, async snapshot assembly, and external bundled browser client delivery.
 - Added a short PartyKit hosting walkthrough to the README and references so shared-room setup includes the current official create, deploy, and generated-host flow.
 - Expanded the README shared-room section with the rebuild steps for a missing `/vendor/partysocket/index.js` browser import and clarified that connection is room-based via shared `Host` and `Room` values.
@@ -59,12 +62,20 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Fixed
 
+- Fixed Codex workstation visibility so local sessions that app-server still reports as `active` no longer fall through the browser’s `waiting/done` seating exclusions and disappear from desks while they are still live.
+- Fixed slow desktop Codex observer attaches from degrading too early by widening the live `thread/resume` subscription timeout, so restarted fleet servers recover current threads back to `subscribed` instead of lingering in stale `readOnly` mode.
+- Fixed two-seat workstation growth so a pod's first occupied seat stays anchored to its grid cell and a second seat expands on the right instead of recentering the original workstation.
+- Fixed boss-lane rendering so boss sessions now render inside compact square office shells with centered workstations, using a stacked left-column layout that fits four 3-tile-tall boss offices in a standard room instead of the old rounded offset frame.
 - Fixed workspace/project labels in the web UI so camel-case names like `CodexAgentsOffice` and `ProjectAtlas` render with spaces between words.
 - Fixed Codex runtime discovery on native Windows so the app can fall back to `wsl.exe --exec codex` when Codex CLI is only installed inside WSL.
 - Fixed the silent empty-state path for Cursor integration so snapshots now explain when the current process is missing `CURSOR_API_KEY` or when a project has no `git remote.origin.url`.
 - Fixed Claude agent labels so synthetic/system transcript model placeholders like `<synthetic>` no longer appear in the office UI.
 - Fixed Cursor project matching when the API only exposes GitHub pull request, GitLab merge request, or similar PR-backed repository URLs.
 - Fixed inferred local Cursor chat discovery so a new Cursor chat no longer revives every stale retained composer as a separate live office agent.
+- Fixed local Cursor observability by upgrading repos opened in trusted Cursor workspaces from transcript/workspace inference to typed hook-backed session state when the committed project hooks run.
+- Fixed the committed Cursor project hook recorder on Windows-style shells by restoring multi-encoding stdin decoding and stable project-root resolution, so fresh local Cursor hook activity writes sidecars again instead of silently dropping payloads.
+- Fixed Cursor hook-backed local session selection so stale future-skewed rows in an existing `.codex-agents/cursor-hooks/<conversation-id>.jsonl` file no longer mask newer appended Cursor activity from the same conversation.
+- Fixed browser speech bubbles and other display-text surfaces so Markdown emphasis markers like `**bold**` are stripped while preserving the readable text.
 - Improved Cursor cloud tracking by polling the official agent conversation API for active/recent agents and mapping newly seen prompts/replies into typed office events without replaying old history on startup.
 - Fixed Codex local startup hydration so the first full `thread/read` no longer replays preloaded assistant history as a fresh live reply, while later rereads still surface genuinely new replies.
 - Fixed local Cursor active/inactive inference so stale `selectedComposerIds` no longer outrank the most recently focused composer when tab order and actual chat focus diverge.
@@ -73,7 +84,11 @@ Entries stay under the active version until an explicit version bump is requeste
 - Fixed workload currentness so future-skewed source timestamps no longer keep finished local threads marked active indefinitely, while genuinely live local sessions still remain visible.
 - Fixed Codex local startup hydration so the first fleet snapshot now waits for initial `thread/resume` hydration and immediately rereads resumed threads, preventing an actively replying desktop thread from appearing as stale `readOnly/notLoaded` rec-room idle after a web-server restart.
 - Fixed browser workstation seating so stale local `notLoaded` threads no longer occupy desks just because workload currentness still marks them recent; only truly ongoing local work or the explicit done cooldown can keep a workstation.
+- Fixed Codex desk occupancy so non-current local threads no longer stay seated on the live floor from a separate browser-side "recently live" fallback; workstation seating now matches the current-workload/session-panel model.
 - Fixed completed Codex process items such as context compaction and reasoning so they no longer leave finished desktop threads stuck in a synthetic `thinking` state after the turn has ended.
+- Fixed Codex local activity detection so future-skewed or invalid subscribed thread timestamps no longer keep idle `running` or `thinking` sessions counted as current workload just because they still look live.
+- Fixed Codex reply streaming so the browser now reads official `item/agentMessage/delta` notifications directly instead of replaying old assistant history as fresh startup events after `thread/read` hydration.
+- Fixed Codex read-only thread fallback so reread assistant replies still surface as typed events when live `thread/resume` delivery is unavailable, without reintroducing startup replay for healthy subscribed threads.
 - Fixed Codex runtime discovery on Windows and Windows+WSL environments where the CLI is absent but the Codex desktop app is installed.
 - Improved Cursor agent loading compatibility by tolerating auth scheme differences and multi-page API responses.
 - Extended text message toast lifetime by 1 second without changing other toast types.

@@ -125,13 +125,7 @@ export function isCurrentWorkloadAgent(agent: DashboardAgent, now = Date.now()):
     const updatedAtAgeMs = ageSince(parseUpdatedAt(agent.updatedAt), now);
     if (
       !Number.isFinite(updatedAtAgeMs)
-      && (
-        agent.activityEvent?.type === "userMessage"
-        || (
-          agent.liveSubscription === "subscribed"
-          && isLiveLocalState(agent.state)
-        )
-      )
+      && agent.activityEvent?.type === "userMessage"
     ) {
       return true;
     }

@@ -131,6 +131,27 @@ test("file change completion events keep final file metadata", () => {
   assert.match(event.path, /packages\/core\/src\/live-monitor\.ts$/);
 });
 
+test("agent message deltas become typed streaming message events", () => {
+  const event = buildDashboardEventFromAppServerMessage(
+    { projectRoot: "/tmp/CodexAgentsOffice" },
+    {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thr_123",
+        turnId: "turn_9",
+        itemId: "item_msg",
+        delta: "Checking the live snapshot."
+      }
+    }
+  );
+
+  assert.equal(event.kind, "message");
+  assert.equal(event.phase, "updated");
+  assert.equal(event.itemId, "item_msg");
+  assert.equal(event.title, "Reply updated");
+  assert.equal(event.detail, "Checking the live snapshot.");
+});
+
 test("resolved requests clear as completed events when pending request context is provided", () => {
   const event = buildDashboardEventFromAppServerMessage(
     {
@@ -1207,7 +1228,7 @@ test("future-skewed fresh user-prompt local threads remain current", () => {
   assert.equal(isCurrentWorkloadAgent(agent, now), true);
 });
 
-test("future-skewed subscribed live local threads remain current", () => {
+test("future-skewed subscribed live local threads do not remain current just from stale commentary", () => {
   const now = Date.parse("2026-03-27T12:15:58.377Z");
   const agent = {
     id: "thr_future_commentary",
@@ -1250,7 +1271,7 @@ test("future-skewed subscribed live local threads remain current", () => {
     network: null
   };
 
-  assert.equal(isCurrentWorkloadAgent(agent, now), true);
+  assert.equal(isCurrentWorkloadAgent(agent, now), false);
 });
 
 test("completed commentary replies do not stay in thinking state once the turn is done", async () => {
@@ -1738,7 +1759,90 @@ test("initial discovery waits for resumed live thread hydration before the first
   assert.equal(agent.isCurrent, true);
 });
 
-test("hydrated thread rereads still synthesize genuinely new assistant replies", async () => {
+test("hydrated thread rereads do not synthesize assistant replies as fresh events", async () => {
+  const monitor = new ProjectLiveMonitor({
+    projectRoot: "/tmp/CodexAgentsOffice",
+    includeCloud: false
+  });
+  const listedThread = {
+    ...sampleThread(),
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            id: "item_preloaded",
+            type: "agentMessage",
+            text: "Preloaded commentary",
+            phase: "commentary"
+          }
+        ]
+      }
+    ]
+  };
+  const hydratedThread = {
+    ...listedThread,
+    turns: [
+      {
+        id: "turn_1",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            id: "item_final",
+            type: "agentMessage",
+            text: "Hydrated reply",
+            phase: "final_answer"
+          }
+        ]
+      }
+    ]
+  };
+  const updatedThread = {
+    ...hydratedThread,
+    updatedAt: hydratedThread.updatedAt + 5,
+    turns: [
+      {
+        id: "turn_2",
+        status: "completed",
+        error: null,
+        items: [
+          {
+            id: "item_follow_up",
+            type: "agentMessage",
+            text: "Fresh follow-up reply",
+            phase: "final_answer"
+          }
+        ]
+      }
+    ]
+  };
+
+  monitor.threads.set(listedThread.id, listedThread);
+  monitor.subscribedThreadIds.add(listedThread.id);
+  monitor.client = {
+    readThread: async () => hydratedThread
+  };
+
+  await monitor.refreshThread(listedThread.id);
+  assert.equal(
+    monitor.recentEvents.some((event) => event.method === "thread/read/agentMessage"),
+    false
+  );
+
+  monitor.client = {
+    readThread: async () => updatedThread
+  };
+
+  await monitor.refreshThread(listedThread.id);
+
+  const messageEvents = monitor.recentEvents.filter((event) => event.method === "thread/read/agentMessage");
+  assert.equal(messageEvents.length, 0);
+});
+
+test("unsubscribed thread rereads still synthesize assistant replies as fallback events", async () => {
   const monitor = new ProjectLiveMonitor({
     projectRoot: "/tmp/CodexAgentsOffice",
     includeCloud: false

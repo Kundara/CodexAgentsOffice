@@ -30,8 +30,11 @@ export const SCENE_GRID_SCRIPT = `
           bossLaneX: gridUnitsToPixels(tileSize, internalSceneSettings.bossLaneStartTiles),
           bossLaneWidth: gridUnitsToPixels(tileSize, internalSceneSettings.bossLaneWidthTiles),
           bossOfficeGapToDesk: gridUnitsToPixels(tileSize, internalSceneSettings.bossGapToDeskTiles),
-          bossOfficeTopRow: internalSceneSettings.wallDepthTiles,
-          bossOfficeTopY: gridUnitsToPixels(tileSize, internalSceneSettings.wallDepthTiles),
+          bossOfficeTopRow: internalSceneSettings.wallDepthTiles + internalSceneSettings.bossOfficeTopInsetTiles,
+          bossOfficeTopY: gridUnitsToPixels(
+            tileSize,
+            internalSceneSettings.wallDepthTiles + internalSceneSettings.bossOfficeTopInsetTiles
+          ),
           bossOfficeGapY: gridUnitsToPixels(tileSize, internalSceneSettings.bossBoothGapTiles),
           bossOfficeWidthTiles: internalSceneSettings.bossBoothWidthTiles,
           bossOfficeWidth: gridUnitsToPixels(tileSize, internalSceneSettings.bossBoothWidthTiles),
