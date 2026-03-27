@@ -291,12 +291,14 @@ export const TOAST_SCRIPT = `
         if (!event) {
           return null;
         }
+        const userMessageMethod = typeof event.method === "string" ? event.method : "";
         const isUserMessageEvent =
           event.kind === "message"
           && (
             event.itemType === "user_message"
             || event.itemType === "userMessage"
-            || (typeof event.method === "string" && /(^|\/)userMessage$/.test(event.method))
+            || userMessageMethod === "userMessage"
+            || userMessageMethod.endsWith("/userMessage")
           );
         if (isUserMessageEvent) {
           return null;

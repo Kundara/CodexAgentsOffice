@@ -169,6 +169,57 @@ test("observer unload notifications do not masquerade as thread completion", () 
   assert.equal(shouldMarkThreadStoppedFromAppServerNotification("thread/status/changed", "notLoaded"), false);
 });
 
+test("thread closed marks an ongoing monitored thread stopped immediately", () => {
+  const monitor = new ProjectLiveMonitor({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    includeCloud: false
+  });
+  const thread = {
+    ...sampleThread(),
+    status: { type: "active" },
+    updatedAt: Math.floor(Date.now() / 1000)
+  };
+
+  monitor.threads.set(thread.id, thread);
+  monitor.markThreadLive(thread.id);
+  monitor.handleAppServerNotification({
+    method: "thread/closed",
+    params: {
+      threadId: thread.id
+    }
+  });
+
+  assert.equal(monitor.ongoingThreadIds.has(thread.id), false);
+  assert.equal(monitor.stoppedAtByThreadId.has(thread.id), true);
+});
+
+test("notLoaded status marks an ongoing monitored thread stopped immediately", () => {
+  const monitor = new ProjectLiveMonitor({
+    projectRoot: "/mnt/f/AI/CodexAgentsOffice",
+    includeCloud: false
+  });
+  const thread = {
+    ...sampleThread(),
+    status: { type: "active" },
+    updatedAt: Math.floor(Date.now() / 1000)
+  };
+
+  monitor.threads.set(thread.id, thread);
+  monitor.markThreadLive(thread.id);
+  monitor.handleAppServerNotification({
+    method: "thread/status/changed",
+    params: {
+      threadId: thread.id,
+      status: {
+        type: "notLoaded"
+      }
+    }
+  });
+
+  assert.equal(monitor.ongoingThreadIds.has(thread.id), false);
+  assert.equal(monitor.stoppedAtByThreadId.has(thread.id), true);
+});
+
 test("tool call server requests become typed tool events", () => {
   const event = buildDashboardEventFromAppServerMessage(
     { projectRoot: "/mnt/f/AI/CodexAgentsOffice" },

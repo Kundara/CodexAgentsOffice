@@ -238,6 +238,20 @@ export function shouldMarkThreadStoppedFromAppServerNotification(
   );
 }
 
+function shouldStopDormantThreadAfterNotification(input: {
+  method: string;
+  statusType?: string | null;
+  wasOngoing: boolean;
+}): boolean {
+  if (!input.wasOngoing) {
+    return false;
+  }
+  return (
+    input.method === "thread/closed"
+    || (input.method === "thread/status/changed" && input.statusType === "notLoaded")
+  );
+}
+
 function hasEquivalentRecentMessageEvent(
   recentEvents: DashboardEvent[],
   candidate: DashboardEvent
@@ -1599,13 +1613,24 @@ export class ProjectLiveMonitor extends EventEmitter {
 
     const threadId = extractThreadId(notification.params);
     if (threadId) {
+      const knownThread = this.threads.get(threadId) ?? null;
+      const wasOngoing =
+        this.ongoingThreadIds.has(threadId)
+        || (knownThread ? isOngoingThread(knownThread) : false);
       const status = notification.method === "thread/status/changed"
         ? asRecord(asRecord(notification.params)?.status)
         : null;
       const statusType = asString(status?.type);
       if (shouldMarkThreadLiveFromAppServerNotification(notification.method, statusType)) {
         this.markThreadLive(threadId);
-      } else if (shouldMarkThreadStoppedFromAppServerNotification(notification.method, statusType)) {
+      } else if (
+        shouldMarkThreadStoppedFromAppServerNotification(notification.method, statusType)
+        || shouldStopDormantThreadAfterNotification({
+          method: notification.method,
+          statusType,
+          wasOngoing
+        })
+      ) {
         this.markThreadStopped(threadId);
       }
       if (
