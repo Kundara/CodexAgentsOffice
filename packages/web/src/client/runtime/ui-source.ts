@@ -5,9 +5,11 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
 
         const sorted = [...snapshot.agents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         return renderNeedsAttention([snapshot]) + sorted.map((agent) => {
+          const appearanceProjectRoot = agent.sourceProjectRoot || snapshot.projectRoot;
+          const appearanceAgentId = agent.sourceAgentId || agent.id;
           const appearanceAction = agent.network
             ? ""
-            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(appearanceProjectRoot)}" data-agent-id="\${escapeHtml(appearanceAgentId)}">Cycle look</button>\`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const description = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
@@ -29,9 +31,11 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
 
         entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
         return renderNeedsAttention(projects) + entries.map(({ snapshot, agent }) => {
+          const appearanceProjectRoot = agent.sourceProjectRoot || snapshot.projectRoot;
+          const appearanceAgentId = agent.sourceAgentId || agent.id;
           const appearanceAction = agent.network
             ? ""
-            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(appearanceProjectRoot)}" data-agent-id="\${escapeHtml(appearanceAgentId)}">Cycle look</button>\`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
@@ -329,9 +333,11 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
 
         const fleet = state.fleet;
         const rawProjects = visibleProjects(fleet);
-        updateRecentLeadReservations(rawProjects);
-        const displayedProjects = rawProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));
-        const sessionProjects = rawProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));
+        const floorProjects = mergeWorktreeProjects(rawProjects);
+        const towerProjects = state.selected === "all" ? floorProjects : rawProjects;
+        updateRecentLeadReservations(towerProjects);
+        const displayedProjects = towerProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));
+        const sessionProjects = towerProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));
         const selectedRawSnapshot = currentSnapshot();
         const snapshot = selectedRawSnapshot
           ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)
@@ -343,7 +349,7 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
           state.workspaceFullscreen = false;
           syncUrl();
         }
-        syncLiveAgentState(rawProjects);
+        syncLiveAgentState(state.selected === "all" ? towerProjects : rawProjects);
         sceneStateDraft = null;
         const counts = fleetCounts({ projects: sessionProjects });
         const nextSceneToken = state.view === "map"
@@ -355,7 +361,7 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
             : \`fleet::\${displayedProjects.map(sceneSnapshotToken).join("||")}\`);
 
         setTextIfChanged(stamp, \`Updated \${fleet.generatedAt}\`);
-        setTextIfChanged(projectCount, \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live · \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`);
+        setTextIfChanged(projectCount, \`\${fleet.projects.length} tracked · \${floorProjects.length} floors · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live · \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`);
         mapViewButton.classList.toggle("active", state.view === "map");
         terminalViewButton.classList.toggle("active", state.view === "terminal");
         setConnection(state.connection);
@@ -371,7 +377,7 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
 
         setHtmlIfChanged(projectTabs, [
           \`<button class="project-tab\${state.selected === "all" ? " active" : ""}" data-action="select-project" data-project-root="all">All</button>\`,
-          ...displayedProjects.map((project) => {
+          ...rawProjects.map((project) => {
             const counts = countsForSnapshot(project);
             const activeClass = project.projectRoot === state.selected ? " active" : "";
             const badge = counts.active;
@@ -645,6 +651,18 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
           };
           applyGlobalSceneSettings();
           saveGlobalSceneSettings();
+          render();
+        });
+      }
+      if (splitWorktreesButton instanceof HTMLButtonElement) {
+        splitWorktreesButton.addEventListener("click", () => {
+          state.globalSceneSettings = {
+            ...state.globalSceneSettings,
+            splitWorktrees: !state.globalSceneSettings.splitWorktrees
+          };
+          applyGlobalSceneSettings();
+          saveGlobalSceneSettings();
+          lastSceneRenderToken = null;
           render();
         });
       }

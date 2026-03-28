@@ -12,6 +12,7 @@
         --accent: #4bd69f;
         --accent-2: #f5b74f;
         --danger: #f06d5e;
+        --worktree-blue: #6ed8ff;
         --tile: 24px;
         --ui-text-scale: 1;
         --tower-scroll-y: 0px;
@@ -1682,6 +1683,16 @@
         line-height: 1.05;
       }
 
+      .agent-hover-worktree {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 2px;
+        color: var(--worktree-blue);
+        font-size: 6px;
+        line-height: 1;
+      }
+
       .agent-hover-summary {
         font-size: 6px;
         line-height: 1;
@@ -1708,6 +1719,14 @@
       .agent-hover-peer {
         color: #ff38d1;
         font-weight: 700;
+      }
+
+      .worktree-inline-icon {
+        width: 12px;
+        height: 12px;
+        display: inline-block;
+        flex: 0 0 auto;
+        image-rendering: pixelated;
       }
 
       .room-empty {
@@ -1957,6 +1976,18 @@
         font-size: 22px;
         font-weight: 700;
         line-height: 1;
+      }
+
+      .tower-floor-title-worktree {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--worktree-blue);
+      }
+
+      .tower-floor-worktree-icon {
+        width: 18px;
+        height: 18px;
       }
 
       .tower-floor-meta {

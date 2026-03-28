@@ -1,6 +1,7 @@
 export interface GlobalSceneSettings {
   textScale: number;
   debugTiles: boolean;
+  splitWorktrees: boolean;
 }
 
 export interface InternalSceneSettings {
@@ -30,7 +31,8 @@ export interface InternalSceneSettings {
 
 export const DEFAULT_GLOBAL_SCENE_SETTINGS: GlobalSceneSettings = {
   textScale: 1,
-  debugTiles: false
+  debugTiles: false,
+  splitWorktrees: false
 };
 
 export const INTERNAL_SCENE_SETTINGS: InternalSceneSettings = {

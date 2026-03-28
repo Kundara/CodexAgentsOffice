@@ -202,7 +202,8 @@ export function startClientApp(): void {
           const parsed = JSON.parse(raw);
           return {
             textScale: clampSceneTextScale(Number(parsed && parsed.textScale)),
-            debugTiles: Boolean(parsed && parsed.debugTiles)
+            debugTiles: Boolean(parsed && parsed.debugTiles),
+            splitWorktrees: Boolean(parsed && parsed.splitWorktrees)
           };
         } catch {
           return { ...defaultGlobalSceneSettings };
@@ -259,7 +260,8 @@ export function startClientApp(): void {
       function applyGlobalSceneSettings() {
         const textScale = clampSceneTextScale(Number(state.globalSceneSettings && state.globalSceneSettings.textScale));
         const debugTiles = Boolean(state.globalSceneSettings && state.globalSceneSettings.debugTiles);
-        state.globalSceneSettings = { textScale, debugTiles };
+        const splitWorktrees = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees);
+        state.globalSceneSettings = { textScale, debugTiles, splitWorktrees };
         document.documentElement.style.setProperty("--ui-text-scale", String(textScale));
         if (textScaleInput instanceof HTMLInputElement) {
           textScaleInput.value = String(textScale);
@@ -268,6 +270,13 @@ export function startClientApp(): void {
         if (debugTilesButton instanceof HTMLButtonElement) {
           debugTilesButton.classList.toggle("active", debugTiles);
           debugTilesButton.setAttribute("aria-pressed", debugTiles ? "true" : "false");
+        }
+        if (splitWorktreesButton instanceof HTMLButtonElement) {
+          splitWorktreesButton.classList.toggle("active", splitWorktrees);
+          splitWorktreesButton.setAttribute("aria-pressed", splitWorktrees ? "true" : "false");
+          splitWorktreesButton.title = splitWorktrees
+            ? "Show each worktree on its own floor"
+            : "Merge worktrees from the same repo onto one floor";
         }
       }
 
@@ -2355,6 +2364,7 @@ export function startClientApp(): void {
 
       const mapViewButton = document.getElementById("map-view-button");
       const terminalViewButton = document.getElementById("terminal-view-button");
+      const splitWorktreesButton = document.getElementById("split-worktrees-button");
       const settingsButton = document.getElementById("settings-button");
       const settingsPopup = document.getElementById("settings-popup");
       const debugTilesButton = document.getElementById("debug-tiles-button");
@@ -2646,6 +2656,124 @@ export function startClientApp(): void {
           else if (agent.state !== "done" && agent.state !== "idle") counters.active += 1;
         }
         return counters;
+      }
+
+      function worktreeIconUrl() {
+        return pixelOffice && pixelOffice.icons && pixelOffice.icons.worktree && pixelOffice.icons.worktree.url
+          ? pixelOffice.icons.worktree.url
+          : "/assets/pixel-office/sprites/icons/worktree.svg";
+      }
+
+      function worktreeNameForSnapshot(snapshot) {
+        return String(snapshot && snapshot.projectIdentity && snapshot.projectIdentity.worktreeName || "").trim();
+      }
+
+      function isWorktreeSnapshot(snapshot) {
+        return worktreeNameForSnapshot(snapshot).length > 0;
+      }
+
+      function snapshotGroupKey(snapshot) {
+        const identity = snapshot && snapshot.projectIdentity ? snapshot.projectIdentity : null;
+        const commonGitDir = normalizeSharedPathCandidate(identity && identity.commonGitDir || "");
+        if (commonGitDir) {
+          return "git-common:" + commonGitDir;
+        }
+        const identityKey = String(identity && identity.key || "").trim();
+        if (identityKey) {
+          return "git-key:" + identityKey;
+        }
+        const gitRoot = normalizeSharedPathCandidate(identity && identity.gitRoot || "");
+        if (gitRoot) {
+          return "git-root:" + gitRoot;
+        }
+        return "project:" + normalizeSharedPathCandidate(snapshot && snapshot.projectRoot || "");
+      }
+
+      function preferredRepresentativeSnapshot(current, candidate) {
+        if (!current) {
+          return candidate;
+        }
+        if (!isWorktreeSnapshot(candidate) && isWorktreeSnapshot(current)) {
+          return candidate;
+        }
+        return current;
+      }
+
+      function mergedAgentId(projectRoot, agentId) {
+        return String(projectRoot || "") + "::" + String(agentId || "");
+      }
+
+      function cloneAgentForMergedSnapshot(sourceSnapshot, targetSnapshot, agent, useSyntheticIds) {
+        const sourceProjectRoot = sourceSnapshot && sourceSnapshot.projectRoot ? sourceSnapshot.projectRoot : targetSnapshot.projectRoot;
+        const remappedPaths = remapSharedPaths(
+          sourceProjectRoot,
+          targetSnapshot.projectRoot,
+          Array.isArray(agent && agent.paths) ? agent.paths : []
+        );
+        const remappedCwd = remapSharedPath(sourceProjectRoot, targetSnapshot.projectRoot, agent && agent.cwd);
+        const fallbackPaths = remappedPaths.length > 0
+          ? remappedPaths
+          : remapSharedPaths(sourceProjectRoot, targetSnapshot.projectRoot, [
+            remappedCwd || agent && agent.cwd || sourceProjectRoot,
+            sourceProjectRoot
+          ]);
+        const roomId = sourceProjectRoot === targetSnapshot.projectRoot
+          ? agent.roomId
+          : roomIdForSharedPaths(targetSnapshot, fallbackPaths);
+        return {
+          ...agent,
+          id: useSyntheticIds ? mergedAgentId(sourceProjectRoot, agent.id) : agent.id,
+          parentThreadId: agent.parentThreadId
+            ? (useSyntheticIds ? mergedAgentId(sourceProjectRoot, agent.parentThreadId) : agent.parentThreadId)
+            : null,
+          roomId: roomId || (sourceProjectRoot === targetSnapshot.projectRoot ? agent.roomId : null),
+          cwd: remappedCwd || agent.cwd,
+          paths: fallbackPaths.length > 0 ? fallbackPaths : agent.paths,
+          sourceProjectRoot,
+          sourceAgentId: agent.id,
+          worktreeName: worktreeNameForSnapshot(sourceSnapshot)
+        };
+      }
+
+      function mergeWorktreeProjects(projects) {
+        if (state.globalSceneSettings && state.globalSceneSettings.splitWorktrees) {
+          return projects;
+        }
+
+        const bucketByKey = new Map();
+        const buckets = [];
+        projects.forEach((snapshot, index) => {
+          const key = snapshotGroupKey(snapshot);
+          let bucket = bucketByKey.get(key);
+          if (!bucket) {
+            bucket = {
+              firstIndex: index,
+              representative: snapshot,
+              snapshots: []
+            };
+            bucketByKey.set(key, bucket);
+            buckets.push(bucket);
+          }
+          bucket.snapshots.push(snapshot);
+          bucket.representative = preferredRepresentativeSnapshot(bucket.representative, snapshot);
+        });
+
+        return buckets
+          .sort((left, right) => left.firstIndex - right.firstIndex)
+          .map((bucket) => {
+            const representative = bucket.representative;
+            const useSyntheticIds = bucket.snapshots.length > 1;
+            return {
+              ...representative,
+              agents: bucket.snapshots.flatMap((snapshot) =>
+                snapshot.agents.map((agent) => cloneAgentForMergedSnapshot(snapshot, representative, agent, useSyntheticIds))
+              ),
+              cloudTasks: bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.cloudTasks) ? snapshot.cloudTasks : []),
+              events: bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.events) ? snapshot.events : []),
+              notes: Array.from(new Set(bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.notes) ? snapshot.notes : []).filter(Boolean))),
+              worktreeGroupSize: bucket.snapshots.length
+            };
+          });
       }
 
       function isBusyAgent(agent) {
@@ -4076,6 +4204,10 @@ export function startClientApp(): void {
         const summaryClass = summary.source === "user"
           ? "agent-hover-summary agent-hover-summary-user"
           : "agent-hover-summary";
+        const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
+        const worktreeHtml = worktreeName
+          ? `<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></div>`
+          : "";
         const metaParts = [
           `<span>${escapeHtml(titleCaseWords(agentKindLabel(snapshot, agent)))}</span>`,
           `<span>${escapeHtml(agentHoverSourceLabel(agent, summary.source))}</span>`,
@@ -4087,7 +4219,7 @@ export function startClientApp(): void {
         ].filter(Boolean);
         const meta = metaParts.join('<span class="agent-hover-separator"> · </span>');
 
-        return `<div class="${escapeHtml(className)}"${styleAttr}><div class="agent-hover-title"><strong>${escapeHtml(hoverTitle)}</strong></div><div class="${escapeHtml(summaryClass)}">${escapeHtml(summary.text)}</div><div class="agent-hover-meta">${meta}</div></div>`;
+        return `<div class="${escapeHtml(className)}"${styleAttr}><div class="agent-hover-title"><strong>${escapeHtml(hoverTitle)}</strong></div>${worktreeHtml}<div class="${escapeHtml(summaryClass)}">${escapeHtml(summary.text)}</div><div class="agent-hover-meta">${meta}</div></div>`;
       }
 
       function flattenRooms(rooms) {
@@ -4614,8 +4746,13 @@ export function startClientApp(): void {
       function renderWorkspaceFloor(snapshot, options = {}) {
         const counts = countsForSnapshot(snapshot);
         const compact = options.compact === true;
-        const title = escapeHtml(projectLabel(snapshot.projectRoot));
         const titleAttr = escapeHtml(snapshot.projectRoot);
+        const worktreeName = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
+          ? worktreeNameForSnapshot(snapshot)
+          : "";
+        const titleHtml = worktreeName
+          ? `<div class="tower-floor-title tower-floor-title-worktree" title="${titleAttr}"><img class="worktree-inline-icon tower-floor-worktree-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></div>`
+          : `<div class="tower-floor-title" title="${titleAttr}">${escapeHtml(projectLabel(snapshot.projectRoot))}</div>`;
         const summary = state.view === "map"
           ? (compact ? "Live floor" : "Current workload")
           : `${counts.total} agents · ${counts.active} active · ${counts.waiting} waiting · ${counts.blocked} blocked · ${counts.cloud} cloud`;
@@ -4631,7 +4768,7 @@ export function startClientApp(): void {
         const actionHtml = options.action
           ? `<button class="tower-floor-open" data-action="${escapeHtml(options.action.type)}"${options.action.projectRoot ? ` data-project-root="${escapeHtml(options.action.projectRoot)}"` : ""}>${escapeHtml(options.action.label)}</button>`
           : "";
-        return `<section class="tower-floor${compact ? " compact" : ""}" data-project-root="${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label"><div class="tower-floor-title" title="${titleAttr}">${title}</div></div><div class="tower-floor-trailing"><div class="tower-floor-meta">${escapeHtml(summary)}</div>${actionHtml}</div></div><div class="tower-floor-body">${notes ? `<div class="tower-floor-note">${escapeHtml(notes)}</div>` : ""}${body}</div></section>`;
+        return `<section class="tower-floor${compact ? " compact" : ""}" data-project-root="${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">${escapeHtml(summary)}</div>${actionHtml}</div></div><div class="tower-floor-body">${notes ? `<div class="tower-floor-note">${escapeHtml(notes)}</div>` : ""}${body}</div></section>`;
       }
 
       function renderWorkspaceScroll(projects) {
@@ -6573,9 +6710,11 @@ function focusKeysIntersect(keys, focusedKeys) {
 
         const sorted = [...snapshot.agents].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
         return renderNeedsAttention([snapshot]) + sorted.map((agent) => {
+          const appearanceProjectRoot = agent.sourceProjectRoot || snapshot.projectRoot;
+          const appearanceAgentId = agent.sourceAgentId || agent.id;
           const appearanceAction = agent.network
             ? ""
-            : `<button data-action="cycle-look" data-project-root="${escapeHtml(snapshot.projectRoot)}" data-agent-id="${escapeHtml(agent.id)}">Cycle look</button>`;
+            : `<button data-action="cycle-look" data-project-root="${escapeHtml(appearanceProjectRoot)}" data-agent-id="${escapeHtml(appearanceAgentId)}">Cycle look</button>`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const description = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
@@ -6597,9 +6736,11 @@ function focusKeysIntersect(keys, focusedKeys) {
 
         entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
         return renderNeedsAttention(projects) + entries.map(({ snapshot, agent }) => {
+          const appearanceProjectRoot = agent.sourceProjectRoot || snapshot.projectRoot;
+          const appearanceAgentId = agent.sourceAgentId || agent.id;
           const appearanceAction = agent.network
             ? ""
-            : `<button data-action="cycle-look" data-project-root="${escapeHtml(snapshot.projectRoot)}" data-agent-id="${escapeHtml(agent.id)}">Cycle look</button>`;
+            : `<button data-action="cycle-look" data-project-root="${escapeHtml(appearanceProjectRoot)}" data-agent-id="${escapeHtml(appearanceAgentId)}">Cycle look</button>`;
           const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
           const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail)
             || latestAgentMessage(agent)
@@ -6897,9 +7038,11 @@ function focusKeysIntersect(keys, focusedKeys) {
 
         const fleet = state.fleet;
         const rawProjects = visibleProjects(fleet);
-        updateRecentLeadReservations(rawProjects);
-        const displayedProjects = rawProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));
-        const sessionProjects = rawProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));
+        const floorProjects = mergeWorktreeProjects(rawProjects);
+        const towerProjects = state.selected === "all" ? floorProjects : rawProjects;
+        updateRecentLeadReservations(towerProjects);
+        const displayedProjects = towerProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));
+        const sessionProjects = towerProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));
         const selectedRawSnapshot = currentSnapshot();
         const snapshot = selectedRawSnapshot
           ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)
@@ -6911,7 +7054,7 @@ function focusKeysIntersect(keys, focusedKeys) {
           state.workspaceFullscreen = false;
           syncUrl();
         }
-        syncLiveAgentState(rawProjects);
+        syncLiveAgentState(state.selected === "all" ? towerProjects : rawProjects);
         sceneStateDraft = null;
         const counts = fleetCounts({ projects: sessionProjects });
         const nextSceneToken = state.view === "map"
@@ -6923,7 +7066,7 @@ function focusKeysIntersect(keys, focusedKeys) {
             : `fleet::${displayedProjects.map(sceneSnapshotToken).join("||")}`);
 
         setTextIfChanged(stamp, `Updated ${fleet.generatedAt}`);
-        setTextIfChanged(projectCount, `${fleet.projects.length} tracked · ${displayedProjects.filter((project) => busyCount(project) > 0).length} live · ${SESSION_RECENT_LEAD_LIMIT} recent sessions`);
+        setTextIfChanged(projectCount, `${fleet.projects.length} tracked · ${floorProjects.length} floors · ${displayedProjects.filter((project) => busyCount(project) > 0).length} live · ${SESSION_RECENT_LEAD_LIMIT} recent sessions`);
         mapViewButton.classList.toggle("active", state.view === "map");
         terminalViewButton.classList.toggle("active", state.view === "terminal");
         setConnection(state.connection);
@@ -6939,7 +7082,7 @@ function focusKeysIntersect(keys, focusedKeys) {
 
         setHtmlIfChanged(projectTabs, [
           `<button class="project-tab${state.selected === "all" ? " active" : ""}" data-action="select-project" data-project-root="all">All</button>`,
-          ...displayedProjects.map((project) => {
+          ...rawProjects.map((project) => {
             const counts = countsForSnapshot(project);
             const activeClass = project.projectRoot === state.selected ? " active" : "";
             const badge = counts.active;
@@ -7213,6 +7356,18 @@ function focusKeysIntersect(keys, focusedKeys) {
           };
           applyGlobalSceneSettings();
           saveGlobalSceneSettings();
+          render();
+        });
+      }
+      if (splitWorktreesButton instanceof HTMLButtonElement) {
+        splitWorktreesButton.addEventListener("click", () => {
+          state.globalSceneSettings = {
+            ...state.globalSceneSettings,
+            splitWorktrees: !state.globalSceneSettings.splitWorktrees
+          };
+          applyGlobalSceneSettings();
+          saveGlobalSceneSettings();
+          lastSceneRenderToken = null;
           render();
         });
       }

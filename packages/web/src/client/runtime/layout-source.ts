@@ -1,6 +1,7 @@
 export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
       const mapViewButton = document.getElementById("map-view-button");
       const terminalViewButton = document.getElementById("terminal-view-button");
+      const splitWorktreesButton = document.getElementById("split-worktrees-button");
       const settingsButton = document.getElementById("settings-button");
       const settingsPopup = document.getElementById("settings-popup");
       const debugTilesButton = document.getElementById("debug-tiles-button");
@@ -292,6 +293,124 @@ export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
           else if (agent.state !== "done" && agent.state !== "idle") counters.active += 1;
         }
         return counters;
+      }
+
+      function worktreeIconUrl() {
+        return pixelOffice && pixelOffice.icons && pixelOffice.icons.worktree && pixelOffice.icons.worktree.url
+          ? pixelOffice.icons.worktree.url
+          : "/assets/pixel-office/sprites/icons/worktree.svg";
+      }
+
+      function worktreeNameForSnapshot(snapshot) {
+        return String(snapshot && snapshot.projectIdentity && snapshot.projectIdentity.worktreeName || "").trim();
+      }
+
+      function isWorktreeSnapshot(snapshot) {
+        return worktreeNameForSnapshot(snapshot).length > 0;
+      }
+
+      function snapshotGroupKey(snapshot) {
+        const identity = snapshot && snapshot.projectIdentity ? snapshot.projectIdentity : null;
+        const commonGitDir = normalizeSharedPathCandidate(identity && identity.commonGitDir || "");
+        if (commonGitDir) {
+          return "git-common:" + commonGitDir;
+        }
+        const identityKey = String(identity && identity.key || "").trim();
+        if (identityKey) {
+          return "git-key:" + identityKey;
+        }
+        const gitRoot = normalizeSharedPathCandidate(identity && identity.gitRoot || "");
+        if (gitRoot) {
+          return "git-root:" + gitRoot;
+        }
+        return "project:" + normalizeSharedPathCandidate(snapshot && snapshot.projectRoot || "");
+      }
+
+      function preferredRepresentativeSnapshot(current, candidate) {
+        if (!current) {
+          return candidate;
+        }
+        if (!isWorktreeSnapshot(candidate) && isWorktreeSnapshot(current)) {
+          return candidate;
+        }
+        return current;
+      }
+
+      function mergedAgentId(projectRoot, agentId) {
+        return String(projectRoot || "") + "::" + String(agentId || "");
+      }
+
+      function cloneAgentForMergedSnapshot(sourceSnapshot, targetSnapshot, agent, useSyntheticIds) {
+        const sourceProjectRoot = sourceSnapshot && sourceSnapshot.projectRoot ? sourceSnapshot.projectRoot : targetSnapshot.projectRoot;
+        const remappedPaths = remapSharedPaths(
+          sourceProjectRoot,
+          targetSnapshot.projectRoot,
+          Array.isArray(agent && agent.paths) ? agent.paths : []
+        );
+        const remappedCwd = remapSharedPath(sourceProjectRoot, targetSnapshot.projectRoot, agent && agent.cwd);
+        const fallbackPaths = remappedPaths.length > 0
+          ? remappedPaths
+          : remapSharedPaths(sourceProjectRoot, targetSnapshot.projectRoot, [
+            remappedCwd || agent && agent.cwd || sourceProjectRoot,
+            sourceProjectRoot
+          ]);
+        const roomId = sourceProjectRoot === targetSnapshot.projectRoot
+          ? agent.roomId
+          : roomIdForSharedPaths(targetSnapshot, fallbackPaths);
+        return {
+          ...agent,
+          id: useSyntheticIds ? mergedAgentId(sourceProjectRoot, agent.id) : agent.id,
+          parentThreadId: agent.parentThreadId
+            ? (useSyntheticIds ? mergedAgentId(sourceProjectRoot, agent.parentThreadId) : agent.parentThreadId)
+            : null,
+          roomId: roomId || (sourceProjectRoot === targetSnapshot.projectRoot ? agent.roomId : null),
+          cwd: remappedCwd || agent.cwd,
+          paths: fallbackPaths.length > 0 ? fallbackPaths : agent.paths,
+          sourceProjectRoot,
+          sourceAgentId: agent.id,
+          worktreeName: worktreeNameForSnapshot(sourceSnapshot)
+        };
+      }
+
+      function mergeWorktreeProjects(projects) {
+        if (state.globalSceneSettings && state.globalSceneSettings.splitWorktrees) {
+          return projects;
+        }
+
+        const bucketByKey = new Map();
+        const buckets = [];
+        projects.forEach((snapshot, index) => {
+          const key = snapshotGroupKey(snapshot);
+          let bucket = bucketByKey.get(key);
+          if (!bucket) {
+            bucket = {
+              firstIndex: index,
+              representative: snapshot,
+              snapshots: []
+            };
+            bucketByKey.set(key, bucket);
+            buckets.push(bucket);
+          }
+          bucket.snapshots.push(snapshot);
+          bucket.representative = preferredRepresentativeSnapshot(bucket.representative, snapshot);
+        });
+
+        return buckets
+          .sort((left, right) => left.firstIndex - right.firstIndex)
+          .map((bucket) => {
+            const representative = bucket.representative;
+            const useSyntheticIds = bucket.snapshots.length > 1;
+            return {
+              ...representative,
+              agents: bucket.snapshots.flatMap((snapshot) =>
+                snapshot.agents.map((agent) => cloneAgentForMergedSnapshot(snapshot, representative, agent, useSyntheticIds))
+              ),
+              cloudTasks: bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.cloudTasks) ? snapshot.cloudTasks : []),
+              events: bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.events) ? snapshot.events : []),
+              notes: Array.from(new Set(bucket.snapshots.flatMap((snapshot) => Array.isArray(snapshot.notes) ? snapshot.notes : []).filter(Boolean))),
+              worktreeGroupSize: bucket.snapshots.length
+            };
+          });
       }
 
       function isBusyAgent(agent) {

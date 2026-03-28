@@ -30,6 +30,8 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Changed
 
+- Changed fleet floor grouping so Git worktrees now merge onto one repo floor by default across Codex, Claude, and Cursor snapshots, with a persisted global `Split Worktrees` toggle to restore one-floor-per-worktree layout when needed.
+- Changed worktree rendering so split worktree floors now use a bright blue worktree title treatment, and agent hover cards expose the source worktree name to keep duplicate repo clones distinguishable.
 - Reworked the core internals so dashboard snapshot assembly now lives in `snapshot-lib`, app-server event and rollout-hook parsing live in `live-monitor-lib`, and Cursor local/cloud helpers live in `cursor-lib` instead of staying stacked inside `snapshot.ts`, `live-monitor.ts`, and `cursor.ts`.
 - Changed the browser runtime composition so `packages/web/src/client/runtime-source.ts` now only joins the final runtime sections; layout, scene, navigation, render, settings, and UI behavior are edited directly in their own section modules instead of being rewritten through string patch helpers.
 - Changed the browser client bootstrap so the shipped app now starts from generated `packages/web/src/client/app-runtime.ts` output instead of evaluating a giant runtime string with `new Function(...)`, while the focused section sources remain the editing surface.

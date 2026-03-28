@@ -36,12 +36,14 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 Browser workload behavior:
 
 - fleet mode only keeps autodiscovered workspaces that have had session activity within the last 7 days
+- fleet mode merges Git worktrees from the same repo onto one floor by default, while a global `Split Worktrees` toggle restores one-floor-per-worktree when needed
 - desks are for truly ongoing work plus a short top-level done cooldown of about 5 seconds
 - local Codex sessions stay on desks while app-server still reports `status.type = "active"`, even if the latest visible item is waiting for input/approval or has already streamed a recent reply
 - the rec area holds recent resting lead sessions, not stale active-looking placeholders
 - stale local `notLoaded` threads and completed process-only items like context compaction no longer count as active desk work after the turn has actually finished
 - single-project focus reuses the same compact scene geometry as the tower overview, with only whole-scene fit scaling changing between those modes
 - desk pods and their workstation seat cells stay snapped to the `16px` tile grid instead of shifting onto separate pixel offsets
+- worktree-backed floors and agent hover cards show a distinct blue worktree badge so duplicate Codex, Claude, and Cursor repo clones stay distinguishable
 
 ## Support matrix
 

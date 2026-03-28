@@ -100,6 +100,7 @@ Sources:
   - fleet view across multiple configured project roots
   - fleet mode only keeps autodiscovered workspaces whose session timestamps are no older than 7 days; config-only roots without recent sessions do not stay visible just because the workspace metadata is newer
   - fleet map renders as a continuous tower of workspace floors instead of a stack of separate cards
+  - Git-linked worktrees merge onto one repo floor by default, with a global split toggle available when one floor per worktree is more useful
   - deep-linkable single-project room view through `?project=<abs-path>`
   - explicit CLI project roots stay pinned to those roots instead of being replaced by auto-discovered workspace lists
   - live SSE updates for browser clients
@@ -130,7 +131,7 @@ Sources:
 - the scene tile is now a fixed `16px` unit in both normal and compact map modes so grid placement aligns with native PixelOffice asset sizing
 - selected-workspace and focused single-workspace rendering reuse the same compact scene prefab geometry as the tower overview; only whole-scene fit scaling changes between those views
 - desk-pod origins and the workstation seat cells inside them are expected to stay tile-aligned, matching the same grid contract used by rec-strip furniture
-- global browser settings currently expose only text scale; it applies to hover/toast/map text but does not change room or prefab geometry
+- global browser settings currently expose text scale plus a persisted worktree split toggle; text scale still applies to hover/toast/map text without changing room or prefab geometry
 - the retained browser map path now uses a persistent Pixi scene host plus HTML anchor overlays for toast positioning, so map updates can mutate scene entities without replacing the scene shell
 - routed avatar movement in the Pixi scene now uses a lightweight grid pathfinder against room occupancy instead of direct straight-line scene tweens
 

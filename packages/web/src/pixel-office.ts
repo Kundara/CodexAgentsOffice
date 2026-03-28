@@ -81,6 +81,13 @@ function pixelOfficeSprite(group: string, name: string, w: number, h: number): P
 }
 
 export const PIXEL_OFFICE_MANIFEST = {
+  icons: {
+    worktree: {
+      url: `${PIXEL_OFFICE_SPRITES_DIR}/icons/worktree.svg`,
+      w: 16,
+      h: 16
+    }
+  },
   avatars: [
     { id: "nova", ...pixelOfficeSprite("avatars", "nova", 15, 23) },
     { id: "lex", ...pixelOfficeSprite("avatars", "lex", 19, 24) },

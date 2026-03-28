@@ -100,6 +100,7 @@ Claude local logs and Cursor background agents are secondary inputs. They can en
 Current browser settings surfaces are:
 
 - text scale
+- a persisted `Split Worktrees` toggle that restores one floor per worktree instead of the default merged repo floor
 - a debug tile overlay toggle for layout diagnostics
 - machine-local Cursor API key save/clear controls
 - shared-room sync toggle plus `host`, `room`, and short `nickname` fields
@@ -184,10 +185,19 @@ Global text scale rules:
 
 - Default browser deploys should run in fleet mode.
 - Fleet mode should keep every discovered workspace live.
+- Git-linked worktrees should merge onto a shared repo floor by default when they belong to the same underlying repository identity.
+- The browser should expose a global `Split Worktrees` toggle that restores the current one-floor-per-worktree presentation without changing the monitored workspace set.
+- When worktrees are split into separate floors, a worktree floor title should use the worktree name with a distinct bright-blue worktree badge/icon treatment.
 - Fleet startup should include configured Codex workspaces from `~/.codex/config.toml` when available, not only workspaces that already emitted recent local thread activity.
 - Fleet mode should hide autodiscovered workspaces once their last session timestamp is more than 7 days old.
 - The selected workspace changes browser focus only; it does not change the monitor set.
 - `/api/server-meta` must report the live bound fleet project set, not only startup seed projects.
+
+Worktree identity rules:
+
+- Shared repo/worktree grouping should work across Codex, Claude, and Cursor-backed snapshots; it must not rely on one source family alone.
+- Shared worktree grouping should prefer actual Git common-dir identity when available, then fall back to other stable repo identity fields only when necessary.
+- Agent hover cards should expose the source worktree name with the same worktree icon so duplicate repo clones remain distinguishable even when the tower floor is merged.
 
 ### Shared-room behavior
 

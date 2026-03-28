@@ -61,6 +61,15 @@ export function renderHtml(
               <button id="map-view-button" data-view="map">Map</button>
               <button id="terminal-view-button" data-view="terminal">Terminal</button>
             </div>
+            <button
+              id="split-worktrees-button"
+              class="toggle-button"
+              type="button"
+              aria-pressed="false"
+              title="Show each worktree on its own floor"
+            >
+              Split Worktrees
+            </button>
             <div class="settings-shell">
               <button
                 id="settings-button"

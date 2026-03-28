@@ -192,8 +192,13 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
       function renderWorkspaceFloor(snapshot, options = {}) {
         const counts = countsForSnapshot(snapshot);
         const compact = options.compact === true;
-        const title = escapeHtml(projectLabel(snapshot.projectRoot));
         const titleAttr = escapeHtml(snapshot.projectRoot);
+        const worktreeName = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
+          ? worktreeNameForSnapshot(snapshot)
+          : "";
+        const titleHtml = worktreeName
+          ? \`<div class="tower-floor-title tower-floor-title-worktree" title="\${titleAttr}"><img class="worktree-inline-icon tower-floor-worktree-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></div>\`
+          : \`<div class="tower-floor-title" title="\${titleAttr}">\${escapeHtml(projectLabel(snapshot.projectRoot))}</div>\`;
         const summary = state.view === "map"
           ? (compact ? "Live floor" : "Current workload")
           : \`\${counts.total} agents · \${counts.active} active · \${counts.waiting} waiting · \${counts.blocked} blocked · \${counts.cloud} cloud\`;
@@ -209,7 +214,7 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
         const actionHtml = options.action
           ? \`<button class="tower-floor-open" data-action="\${escapeHtml(options.action.type)}"\${options.action.projectRoot ? \` data-project-root="\${escapeHtml(options.action.projectRoot)}"\` : ""}>\${escapeHtml(options.action.label)}</button>\`
           : "";
-        return \`<section class="tower-floor\${compact ? " compact" : ""}" data-project-root="\${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label"><div class="tower-floor-title" title="\${titleAttr}">\${title}</div></div><div class="tower-floor-trailing"><div class="tower-floor-meta">\${escapeHtml(summary)}</div>\${actionHtml}</div></div><div class="tower-floor-body">\${notes ? \`<div class="tower-floor-note">\${escapeHtml(notes)}</div>\` : ""}\${body}</div></section>\`;
+        return \`<section class="tower-floor\${compact ? " compact" : ""}" data-project-root="\${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">\${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">\${escapeHtml(summary)}</div>\${actionHtml}</div></div><div class="tower-floor-body">\${notes ? \`<div class="tower-floor-note">\${escapeHtml(notes)}</div>\` : ""}\${body}</div></section>\`;
       }
 
       function renderWorkspaceScroll(projects) {

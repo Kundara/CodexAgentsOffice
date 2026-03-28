@@ -84,9 +84,11 @@ export interface ProjectIdentity {
   key: string | null;
   source: "git" | "unknown";
   gitRoot: string | null;
+  commonGitDir: string | null;
   repoUrl: string | null;
   repoName: string | null;
   branch: string | null;
+  worktreeName: string | null;
 }
 
 export interface ThreadItem {

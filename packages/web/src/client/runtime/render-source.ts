@@ -545,6 +545,10 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         const summaryClass = summary.source === "user"
           ? "agent-hover-summary agent-hover-summary-user"
           : "agent-hover-summary";
+        const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
+        const worktreeHtml = worktreeName
+          ? \`<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></div>\`
+          : "";
         const metaParts = [
           \`<span>\${escapeHtml(titleCaseWords(agentKindLabel(snapshot, agent)))}</span>\`,
           \`<span>\${escapeHtml(agentHoverSourceLabel(agent, summary.source))}</span>\`,
@@ -556,7 +560,7 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         ].filter(Boolean);
         const meta = metaParts.join('<span class="agent-hover-separator"> · </span>');
 
-        return \`<div class="\${escapeHtml(className)}"\${styleAttr}><div class="agent-hover-title"><strong>\${escapeHtml(hoverTitle)}</strong></div><div class="\${escapeHtml(summaryClass)}">\${escapeHtml(summary.text)}</div><div class="agent-hover-meta">\${meta}</div></div>\`;
+        return \`<div class="\${escapeHtml(className)}"\${styleAttr}><div class="agent-hover-title"><strong>\${escapeHtml(hoverTitle)}</strong></div>\${worktreeHtml}<div class="\${escapeHtml(summaryClass)}">\${escapeHtml(summary.text)}</div><div class="agent-hover-meta">\${meta}</div></div>\`;
       }
 
       function flattenRooms(rooms) {

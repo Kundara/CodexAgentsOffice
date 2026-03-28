@@ -44,6 +44,18 @@ test("renderHtml can bootstrap a discovered fleet project list distinct from the
   assert.match(html, /"root":"\/tmp\/discovered","label":"Discovered"/);
 });
 
+test("renderHtml includes the global split-worktrees toggle", () => {
+  const html = renderHtml({
+    host: "127.0.0.1",
+    port: 4181,
+    explicitProjects: false,
+    projects: [{ root: "/tmp/project", label: "project" }]
+  });
+
+  assert.match(html, /id="split-worktrees-button"/);
+  assert.match(html, /Split Worktrees/);
+});
+
 test("client bootstrap runs the generated runtime module instead of evaling a source string", () => {
   const indexSource = readClientSource("index.ts");
   const runtimeModuleSource = readClientSource("app-runtime.ts");
@@ -204,6 +216,21 @@ test("runtime source section files now start on function boundaries instead of c
 
   assert.match(sceneSource, /^export const CLIENT_RUNTIME_SCENE_SOURCE = `\s*function buildLeadClusters/);
   assert.match(uiSource, /^export const CLIENT_RUNTIME_UI_SOURCE = `\s*function renderSessions/);
+});
+
+test("runtime source merges worktrees by repo and renders worktree badges in hover and split floor headers", () => {
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const renderSource = readRuntimeSource("render-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts");
+  const settingsSource = readRuntimeSource("settings-source.ts");
+
+  assert.ok(layoutSource.includes("function mergeWorktreeProjects(projects) {"));
+  assert.ok(layoutSource.includes('return "git-common:" + commonGitDir;'));
+  assert.ok(layoutSource.includes("sourceProjectRoot,"));
+  assert.ok(renderSource.includes('const worktreeHtml = worktreeName'));
+  assert.ok(renderSource.includes('class="agent-hover-worktree"'));
+  assert.ok(sceneSource.includes('tower-floor-title tower-floor-title-worktree'));
+  assert.ok(settingsSource.includes("splitWorktrees: Boolean(parsed && parsed.splitWorktrees)"));
 });
 
 test("rec-room roster keeps space for recently visible resting leads that went active", () => {

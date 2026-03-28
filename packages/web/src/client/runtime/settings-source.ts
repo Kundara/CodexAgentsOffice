@@ -145,7 +145,8 @@ export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
           const parsed = JSON.parse(raw);
           return {
             textScale: clampSceneTextScale(Number(parsed && parsed.textScale)),
-            debugTiles: Boolean(parsed && parsed.debugTiles)
+            debugTiles: Boolean(parsed && parsed.debugTiles),
+            splitWorktrees: Boolean(parsed && parsed.splitWorktrees)
           };
         } catch {
           return { ...defaultGlobalSceneSettings };
@@ -202,7 +203,8 @@ export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
       function applyGlobalSceneSettings() {
         const textScale = clampSceneTextScale(Number(state.globalSceneSettings && state.globalSceneSettings.textScale));
         const debugTiles = Boolean(state.globalSceneSettings && state.globalSceneSettings.debugTiles);
-        state.globalSceneSettings = { textScale, debugTiles };
+        const splitWorktrees = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees);
+        state.globalSceneSettings = { textScale, debugTiles, splitWorktrees };
         document.documentElement.style.setProperty("--ui-text-scale", String(textScale));
         if (textScaleInput instanceof HTMLInputElement) {
           textScaleInput.value = String(textScale);
@@ -211,6 +213,13 @@ export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
         if (debugTilesButton instanceof HTMLButtonElement) {
           debugTilesButton.classList.toggle("active", debugTiles);
           debugTilesButton.setAttribute("aria-pressed", debugTiles ? "true" : "false");
+        }
+        if (splitWorktreesButton instanceof HTMLButtonElement) {
+          splitWorktreesButton.classList.toggle("active", splitWorktrees);
+          splitWorktreesButton.setAttribute("aria-pressed", splitWorktrees ? "true" : "false");
+          splitWorktreesButton.title = splitWorktrees
+            ? "Show each worktree on its own floor"
+            : "Merge worktrees from the same repo onto one floor";
         }
       }
 
