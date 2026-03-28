@@ -1,0 +1,92 @@
+{
+  "door": {
+    "backdropColor": "#071018",
+    "backdropAlpha": 0.96,
+    "backdropWidthTiles": 2,
+    "backdropHeightTiles": 1,
+    "slideOffsetPx": 8,
+    "holdOpenMs": 520,
+    "openLerp": 0.24,
+    "closeLerp": 0.16
+  },
+  "idleBehavior": {
+    "flipIntervalMs": { "min": 1000, "max": 12000 },
+    "facilityVisitIntervalMs": { "min": 7000, "max": 16000 },
+    "itemDurationMs": 15000,
+    "throwAwayDurationMs": 700,
+    "throwAwayJumpPx": 13
+  },
+  "items": {
+    "book": {
+      "spriteKey": "fileBlue",
+      "durationMs": 15000,
+      "handOffsetPx": { "x": 7, "y": 10 }
+    },
+    "plastic-cup": {
+      "spriteKey": "mug",
+      "durationMs": 15000,
+      "handOffsetPx": { "x": 7, "y": 11 }
+    },
+    "snack": {
+      "spriteKey": "paper",
+      "durationMs": 15000,
+      "handOffsetPx": { "x": 7, "y": 11 }
+    }
+  },
+  "primaryRoomFurniture": [
+    {
+      "id": "vending",
+      "spriteKey": "vending",
+      "column": 0,
+      "baseRow": 0,
+      "z": 3,
+      "facilityProvider": {
+        "items": ["snack"],
+        "serviceTile": { "anchor": "center", "row": 2 }
+      }
+    },
+    {
+      "id": "cooler",
+      "spriteKey": "cooler",
+      "column": 2,
+      "baseRow": 0,
+      "z": 3,
+      "facilityProvider": {
+        "items": ["plastic-cup"],
+        "serviceTile": { "anchor": "center", "row": 2 }
+      }
+    },
+    {
+      "id": "counter",
+      "spriteKey": "counter",
+      "column": 3,
+      "baseRow": 0,
+      "z": 3
+    },
+    {
+      "id": "sofa-left",
+      "spriteKey": "sofaGray",
+      "column": { "anchor": "right", "offset": 10 },
+      "baseRow": 0,
+      "z": 3
+    },
+    {
+      "id": "sofa-right",
+      "spriteKey": "sofaOrange",
+      "column": { "anchor": "right", "offset": 7 },
+      "baseRow": 0,
+      "z": 4
+    },
+    {
+      "id": "shelf",
+      "spriteKey": "bookshelf",
+      "column": { "anchor": "right", "offset": 2 },
+      "baseRow": 0,
+      "z": 3,
+      "facilityProvider": {
+        "items": ["book"],
+        "serviceTile": { "anchor": "center", "row": 2 }
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { PIXEL_OFFICE_EVENT_ICON_URLS, PIXEL_OFFICE_MANIFEST, PIXEL_OFFICE_THREAD_ITEM_ICON_URLS } from "../pixel-office";
+import { SCENE_DEFINITIONS } from "../scene-definitions";
 import { DEFAULT_GLOBAL_SCENE_SETTINGS, INTERNAL_SCENE_SETTINGS } from "../scene-config";
 import { SERVER_BUILD_AT } from "../server/server-metadata";
 import type { ProjectDescriptor, ServerOptions } from "../server/server-types";
@@ -11,6 +12,7 @@ export function renderHtml(
   const clientConfigJson = JSON.stringify({
     projects,
     pixelOffice: PIXEL_OFFICE_MANIFEST,
+    sceneDefinitions: SCENE_DEFINITIONS,
     eventIconUrls: PIXEL_OFFICE_EVENT_ICON_URLS,
     threadItemIconUrls: PIXEL_OFFICE_THREAD_ITEM_ICON_URLS,
     defaultGlobalSceneSettings: DEFAULT_GLOBAL_SCENE_SETTINGS,

@@ -7,6 +7,7 @@ declare global {
     __AGENTS_OFFICE_CLIENT_CONFIG__?: {
       projects?: unknown[];
       pixelOffice?: Record<string, unknown>;
+      sceneDefinitions?: Record<string, unknown>;
       eventIconUrls?: Record<string, string>;
       threadItemIconUrls?: Record<string, string>;
       defaultGlobalSceneSettings?: Record<string, unknown>;
@@ -21,6 +22,7 @@ export function startClientApp(): void {
       const runtimeConfig = window.__AGENTS_OFFICE_CLIENT_CONFIG__ || {};
       const configuredProjects = runtimeConfig.projects || [];
       const pixelOffice = runtimeConfig.pixelOffice || {};
+      const sceneDefinitions = runtimeConfig.sceneDefinitions || {};
       const eventIconUrls = runtimeConfig.eventIconUrls || {};
       const threadItemIconUrls = runtimeConfig.threadItemIconUrls || {};
       const defaultGlobalSceneSettings = runtimeConfig.defaultGlobalSceneSettings || {};
@@ -4261,32 +4263,137 @@ export function startClientApp(): void {
         return sofas[index % sofas.length];
       }
 
+      function resolveScenePropSprite(spriteKey, fallback = null) {
+        if (typeof spriteKey === "string" && pixelOffice && pixelOffice.props && pixelOffice.props[spriteKey]) {
+          return pixelOffice.props[spriteKey];
+        }
+        return fallback;
+      }
+
+      function sceneHeldItemDefinition(itemId) {
+        if (!itemId || !sceneDefinitions || !sceneDefinitions.items) {
+          return null;
+        }
+        const definition = sceneDefinitions.items[itemId];
+        if (!definition) {
+          return null;
+        }
+        const sprite = resolveScenePropSprite(definition.spriteKey, null);
+        if (!sprite) {
+          return null;
+        }
+        const handOffset = definition.handOffsetPx || {};
+        return {
+          id: itemId,
+          sprite,
+          durationMs: Number.isFinite(definition.durationMs) ? Number(definition.durationMs) : null,
+          handOffsetPx: {
+            x: Number.isFinite(handOffset.x) ? Number(handOffset.x) : 7,
+            y: Number.isFinite(handOffset.y) ? Number(handOffset.y) : 10
+          }
+        };
+      }
+
+      function resolveConfiguredFurnitureColumn(column, roomWidthTiles, widthTiles, fallbackColumn = 0) {
+        const maxColumn = Math.max(0, roomWidthTiles - Math.max(1, widthTiles || 1));
+        if (Number.isFinite(column)) {
+          return Math.max(0, Math.min(maxColumn, Number(column)));
+        }
+        if (column && typeof column === "object") {
+          const anchor = typeof column.anchor === "string" ? column.anchor : "left";
+          const offset = Number.isFinite(column.offset) ? Number(column.offset) : 0;
+          if (anchor === "right") {
+            return Math.max(0, Math.min(maxColumn, roomWidthTiles - Math.max(1, widthTiles || 1) - offset));
+          }
+          if (anchor === "center") {
+            return Math.max(0, Math.min(maxColumn, Math.round((roomWidthTiles - Math.max(1, widthTiles || 1)) / 2) + offset));
+          }
+          return Math.max(0, Math.min(maxColumn, offset));
+        }
+        return Math.max(0, Math.min(maxColumn, Number.isFinite(fallbackColumn) ? Number(fallbackColumn) : 0));
+      }
+
+      function normalizeFurnitureFacilityProvider(item, roomWidthTiles) {
+        const provider = item && item.facilityProvider ? item.facilityProvider : null;
+        if (!provider || !Array.isArray(provider.items) || provider.items.length === 0) {
+          return null;
+        }
+        const serviceTile = provider.serviceTile || {};
+        const anchor = typeof serviceTile.anchor === "string" ? serviceTile.anchor : "center";
+        const offset = Number.isFinite(serviceTile.offset) ? Number(serviceTile.offset) : 0;
+        const widthTiles = Math.max(1, Number(item.widthTiles) || 1);
+        let column = Number(item.column) || 0;
+        if (anchor === "right") {
+          column += Math.max(0, widthTiles - 1) + offset;
+        } else if (anchor === "left") {
+          column += offset;
+        } else {
+          column += Math.floor((widthTiles - 1) / 2) + offset;
+        }
+        column = Math.max(0, Math.min(Math.max(0, roomWidthTiles - 1), column));
+        const row = Number.isFinite(serviceTile.row)
+          ? Number(serviceTile.row)
+          : Math.max(1, (Number(item.baseRow) || 0) + Math.max(1, Number(item.heightTiles) || 1));
+        return {
+          ...provider,
+          items: provider.items.slice(),
+          serviceTile: {
+            column,
+            row
+          }
+        };
+      }
+
       function recRoomSofaLayout(compact, roomPixelWidth, baseY) {
         const tile = sceneTileSize(compact);
         const roomWidthTiles = Math.round(roomPixelWidth / tile);
-        const rightColumn = roomWidthTiles - 7;
-        const leftColumn = rightColumn - 3;
+        const configuredFurniture = primaryFurnitureDefaults({ width: roomWidthTiles })
+          .map((item) => normalizeFurnitureItem(item, tile, roomWidthTiles));
+        const leftSofa = configuredFurniture.find((item) => item.id === "sofa-left") || null;
+        const rightSofa = configuredFurniture.find((item) => item.id === "sofa-right") || null;
+        const rightColumn = rightSofa ? rightSofa.column : roomWidthTiles - 7;
+        const leftColumn = leftSofa ? leftSofa.column : rightColumn - 3;
         return {
           scale: 1,
           sofaWidth: tile * 2,
           sofaHeight: tile,
           sofas: [
-            { id: "sofa-left", sprite: sofaSpriteAt(1), x: leftColumn * tile, y: baseY },
-            { id: "sofa-right", sprite: sofaSpriteAt(0), x: rightColumn * tile, y: baseY }
+            { id: "sofa-left", sprite: leftSofa?.sprite || sofaSpriteAt(1), x: leftColumn * tile, y: baseY },
+            { id: "sofa-right", sprite: rightSofa?.sprite || sofaSpriteAt(0), x: rightColumn * tile, y: baseY }
           ]
         };
       }
 
       function primaryFurnitureDefaults(room) {
+        const configured = Array.isArray(sceneDefinitions && sceneDefinitions.primaryRoomFurniture)
+          ? sceneDefinitions.primaryRoomFurniture
+          : null;
+        if (configured && configured.length > 0) {
+          return configured.map((item, index) => {
+            const fallbackSprite =
+              item.id === "sofa-left" ? sofaSpriteAt(1)
+              : item.id === "sofa-right" ? sofaSpriteAt(0)
+              : null;
+            return {
+              id: item.id || "furniture-" + index,
+              sprite: resolveScenePropSprite(item.spriteKey, fallbackSprite),
+              column: item.column,
+              baseRow: Number.isFinite(item.baseRow) ? Number(item.baseRow) : 0,
+              z: Number.isFinite(item.z) ? Number(item.z) : 3,
+              furniture: true,
+              facilityProvider: item.facilityProvider || null
+            };
+          }).filter((item) => item.sprite);
+        }
         const rightSofaColumn = room.width - 7;
         const leftSofaColumn = rightSofaColumn - 3;
         return [
-          { id: "vending", sprite: pixelOffice.props.vending, column: 0, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true },
-          { id: "cooler", sprite: pixelOffice.props.cooler, column: 2, baseRow: 0, widthTiles: 1, heightTiles: 1, z: 3, furniture: true },
+          { id: "vending", sprite: pixelOffice.props.vending, column: 0, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true, facilityProvider: { items: ["snack"], serviceTile: { anchor: "center", row: 2 } } },
+          { id: "cooler", sprite: pixelOffice.props.cooler, column: 2, baseRow: 0, widthTiles: 1, heightTiles: 1, z: 3, furniture: true, facilityProvider: { items: ["plastic-cup"], serviceTile: { anchor: "center", row: 2 } } },
           { id: "counter", sprite: pixelOffice.props.counter, column: 3, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 3, furniture: true },
           { id: "sofa-left", sprite: sofaSpriteAt(1), column: leftSofaColumn, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 3, furniture: true },
           { id: "sofa-right", sprite: sofaSpriteAt(0), column: rightSofaColumn, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 4, furniture: true },
-          { id: "shelf", sprite: pixelOffice.props.bookshelf, column: room.width - 2, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true }
+          { id: "shelf", sprite: pixelOffice.props.bookshelf, column: room.width - 2, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true, facilityProvider: { items: ["book"], serviceTile: { anchor: "center", row: 2 } } }
         ];
       }
 
@@ -4297,12 +4404,18 @@ export function startClientApp(): void {
         };
       }
 
-      function normalizeFurnitureItem(item, tileSize) {
+      function normalizeFurnitureItem(item, tileSize, roomWidthTiles) {
         const footprint = tileFootprintForSprite(item.sprite, tileSize);
-        return {
+        const column = resolveConfiguredFurnitureColumn(item.column, roomWidthTiles, footprint.widthTiles, item.column);
+        const normalized = {
           ...item,
+          column,
           widthTiles: footprint.widthTiles,
           heightTiles: footprint.heightTiles
+        };
+        return {
+          ...normalized,
+          facilityProvider: normalizeFurnitureFacilityProvider(normalized, roomWidthTiles)
         };
       }
 
@@ -4314,7 +4427,7 @@ export function startClientApp(): void {
       }
 
       function resolveFurnitureLayout(snapshot, room, tileSize) {
-        const defaults = primaryFurnitureDefaults(room).map((item) => normalizeFurnitureItem(item, tileSize));
+        const defaults = primaryFurnitureDefaults(room).map((item) => normalizeFurnitureItem(item, tileSize, room.width));
         const placed = [];
         defaults.forEach((item) => {
           const requested = furnitureColumnOverride(snapshot.projectRoot, room.id, item.id, item.column);
@@ -4326,10 +4439,26 @@ export function startClientApp(): void {
           while (placed.some((other) => rectanglesOverlap({ ...item, column }, other)) && column > 0) {
             column -= 1;
           }
-          const resolved = { ...item, column };
+          const resolved = normalizeFurnitureItem({ ...item, column }, tileSize, room.width);
           placed.push(resolved);
         });
         return placed;
+      }
+
+      function buildFacilityProviderModel(room, item) {
+        if (!room || !item || !item.facilityProvider) {
+          return null;
+        }
+        return {
+          id: room.id + "::facility::" + item.id,
+          roomId: room.id,
+          furnitureId: item.id,
+          items: item.facilityProvider.items.slice(),
+          serviceTile: {
+            column: item.facilityProvider.serviceTile.column,
+            row: item.facilityProvider.serviceTile.row
+          }
+        };
       }
 
       function recRoomSeatSlotAt(agent, index, compact, roomPixelWidth, baseY, sofaColumns = null) {
@@ -4837,8 +4966,10 @@ export function startClientApp(): void {
           width: baseMaxX * tile,
           height: maxY * tile,
           rooms: [],
+          roomDoors: [],
           tileObjects: [],
           furniture: [],
+          facilities: [],
           workstations: [],
           desks: [],
           offices: [],
@@ -4874,9 +5005,28 @@ export function startClientApp(): void {
             isPrimaryRoom
           });
           const centerColumn = Math.floor(room.width / 2);
+          const entrance = roomEntranceLayout(roomPixelWidth, compact, floorTop);
+          const doorWidth = Math.round(pixelOffice.props.boothDoor.w * entrance.doorScale);
+          const doorHeight = Math.round(pixelOffice.props.boothDoor.h * entrance.doorScale);
+          const doorBackdrop = sceneDefinitions && sceneDefinitions.door ? sceneDefinitions.door : {};
+          const backdropWidth = Math.max(tile * 2, Math.round((Number(doorBackdrop.backdropWidthTiles) || 2) * tile));
+          const backdropHeight = Math.max(tile, Math.round((Number(doorBackdrop.backdropHeightTiles) || 1) * tile));
+          model.roomDoors.push({
+            id: room.id + "::door",
+            roomId: room.id,
+            leftSprite: pixelOffice.props.boothDoor.url,
+            rightSprite: pixelOffice.props.boothDoor.url,
+            leftX: roomX + entrance.centerDoorX,
+            rightX: roomX + entrance.centerDoorX + doorWidth,
+            y: roomY + entrance.centerDoorY,
+            width: doorWidth,
+            height: doorHeight,
+            backdropX: roomX + Math.round(roomPixelWidth / 2 - backdropWidth / 2),
+            backdropY: floorTop - backdropHeight,
+            backdropWidth,
+            backdropHeight
+          });
           model.tileObjects.push(
-            buildSceneTileObject(room.id + "::door-left", room.id, pixelOffice.props.boothDoor, centerColumn - 2, 0, 1, 2, 2, { flipX: true, anchor: "wall" }),
-            buildSceneTileObject(room.id + "::door-right", room.id, pixelOffice.props.boothDoor, centerColumn - 1, 0, 1, 2, 2, { flipX: false, anchor: "wall" }),
             buildSceneTileObject(room.id + "::clock", room.id, pixelOffice.props.clock, centerColumn - 2, -2, 1, 1, 3, { anchor: "wall" })
           );
           if (isPrimaryRoom) {
@@ -4907,6 +5057,11 @@ export function startClientApp(): void {
               )
             );
             model.furniture.push(...furnitureLayout.map((item) => ({ ...item, roomId: room.id, projectRoot: snapshot.projectRoot })));
+            model.facilities.push(
+              ...furnitureLayout
+                .map((item) => buildFacilityProviderModel(room, item))
+                .filter(Boolean)
+            );
             room.__sofaColumns = sofaColumns;
           }
 
@@ -5250,9 +5405,15 @@ export function startClientApp(): void {
           assetUrls: new Set(),
           animatedSprites: [],
           motionStates: new Map(),
+          roomDoorStates: new Map(),
           agentHitNodes: new Map(),
           animateTick: null,
-          focusables: []
+          focusables: [],
+          roomById: new Map(),
+          roomNavigation: new Map(),
+          reservedAgentTiles: new Map(),
+          updateAutonomousRestingMotion: null,
+          syncHeldItemSprite: null
         };
         renderer.ready = renderer.app.init({
           backgroundAlpha: 0,
@@ -5277,10 +5438,13 @@ export function startClientApp(): void {
             const now = performance.now();
             const deltaMs = renderer.app?.ticker?.deltaMS || 16;
             renderer.animatedSprites.forEach((entry) => {
-              if (!entry || !entry.sprite) {
+              if (!entry || (!entry.sprite && entry.kind !== "blink")) {
                 return;
               }
               if (entry.kind === "motion") {
+                if (entry.autonomy && !entry.exiting && typeof renderer.updateAutonomousRestingMotion === "function") {
+                  renderer.updateAutonomousRestingMotion(entry, now);
+                }
                 const route = Array.isArray(entry.route) ? entry.route : [];
                 const speed = Number(entry.speed) || 128;
                 let remaining = speed * (deltaMs / 1000);
@@ -5346,6 +5510,9 @@ export function startClientApp(): void {
                   entry.bubbleText.x = bubbleX + Math.round((entry.bubbleBox.width - entry.bubbleText.width) / 2);
                   entry.bubbleText.y = bubbleY + Math.round((entry.bubbleBox.height - entry.bubbleText.height) / 2) - 1;
                 }
+                if (typeof renderer.syncHeldItemSprite === "function") {
+                  renderer.syncHeldItemSprite(entry);
+                }
                 syncAgentHitNodePosition(renderer, entry);
                 if (entry.exiting && entry.routeIndex >= route.length) {
                   entry.sprite.alpha = Math.max(0, entry.sprite.alpha - 0.16);
@@ -5354,6 +5521,9 @@ export function startClientApp(): void {
                   }
                   if (entry.bubbleText) {
                     entry.bubbleText.alpha = entry.sprite.alpha;
+                  }
+                  if (entry.heldItemSprite) {
+                    entry.heldItemSprite.alpha = entry.sprite.alpha;
                   }
                 }
                 return;
@@ -5377,6 +5547,37 @@ export function startClientApp(): void {
               }
               if (entry.kind === "bob") {
                 entry.sprite.y = entry.baseY + Math.round(Math.sin((now + entry.phase) / 220) * 1);
+                return;
+              }
+              if (entry.kind === "thrown-item") {
+                const duration = Math.max(1, Number(entry.durationMs) || 700);
+                const elapsed = Math.max(0, now - Number(entry.startedAt || now));
+                const progress = Math.min(1, elapsed / duration);
+                entry.sprite.x = pixelSnap(entry.startX + (Number(entry.dx) || 0) * progress);
+                entry.sprite.y = pixelSnap(entry.startY + (Number(entry.dy) || 0) * progress - Math.sin(progress * Math.PI) * (Number(entry.jumpPx) || 12));
+                entry.sprite.alpha = Math.max(0, 1 - progress);
+              }
+            });
+            const doorDefinition = sceneDefinitions && sceneDefinitions.door ? sceneDefinitions.door : {};
+            const slideOffsetPx = Number.isFinite(doorDefinition.slideOffsetPx) ? Number(doorDefinition.slideOffsetPx) : 8;
+            const openLerp = Number.isFinite(doorDefinition.openLerp) ? Number(doorDefinition.openLerp) : 0.24;
+            const closeLerp = Number.isFinite(doorDefinition.closeLerp) ? Number(doorDefinition.closeLerp) : 0.16;
+            renderer.roomDoorStates.forEach((doorState) => {
+              if (!doorState) {
+                return;
+              }
+              const targetOpen = Number(doorState.doorPulseUntil) > now ? 1 : 0;
+              const lerp = targetOpen > Number(doorState.openAmount || 0) ? openLerp : closeLerp;
+              doorState.openAmount = Number(doorState.openAmount || 0) + (targetOpen - Number(doorState.openAmount || 0)) * lerp;
+              if (Math.abs(targetOpen - doorState.openAmount) < 0.01) {
+                doorState.openAmount = targetOpen;
+              }
+              const slide = Math.round(slideOffsetPx * doorState.openAmount);
+              if (doorState.leftSprite) {
+                doorState.leftSprite.x = pixelSnap(doorState.baseLeftX - slide);
+              }
+              if (doorState.rightSprite) {
+                doorState.rightSprite.x = pixelSnap(doorState.baseRightX + slide);
               }
             });
             renderer.animatedSprites = renderer.animatedSprites.filter((entry) => {
@@ -5391,6 +5592,14 @@ export function startClientApp(): void {
                       node.visible = true;
                     }
                   });
+                }
+                return !done;
+              }
+              if (entry.kind === "thrown-item") {
+                const done = now - Number(entry.startedAt || now) >= Number(entry.durationMs || 700);
+                if (done && entry.sprite && entry.sprite.parent) {
+                  entry.sprite.parent.removeChild(entry.sprite);
+                  entry.sprite.destroy?.();
                 }
                 return !done;
               }
@@ -5415,6 +5624,14 @@ export function startClientApp(): void {
 
       function collectOfficeSceneAssetUrls(model) {
         const urls = new Set();
+        model.roomDoors.forEach((door) => {
+          if (door && door.leftSprite) {
+            urls.add(door.leftSprite);
+          }
+          if (door && door.rightSprite) {
+            urls.add(door.rightSprite);
+          }
+        });
         model.tileObjects.forEach((object) => {
           if (object && object.sprite) {
             urls.add(object.sprite);
@@ -5446,6 +5663,14 @@ export function startClientApp(): void {
           if (agent && agent.sprite) {
             urls.add(agent.sprite);
           }
+        });
+        model.facilities.forEach((facility) => {
+          (facility.items || []).forEach((itemId) => {
+            const itemDefinition = sceneHeldItemDefinition(itemId);
+            if (itemDefinition && itemDefinition.sprite && itemDefinition.sprite.url) {
+              urls.add(itemDefinition.sprite.url);
+            }
+          });
         });
         return [...urls];
       }
@@ -5847,7 +6072,9 @@ function roleTint(role) {
         renderer.anchorLayer.style.height = scaledHeight + "px";
         renderer.app.renderer.resize(scaledWidth, scaledHeight);
         const previousMotionStates = new Map(renderer.motionStates || []);
+        const previousDoorStates = new Map(renderer.roomDoorStates || []);
         renderer.motionStates = new Map();
+        renderer.roomDoorStates = new Map();
         renderer.root.removeChildren();
         renderer.root.scale.set(scale, scale);
         renderer.animatedSprites = [];
@@ -5858,12 +6085,266 @@ function roleTint(role) {
         const roomNavigation = buildOfficeNavigation(model);
         syncOfficeAnchors(renderer, model, scale);
         const reservedAgentTiles = reserveAgentTiles(model, roomById);
+        renderer.roomById = roomById;
+        renderer.roomNavigation = roomNavigation;
+        renderer.reservedAgentTiles = reservedAgentTiles;
         const background = new PIXI.Graphics()
           .roundRect(0, 0, model.width, model.height, 14)
           .fill({ color: 0x0b1b2b })
           .stroke({ color: 0x2e5c7b, width: 2 });
         background.zIndex = 0;
         renderer.root.addChild(background);
+
+        function parseSceneColor(value, fallback) {
+          if (typeof value === "string" && value.startsWith("#")) {
+            const parsed = Number.parseInt(value.slice(1), 16);
+            if (Number.isFinite(parsed)) {
+              return parsed;
+            }
+          }
+          if (Number.isFinite(value)) {
+            return Number(value);
+          }
+          return fallback;
+        }
+
+        function sceneDoorConfig() {
+          const door = sceneDefinitions && sceneDefinitions.door ? sceneDefinitions.door : {};
+          return {
+            backdropColor: parseSceneColor(door.backdropColor, 0x071018),
+            backdropAlpha: Number.isFinite(door.backdropAlpha) ? Number(door.backdropAlpha) : 0.96,
+            holdOpenMs: Number.isFinite(door.holdOpenMs) ? Number(door.holdOpenMs) : 520,
+            slideOffsetPx: Number.isFinite(door.slideOffsetPx) ? Number(door.slideOffsetPx) : 8
+          };
+        }
+
+        function sceneIdleBehaviorConfig() {
+          const idle = sceneDefinitions && sceneDefinitions.idleBehavior ? sceneDefinitions.idleBehavior : {};
+          return {
+            flipIntervalMs: idle.flipIntervalMs || { min: 1000, max: 12000 },
+            facilityVisitIntervalMs: idle.facilityVisitIntervalMs || { min: 7000, max: 16000 },
+            itemDurationMs: Number.isFinite(idle.itemDurationMs) ? Number(idle.itemDurationMs) : 15000,
+            throwAwayDurationMs: Number.isFinite(idle.throwAwayDurationMs) ? Number(idle.throwAwayDurationMs) : 700,
+            throwAwayJumpPx: Number.isFinite(idle.throwAwayJumpPx) ? Number(idle.throwAwayJumpPx) : 13
+          };
+        }
+
+        function randomBetween(range, fallbackMin, fallbackMax) {
+          const min = Number.isFinite(range?.min) ? Number(range.min) : fallbackMin;
+          const max = Number.isFinite(range?.max) ? Number(range.max) : fallbackMax;
+          if (max <= min) {
+            return min;
+          }
+          return min + Math.round(Math.random() * (max - min));
+        }
+
+        function nextIdleFlipAt(now = performance.now()) {
+          return now + randomBetween(sceneIdleBehaviorConfig().flipIntervalMs, 1000, 12000);
+        }
+
+        function nextIdleTripAt(now = performance.now()) {
+          return now + randomBetween(sceneIdleBehaviorConfig().facilityVisitIntervalMs, 7000, 16000);
+        }
+
+        function isAutonomousRestingAgent(agent) {
+          return agent && agent.kind === "resting" && (agent.state === "idle" || agent.state === "done");
+        }
+
+        function ensureHeldItemSprite(motionState) {
+          const autonomy = motionState && motionState.autonomy ? motionState.autonomy : null;
+          const itemDefinition = autonomy && autonomy.carriedItemId ? sceneHeldItemDefinition(autonomy.carriedItemId) : null;
+          if (!itemDefinition) {
+            if (motionState && motionState.heldItemSprite && motionState.heldItemSprite.parent) {
+              motionState.heldItemSprite.parent.removeChild(motionState.heldItemSprite);
+              motionState.heldItemSprite.destroy?.();
+            }
+            if (motionState) {
+              motionState.heldItemSprite = null;
+            }
+            return null;
+          }
+          if (motionState.heldItemSprite && motionState.heldItemSprite.__itemId === itemDefinition.id) {
+            return motionState.heldItemSprite;
+          }
+          if (motionState.heldItemSprite && motionState.heldItemSprite.parent) {
+            motionState.heldItemSprite.parent.removeChild(motionState.heldItemSprite);
+            motionState.heldItemSprite.destroy?.();
+          }
+          const sprite = PIXI.Sprite.from(loadedOfficeAssetImages.get(itemDefinition.sprite.url) || itemDefinition.sprite.url);
+          sprite.width = itemDefinition.sprite.w;
+          sprite.height = itemDefinition.sprite.h;
+          sprite.zIndex = (motionState.sprite?.zIndex || 12) + 1;
+          sprite.__itemId = itemDefinition.id;
+          renderer.root.addChild(sprite);
+          motionState.heldItemSprite = sprite;
+          return sprite;
+        }
+
+        function syncHeldItemSprite(motionState) {
+          const autonomy = motionState && motionState.autonomy ? motionState.autonomy : null;
+          const itemDefinition = autonomy && autonomy.carriedItemId ? sceneHeldItemDefinition(autonomy.carriedItemId) : null;
+          if (!itemDefinition) {
+            ensureHeldItemSprite(motionState);
+            return;
+          }
+          const sprite = ensureHeldItemSprite(motionState);
+          if (!sprite) {
+            return;
+          }
+          const itemWidth = itemDefinition.sprite.w;
+          const handX = motionState.flipX
+            ? motionState.currentX + motionState.width - itemDefinition.handOffsetPx.x - itemWidth
+            : motionState.currentX + itemDefinition.handOffsetPx.x;
+          sprite.x = pixelSnap(handX);
+          sprite.y = pixelSnap(motionState.currentY + itemDefinition.handOffsetPx.y);
+          sprite.alpha = motionState.sprite && Number.isFinite(motionState.sprite.alpha) ? motionState.sprite.alpha : 1;
+        }
+
+        function spawnThrownHeldItem(motionState) {
+          const autonomy = motionState && motionState.autonomy ? motionState.autonomy : null;
+          const itemDefinition = autonomy && autonomy.carriedItemId ? sceneHeldItemDefinition(autonomy.carriedItemId) : null;
+          if (!motionState || !itemDefinition) {
+            return;
+          }
+          syncHeldItemSprite(motionState);
+          const itemSprite = motionState.heldItemSprite || ensureHeldItemSprite(motionState);
+          if (!itemSprite) {
+            return;
+          }
+          const idleConfig = sceneIdleBehaviorConfig();
+          const thrownSprite = PIXI.Sprite.from(loadedOfficeAssetImages.get(itemDefinition.sprite.url) || itemDefinition.sprite.url);
+          thrownSprite.width = itemDefinition.sprite.w;
+          thrownSprite.height = itemDefinition.sprite.h;
+          thrownSprite.x = itemSprite.x;
+          thrownSprite.y = itemSprite.y;
+          thrownSprite.zIndex = itemSprite.zIndex;
+          renderer.root.addChild(thrownSprite);
+          renderer.animatedSprites.push({
+            kind: "thrown-item",
+            sprite: thrownSprite,
+            startedAt: performance.now(),
+            durationMs: idleConfig.throwAwayDurationMs,
+            jumpPx: idleConfig.throwAwayJumpPx,
+            startX: itemSprite.x,
+            startY: itemSprite.y,
+            dx: motionState.flipX ? -10 : 10,
+            dy: 6
+          });
+          if (itemSprite.parent) {
+            itemSprite.parent.removeChild(itemSprite);
+            itemSprite.destroy?.();
+          }
+          motionState.heldItemSprite = null;
+          autonomy.carriedItemId = null;
+          autonomy.holdUntil = 0;
+        }
+
+        function routeMotionStateTo(motionState, room, nav, targetTile, exactTarget, speed = null) {
+          if (!motionState || !room || !nav || !targetTile) {
+            return;
+          }
+          const startTile = nearestWalkableTile(
+            nav,
+            motionState.currentTile || officeAvatarFootTile(room, model.tile, motionState.currentX, motionState.currentY, motionState.width, motionState.height)
+          );
+          const endTile = nearestWalkableTile(nav, targetTile) || targetTile;
+          const route = startTile && endTile
+            ? buildAgentPixelRoute(nav, startTile, endTile, room, model.tile, motionState.width, motionState.height, exactTarget)
+            : [exactTarget || { x: motionState.currentX, y: motionState.currentY }];
+          motionState.route = route;
+          motionState.routeIndex = route.length > 1 ? 1 : route.length;
+          motionState.currentTile = startTile || endTile || motionState.currentTile;
+          motionState.targetX = exactTarget?.x ?? motionState.targetX;
+          motionState.targetY = exactTarget?.y ?? motionState.targetY;
+          if (Number.isFinite(speed)) {
+            motionState.speed = Number(speed);
+          }
+        }
+
+        function pickFacilityProvider(roomId) {
+          const facilities = model.facilities.filter((facility) => facility && facility.roomId === roomId && Array.isArray(facility.items) && facility.items.length > 0);
+          if (facilities.length === 0) {
+            return null;
+          }
+          return facilities[Math.floor(Math.random() * facilities.length)] || null;
+        }
+
+        function updateAutonomousRestingMotion(motionState, now) {
+          const autonomy = motionState && motionState.autonomy ? motionState.autonomy : null;
+          if (!autonomy) {
+            return;
+          }
+          const room = renderer.roomById.get(motionState.roomId);
+          const nav = navigationForAgent(renderer.roomNavigation, renderer.reservedAgentTiles, motionState.roomId, motionState.key);
+          if (!room || !nav) {
+            return;
+          }
+          if (autonomy.carriedItemId && Number.isFinite(autonomy.holdUntil) && now >= autonomy.holdUntil) {
+            autonomy.carriedItemId = null;
+            autonomy.holdUntil = 0;
+          }
+          const routeFinished = motionState.routeIndex >= ((motionState.route && motionState.route.length) || 0);
+          if (!routeFinished) {
+            return;
+          }
+          if (autonomy.phase === "to-facility" && autonomy.facility) {
+            const items = Array.isArray(autonomy.facility.items) ? autonomy.facility.items : [];
+            const itemId = items[Math.floor(Math.random() * items.length)] || null;
+            const itemDefinition = itemId ? sceneHeldItemDefinition(itemId) : null;
+            const idleConfig = sceneIdleBehaviorConfig();
+            autonomy.carriedItemId = itemDefinition ? itemDefinition.id : null;
+            autonomy.holdUntil = itemDefinition
+              ? now + (Number.isFinite(itemDefinition.durationMs) ? itemDefinition.durationMs : idleConfig.itemDurationMs)
+              : 0;
+            autonomy.phase = "returning";
+            const homeTile = officeAvatarFootTile(room, model.tile, autonomy.homeX, autonomy.homeY, motionState.width, motionState.height);
+            routeMotionStateTo(
+              motionState,
+              room,
+              nav,
+              homeTile,
+              { x: autonomy.homeX, y: autonomy.homeY },
+              176
+            );
+            motionState.targetFlipX = autonomy.homeFlip;
+            return;
+          }
+          if (autonomy.phase === "returning") {
+            autonomy.phase = "seated";
+            autonomy.facility = null;
+            autonomy.nextFlipAt = nextIdleFlipAt(now);
+            autonomy.nextTripAt = nextIdleTripAt(now);
+            motionState.targetFlipX = autonomy.homeFlip;
+            return;
+          }
+          if (now >= autonomy.nextFlipAt) {
+            autonomy.homeFlip = !autonomy.homeFlip;
+            motionState.targetFlipX = autonomy.homeFlip;
+            autonomy.nextFlipAt = nextIdleFlipAt(now);
+          }
+          if (now >= autonomy.nextTripAt) {
+            const facility = pickFacilityProvider(motionState.roomId);
+            if (!facility) {
+              autonomy.nextTripAt = nextIdleTripAt(now);
+              return;
+            }
+            autonomy.phase = "to-facility";
+            autonomy.facility = facility;
+            const serviceTile = facility.serviceTile;
+            routeMotionStateTo(
+              motionState,
+              room,
+              nav,
+              serviceTile,
+              officeAvatarPositionForTile(room, model.tile, serviceTile, motionState.width, motionState.height),
+              164
+            );
+            autonomy.nextTripAt = nextIdleTripAt(now);
+          }
+        }
+
+        renderer.updateAutonomousRestingMotion = updateAutonomousRestingMotion;
+        renderer.syncHeldItemSprite = syncHeldItemSprite;
 
         function addSpriteNode(definition) {
           const sprite = PIXI.Sprite.from(loadedOfficeAssetImages.get(definition.sprite) || definition.sprite);
@@ -5966,20 +6447,34 @@ function roleTint(role) {
           const nav = navigationForAgent(roomNavigation, reservations, agent.roomId, agentKey);
           const targetTile = officeAvatarFootTile(room, model.tile, agent.x, agent.y, agent.width, agent.height);
           const enteringFromDoor = !previousMotionState && enteringAgentKeys.has(agent.key || agent.id);
+          const autonomousResting = isAutonomousRestingAgent(agent);
           const previousState = previousMotionState && previousMotionState.roomId === agent.roomId
             ? previousMotionState
             : null;
-          const sameTarget = Boolean(
-            previousState
-            && previousState.roomId === agent.roomId
-            && previousState.targetX === agent.x
-            && previousState.targetY === agent.y
+          if (previousState && previousState.autonomy && previousState.autonomy.carriedItemId && !autonomousResting) {
+            spawnThrownHeldItem(previousState);
+          }
+          const preserveAutonomyRoute = Boolean(
+            autonomousResting
+            && previousState
+            && previousState.autonomy
+            && previousState.autonomy.phase !== "seated"
             && previousState.exiting !== true
+          );
+          const sameTarget = Boolean(
+            preserveAutonomyRoute || (
+              previousState
+              && previousState.roomId === agent.roomId
+              && previousState.targetX === agent.x
+              && previousState.targetY === agent.y
+              && previousState.exiting !== true
+            )
           );
           if (sameTarget) {
             previousState.sprite = avatarVisual.avatar;
             previousState.bubbleBox = avatarVisual.bubbleBox;
             previousState.bubbleText = avatarVisual.bubbleText;
+             previousState.heldItemSprite = null;
             previousState.anchorNode = renderer.agentHitNodes.get(agentKey) || null;
             previousState.width = agent.width;
             previousState.height = agent.height;
@@ -5990,8 +6485,28 @@ function roleTint(role) {
             previousState.mirrored = typeof agent.mirrored === "boolean"
               ? agent.mirrored
               : (typeof previousState.mirrored === "boolean" ? previousState.mirrored : null);
+            if (autonomousResting) {
+              previousState.autonomy = previousState.autonomy || {
+                phase: "seated",
+                homeX: agent.x,
+                homeY: agent.y,
+                homeFlip: agent.flipX === true,
+                nextFlipAt: nextIdleFlipAt(),
+                nextTripAt: nextIdleTripAt(),
+                facility: null,
+                carriedItemId: null,
+                holdUntil: 0
+              };
+              previousState.autonomy.homeX = agent.x;
+              previousState.autonomy.homeY = agent.y;
+              previousState.autonomy.homeFlip = agent.flipX === true;
+            } else {
+              previousState.autonomy = null;
+            }
             renderer.motionStates.set(agentKey, previousState);
-            if (["editing", "running", "validating", "scanning", "thinking", "planning", "delegating"].includes(agent.state) && previousState.routeIndex >= (previousState.route?.length || 0)) {
+            if (autonomousResting) {
+              renderer.animatedSprites.push(previousState);
+            } else if (["editing", "running", "validating", "scanning", "thinking", "planning", "delegating"].includes(agent.state) && previousState.routeIndex >= (previousState.route?.length || 0)) {
               renderer.animatedSprites.push({
                 kind: "bob",
                 sprite: avatarVisual.avatar,
@@ -6051,8 +6566,35 @@ function roleTint(role) {
             slotId: agent.slotId || previousState?.slotId || null,
             mirrored: typeof agent.mirrored === "boolean"
               ? agent.mirrored
-              : (typeof previousState?.mirrored === "boolean" ? previousState.mirrored : null)
+              : (typeof previousState?.mirrored === "boolean" ? previousState.mirrored : null),
+            heldItemSprite: null,
+            autonomy: autonomousResting
+              ? (previousState && previousState.autonomy
+                ? {
+                    ...previousState.autonomy,
+                    homeX: agent.x,
+                    homeY: agent.y,
+                    homeFlip: agent.flipX === true
+                  }
+                : {
+                    phase: "seated",
+                    homeX: agent.x,
+                    homeY: agent.y,
+                    homeFlip: agent.flipX === true,
+                    nextFlipAt: nextIdleFlipAt(),
+                    nextTripAt: nextIdleTripAt(),
+                    facility: null,
+                    carriedItemId: null,
+                    holdUntil: 0
+                  })
+              : null
           };
+          if (enteringFromDoor) {
+            const doorState = renderer.roomDoorStates.get(agent.roomId);
+            if (doorState) {
+              doorState.doorPulseUntil = performance.now() + sceneDoorConfig().holdOpenMs;
+            }
+          }
           if (["editing", "running", "validating", "scanning", "thinking", "planning", "delegating"].includes(agent.state) && route.length <= 1) {
             motionState.currentX = agent.x;
             motionState.currentY = agent.y;
@@ -6074,6 +6616,9 @@ function roleTint(role) {
             motionState.route = [{ x: agent.x, y: agent.y }];
             motionState.routeIndex = 1;
             renderer.motionStates.set(motionState.key, motionState);
+            if (autonomousResting) {
+              renderer.animatedSprites.push(motionState);
+            }
             syncAgentHitNodePosition(renderer, motionState);
             return avatarVisual.nodes;
           }
@@ -6130,6 +6675,45 @@ function roleTint(role) {
             .fill({ color: 0x9dd6ff, alpha: 0.32 });
           mural.zIndex = 2;
           renderer.root.addChild(mural);
+
+          const roomDoor = model.roomDoors.find((entry) => entry.roomId === room.id) || null;
+          if (roomDoor) {
+            const doorConfig = sceneDoorConfig();
+            const backdrop = new PIXI.Graphics()
+              .rect(roomDoor.backdropX, roomDoor.backdropY, roomDoor.backdropWidth, roomDoor.backdropHeight)
+              .fill({ color: doorConfig.backdropColor, alpha: doorConfig.backdropAlpha });
+            backdrop.zIndex = 2.2;
+            renderer.root.addChild(backdrop);
+
+            const leftDoor = PIXI.Sprite.from(loadedOfficeAssetImages.get(roomDoor.leftSprite) || roomDoor.leftSprite);
+            leftDoor.width = roomDoor.width;
+            leftDoor.height = roomDoor.height;
+            leftDoor.scale.x = -Math.abs(leftDoor.scale.x || 1);
+            leftDoor.x = roomDoor.leftX + roomDoor.width;
+            leftDoor.y = roomDoor.y;
+            leftDoor.zIndex = 2.6;
+            renderer.root.addChild(leftDoor);
+
+            const rightDoor = PIXI.Sprite.from(loadedOfficeAssetImages.get(roomDoor.rightSprite) || roomDoor.rightSprite);
+            rightDoor.width = roomDoor.width;
+            rightDoor.height = roomDoor.height;
+            rightDoor.x = roomDoor.rightX;
+            rightDoor.y = roomDoor.y;
+            rightDoor.zIndex = 2.6;
+            renderer.root.addChild(rightDoor);
+
+            const previousDoorState = previousDoorStates.get(room.id) || null;
+            renderer.roomDoorStates.set(room.id, {
+              roomId: room.id,
+              backdrop,
+              leftSprite: leftDoor,
+              rightSprite: rightDoor,
+              baseLeftX: roomDoor.leftX + roomDoor.width,
+              baseRightX: roomDoor.rightX,
+              openAmount: Number(previousDoorState?.openAmount) || 0,
+              doorPulseUntil: Number(previousDoorState?.doorPulseUntil) || 0
+            });
+          }
 
           const floorTop = room.floorTop;
           for (let y = floorTop; y < room.y + room.height; y += 48) {
@@ -6492,6 +7076,10 @@ function roleTint(role) {
           };
           renderer.motionStates.set(key, ghostMotion);
           renderer.animatedSprites.push(ghostMotion);
+          const doorState = renderer.roomDoorStates.get(motionState.roomId);
+          if (doorState) {
+            doorState.doorPulseUntil = performance.now() + sceneDoorConfig().holdOpenMs;
+          }
         });
 
         const projectSceneKeyPrefix = model.projectRoot + "::";

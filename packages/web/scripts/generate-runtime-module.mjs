@@ -59,6 +59,7 @@ declare global {
     __AGENTS_OFFICE_CLIENT_CONFIG__?: {
       projects?: unknown[];
       pixelOffice?: Record<string, unknown>;
+      sceneDefinitions?: Record<string, unknown>;
       eventIconUrls?: Record<string, string>;
       threadItemIconUrls?: Record<string, string>;
       defaultGlobalSceneSettings?: Record<string, unknown>;

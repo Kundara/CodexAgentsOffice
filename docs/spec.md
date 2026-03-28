@@ -123,6 +123,7 @@ Current browser settings surfaces are:
 ### Scene layout and tiles
 
 - The office floor should use a tile grid as its primary layout system.
+- Scene sprite metadata and room-interaction definitions should load from startup-read config files instead of being hard-coded inside the browser runtime strings.
 - Rooms from `.codex-agents/rooms.xml` define the outer floor bounds; internal furniture/layout is then placed on a tile grid inside those room bounds.
 - The grid starts at the end of the wall band and continues through the whole visible floor area to the bottom of the room.
 - The renderer may scale tiles to fit available width, but object placement should stay grid-derived rather than free-floating.
@@ -140,6 +141,8 @@ Current browser settings surfaces are:
 - A newly visible active agent should enter from the room door and walk to its assigned workstation.
 - If a resting lead becomes active again, it should leave its rec-area seat and walk to its newly assigned workstation instead of despawning and respawning.
 - When an agent truly leaves the visible scene, it should walk back out through the room door.
+- Each room door should render as a two-part sliding door with a dark recess behind it.
+- The door should slide open while an agent enters or exits through that room and then close again after a short hold-open delay.
 
 ### Scene settings model
 
@@ -244,7 +247,33 @@ Worktree identity rules:
 - Waiting and resting agents can occupy the walkway / wall-side slots beneath that first furniture row.
 - The rec strip should use the same PixelOffice object language as the work floor: vending, shelf, sofa, counter, plants, doors, and wall props.
 - Sofa placement is furniture-relative. If the sofa moves, the derived idle/rest seats move with it.
+- Facility-provider placement is also furniture-relative. If a provider furniture item moves, agents must walk to that furniture item's current live service point instead of an old default tile.
 - Rec-room seat stability matters more than strict most-recent sorting once an agent is already visibly seated; ordinary updates should not create a visible shuffle party.
+
+### Idle rec-area behavior
+
+- Resting lead avatars in the rec area should occasionally mirror their facing direction while seated.
+- Idle seated flips should happen on a randomized interval between 1 and 12 seconds.
+- Resting lead avatars may autonomously stand up, walk to a rec-area facility provider, collect one serviced item, and return to their sofa seat with that item held in-hand.
+- After returning to the sofa, the held item should follow the avatar hand position until its per-item hold duration expires.
+- The first implementation uses a default hold duration of 15 seconds per item, while still allowing duration overrides per serviced item in configuration.
+- If a resting lead stops being idle/done and becomes active again before the hold duration ends, the held item should be discarded immediately with a small jump-plus-fade animation and must stop following the avatar.
+
+### Facility providers and held items
+
+- Rec-area furniture should be expandable through a provider definition model instead of one-off hard-coded logic per furniture sprite.
+- A facility provider definition should live on the furniture item itself and contain:
+  - a randomizable list of serviced item ids
+  - a live service tile definition derived from the placed furniture position
+- A held-item definition should live in startup-loaded scene config and contain:
+  - the sprite key to render
+  - the default hold duration
+  - the hand offset for where it should follow the avatar sprite
+- Initial provider/item mappings:
+  - bookshelf provides `book`
+  - water machine / cooler provides `plastic-cup`
+  - snack machine / vending provides `snack`
+- The runtime should make it easy to add new providers and new serviced items without editing the core routing logic.
 
 ## State and workload rules
 

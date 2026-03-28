@@ -1,10 +1,5 @@
-interface PixelSprite {
-  url: string;
-  w: number;
-  h: number;
-}
-
 const PIXEL_OFFICE_SPRITES_DIR = "/assets/pixel-office/sprites";
+import PIXEL_OFFICE_MANIFEST_JSON from "./config/pixel-office-manifest.json";
 
 export const PIXEL_OFFICE_EVENT_ICON_METHODS = [
   "thread/started",
@@ -72,73 +67,4 @@ export const PIXEL_OFFICE_THREAD_ITEM_ICON_URLS = {
   contextCompaction: `${PIXEL_OFFICE_SPRITES_DIR}/icons/thread-item/contextCompaction.svg`
 } as const;
 
-function pixelOfficeSprite(group: string, name: string, w: number, h: number): PixelSprite {
-  return {
-    url: `${PIXEL_OFFICE_SPRITES_DIR}/${group}/${name}.png`,
-    w,
-    h
-  };
-}
-
-export const PIXEL_OFFICE_MANIFEST = {
-  icons: {
-    worktree: {
-      url: `${PIXEL_OFFICE_SPRITES_DIR}/icons/worktree.svg`,
-      w: 16,
-      h: 16
-    }
-  },
-  avatars: [
-    { id: "nova", ...pixelOfficeSprite("avatars", "nova", 15, 23) },
-    { id: "lex", ...pixelOfficeSprite("avatars", "lex", 19, 24) },
-    { id: "mira", ...pixelOfficeSprite("avatars", "mira", 13, 21) },
-    { id: "atlas", ...pixelOfficeSprite("avatars", "atlas", 17, 23) },
-    { id: "echo", ...pixelOfficeSprite("avatars", "echo", 17, 23) }
-  ],
-  chairs: [
-    pixelOfficeSprite("chairs", "chair-1", 11, 22),
-    pixelOfficeSprite("chairs", "chair-2", 11, 22),
-    pixelOfficeSprite("chairs", "chair-3", 11, 22),
-    pixelOfficeSprite("chairs", "chair-4", 11, 22),
-    pixelOfficeSprite("chairs", "chair-5", 11, 22),
-    pixelOfficeSprite("chairs", "chair-6", 11, 22)
-  ],
-  props: {
-    sky: pixelOfficeSprite("props", "sky", 256, 38),
-    floorStrip: pixelOfficeSprite("props", "floorStrip", 73, 24),
-    deskWide: pixelOfficeSprite("props", "deskWide", 40, 16),
-    deskSmall: pixelOfficeSprite("props", "deskSmall", 26, 16),
-    counter: pixelOfficeSprite("props", "deskWide", 40, 16),
-    cabinet: pixelOfficeSprite("props", "cabinet", 26, 20),
-    cubiclePanelLeft: pixelOfficeSprite("props", "cubiclePanelLeft", 17, 19),
-    cubiclePanelRight: pixelOfficeSprite("props", "cubiclePanelRight", 17, 19),
-    cubiclePost: pixelOfficeSprite("props", "cubiclePost", 4, 27),
-    windowLeft: pixelOfficeSprite("props", "windowLeft", 26, 21),
-    windowRight: pixelOfficeSprite("props", "windowRight", 26, 21),
-    boothDoor: pixelOfficeSprite("props", "boothDoor", 16, 31),
-    sofaGray: pixelOfficeSprite("props", "sofaGray", 33, 15),
-    sofaBlue: pixelOfficeSprite("props", "sofaBlue", 33, 16),
-    sofaGreen: pixelOfficeSprite("props", "sofaGreen", 33, 16),
-    sofaOrange: pixelOfficeSprite("props", "sofaOrange", 33, 16),
-    vending: pixelOfficeSprite("props", "vending", 24, 34),
-    bookshelf: pixelOfficeSprite("props", "bookshelf", 24, 31),
-    plant: pixelOfficeSprite("props", "plant", 14, 19),
-    calendar: pixelOfficeSprite("props", "calendar", 17, 11),
-    workstation: pixelOfficeSprite("props", "workstation", 15, 19),
-    cooler: pixelOfficeSprite("props", "cooler", 9, 17),
-    tower: pixelOfficeSprite("props", "tower", 6, 19),
-    clock: pixelOfficeSprite("props", "clock", 19, 6),
-    mug: pixelOfficeSprite("props", "mug", 7, 11),
-    artWarm: pixelOfficeSprite("props", "artWarm", 12, 9),
-    artUk: pixelOfficeSprite("props", "artUk", 12, 9),
-    artUs: pixelOfficeSprite("props", "artUs", 12, 9),
-    filePurple: pixelOfficeSprite("props", "filePurple", 11, 8),
-    fileBlue: pixelOfficeSprite("props", "fileBlue", 11, 8),
-    fileGreen: pixelOfficeSprite("props", "fileGreen", 11, 8),
-    badge: pixelOfficeSprite("props", "badge", 9, 9),
-    paper: pixelOfficeSprite("props", "paper", 11, 8),
-    socket: pixelOfficeSprite("props", "socket", 10, 6),
-    catBlack: pixelOfficeSprite("props", "catBlack", 13, 13),
-    catSleep: pixelOfficeSprite("props", "catSleep", 24, 11)
-  }
-} as const;
+export const PIXEL_OFFICE_MANIFEST = PIXEL_OFFICE_MANIFEST_JSON;

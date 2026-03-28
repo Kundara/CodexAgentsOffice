@@ -283,8 +283,10 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
           width: baseMaxX * tile,
           height: maxY * tile,
           rooms: [],
+          roomDoors: [],
           tileObjects: [],
           furniture: [],
+          facilities: [],
           workstations: [],
           desks: [],
           offices: [],
@@ -320,9 +322,28 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
             isPrimaryRoom
           });
           const centerColumn = Math.floor(room.width / 2);
+          const entrance = roomEntranceLayout(roomPixelWidth, compact, floorTop);
+          const doorWidth = Math.round(pixelOffice.props.boothDoor.w * entrance.doorScale);
+          const doorHeight = Math.round(pixelOffice.props.boothDoor.h * entrance.doorScale);
+          const doorBackdrop = sceneDefinitions && sceneDefinitions.door ? sceneDefinitions.door : {};
+          const backdropWidth = Math.max(tile * 2, Math.round((Number(doorBackdrop.backdropWidthTiles) || 2) * tile));
+          const backdropHeight = Math.max(tile, Math.round((Number(doorBackdrop.backdropHeightTiles) || 1) * tile));
+          model.roomDoors.push({
+            id: room.id + "::door",
+            roomId: room.id,
+            leftSprite: pixelOffice.props.boothDoor.url,
+            rightSprite: pixelOffice.props.boothDoor.url,
+            leftX: roomX + entrance.centerDoorX,
+            rightX: roomX + entrance.centerDoorX + doorWidth,
+            y: roomY + entrance.centerDoorY,
+            width: doorWidth,
+            height: doorHeight,
+            backdropX: roomX + Math.round(roomPixelWidth / 2 - backdropWidth / 2),
+            backdropY: floorTop - backdropHeight,
+            backdropWidth,
+            backdropHeight
+          });
           model.tileObjects.push(
-            buildSceneTileObject(room.id + "::door-left", room.id, pixelOffice.props.boothDoor, centerColumn - 2, 0, 1, 2, 2, { flipX: true, anchor: "wall" }),
-            buildSceneTileObject(room.id + "::door-right", room.id, pixelOffice.props.boothDoor, centerColumn - 1, 0, 1, 2, 2, { flipX: false, anchor: "wall" }),
             buildSceneTileObject(room.id + "::clock", room.id, pixelOffice.props.clock, centerColumn - 2, -2, 1, 1, 3, { anchor: "wall" })
           );
           if (isPrimaryRoom) {
@@ -353,6 +374,11 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
               )
             );
             model.furniture.push(...furnitureLayout.map((item) => ({ ...item, roomId: room.id, projectRoot: snapshot.projectRoot })));
+            model.facilities.push(
+              ...furnitureLayout
+                .map((item) => buildFacilityProviderModel(room, item))
+                .filter(Boolean)
+            );
             room.__sofaColumns = sofaColumns;
           }
 
@@ -696,9 +722,15 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
           assetUrls: new Set(),
           animatedSprites: [],
           motionStates: new Map(),
+          roomDoorStates: new Map(),
           agentHitNodes: new Map(),
           animateTick: null,
-          focusables: []
+          focusables: [],
+          roomById: new Map(),
+          roomNavigation: new Map(),
+          reservedAgentTiles: new Map(),
+          updateAutonomousRestingMotion: null,
+          syncHeldItemSprite: null
         };
         renderer.ready = renderer.app.init({
           backgroundAlpha: 0,
@@ -723,10 +755,13 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
             const now = performance.now();
             const deltaMs = renderer.app?.ticker?.deltaMS || 16;
             renderer.animatedSprites.forEach((entry) => {
-              if (!entry || !entry.sprite) {
+              if (!entry || (!entry.sprite && entry.kind !== "blink")) {
                 return;
               }
               if (entry.kind === "motion") {
+                if (entry.autonomy && !entry.exiting && typeof renderer.updateAutonomousRestingMotion === "function") {
+                  renderer.updateAutonomousRestingMotion(entry, now);
+                }
                 const route = Array.isArray(entry.route) ? entry.route : [];
                 const speed = Number(entry.speed) || 128;
                 let remaining = speed * (deltaMs / 1000);
@@ -792,6 +827,9 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   entry.bubbleText.x = bubbleX + Math.round((entry.bubbleBox.width - entry.bubbleText.width) / 2);
                   entry.bubbleText.y = bubbleY + Math.round((entry.bubbleBox.height - entry.bubbleText.height) / 2) - 1;
                 }
+                if (typeof renderer.syncHeldItemSprite === "function") {
+                  renderer.syncHeldItemSprite(entry);
+                }
                 syncAgentHitNodePosition(renderer, entry);
                 if (entry.exiting && entry.routeIndex >= route.length) {
                   entry.sprite.alpha = Math.max(0, entry.sprite.alpha - 0.16);
@@ -800,6 +838,9 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   }
                   if (entry.bubbleText) {
                     entry.bubbleText.alpha = entry.sprite.alpha;
+                  }
+                  if (entry.heldItemSprite) {
+                    entry.heldItemSprite.alpha = entry.sprite.alpha;
                   }
                 }
                 return;
@@ -823,6 +864,37 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
               }
               if (entry.kind === "bob") {
                 entry.sprite.y = entry.baseY + Math.round(Math.sin((now + entry.phase) / 220) * 1);
+                return;
+              }
+              if (entry.kind === "thrown-item") {
+                const duration = Math.max(1, Number(entry.durationMs) || 700);
+                const elapsed = Math.max(0, now - Number(entry.startedAt || now));
+                const progress = Math.min(1, elapsed / duration);
+                entry.sprite.x = pixelSnap(entry.startX + (Number(entry.dx) || 0) * progress);
+                entry.sprite.y = pixelSnap(entry.startY + (Number(entry.dy) || 0) * progress - Math.sin(progress * Math.PI) * (Number(entry.jumpPx) || 12));
+                entry.sprite.alpha = Math.max(0, 1 - progress);
+              }
+            });
+            const doorDefinition = sceneDefinitions && sceneDefinitions.door ? sceneDefinitions.door : {};
+            const slideOffsetPx = Number.isFinite(doorDefinition.slideOffsetPx) ? Number(doorDefinition.slideOffsetPx) : 8;
+            const openLerp = Number.isFinite(doorDefinition.openLerp) ? Number(doorDefinition.openLerp) : 0.24;
+            const closeLerp = Number.isFinite(doorDefinition.closeLerp) ? Number(doorDefinition.closeLerp) : 0.16;
+            renderer.roomDoorStates.forEach((doorState) => {
+              if (!doorState) {
+                return;
+              }
+              const targetOpen = Number(doorState.doorPulseUntil) > now ? 1 : 0;
+              const lerp = targetOpen > Number(doorState.openAmount || 0) ? openLerp : closeLerp;
+              doorState.openAmount = Number(doorState.openAmount || 0) + (targetOpen - Number(doorState.openAmount || 0)) * lerp;
+              if (Math.abs(targetOpen - doorState.openAmount) < 0.01) {
+                doorState.openAmount = targetOpen;
+              }
+              const slide = Math.round(slideOffsetPx * doorState.openAmount);
+              if (doorState.leftSprite) {
+                doorState.leftSprite.x = pixelSnap(doorState.baseLeftX - slide);
+              }
+              if (doorState.rightSprite) {
+                doorState.rightSprite.x = pixelSnap(doorState.baseRightX + slide);
               }
             });
             renderer.animatedSprites = renderer.animatedSprites.filter((entry) => {
@@ -837,6 +909,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                       node.visible = true;
                     }
                   });
+                }
+                return !done;
+              }
+              if (entry.kind === "thrown-item") {
+                const done = now - Number(entry.startedAt || now) >= Number(entry.durationMs || 700);
+                if (done && entry.sprite && entry.sprite.parent) {
+                  entry.sprite.parent.removeChild(entry.sprite);
+                  entry.sprite.destroy?.();
                 }
                 return !done;
               }
@@ -861,6 +941,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
 
       function collectOfficeSceneAssetUrls(model) {
         const urls = new Set();
+        model.roomDoors.forEach((door) => {
+          if (door && door.leftSprite) {
+            urls.add(door.leftSprite);
+          }
+          if (door && door.rightSprite) {
+            urls.add(door.rightSprite);
+          }
+        });
         model.tileObjects.forEach((object) => {
           if (object && object.sprite) {
             urls.add(object.sprite);
@@ -892,6 +980,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
           if (agent && agent.sprite) {
             urls.add(agent.sprite);
           }
+        });
+        model.facilities.forEach((facility) => {
+          (facility.items || []).forEach((itemId) => {
+            const itemDefinition = sceneHeldItemDefinition(itemId);
+            if (itemDefinition && itemDefinition.sprite && itemDefinition.sprite.url) {
+              urls.add(itemDefinition.sprite.url);
+            }
+          });
         });
         return [...urls];
       }

@@ -24,6 +24,7 @@ test("renderHtml loads external client assets and bootstrap config", () => {
   assert.match(html, /<link rel="stylesheet" href="\/client\/app\.css\?v=/);
   assert.match(html, /<script src="\/client\/app\.js\?v=.*"><\/script>/);
   assert.match(html, /window\.__AGENTS_OFFICE_CLIENT_CONFIG__/);
+  assert.match(html, /"sceneDefinitions":\{/);
 });
 
 test("renderHtml can bootstrap a discovered fleet project list distinct from the seed options", () => {
@@ -294,6 +295,35 @@ test("runtime source falls back to default rec layout when saved sofa columns ov
   assert.ok(settingsSource.includes("function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {"));
   assert.ok(settingsSource.includes("|| (slotLimit !== null && slotIndex >= slotLimit)"));
   assert.ok(settingsSource.includes("if (slotLimit !== null && nextSlotIndex >= slotLimit) {"));
+});
+
+test("runtime source resolves facility providers and service tiles from startup scene definitions", () => {
+  const renderSource = readRuntimeSource("render-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts");
+
+  assert.ok(renderSource.includes("function sceneHeldItemDefinition(itemId) {"));
+  assert.ok(renderSource.includes("function normalizeFurnitureFacilityProvider(item, roomWidthTiles) {"));
+  assert.ok(renderSource.includes("function buildFacilityProviderModel(room, item) {"));
+  assert.ok(renderSource.includes("const resolved = normalizeFurnitureItem({ ...item, column }, tileSize, room.width);"));
+  assert.ok(sceneSource.includes("roomDoors: [],"));
+  assert.ok(sceneSource.includes("facilities: [],"));
+  assert.ok(sceneSource.includes("model.roomDoors.push({"));
+  assert.ok(sceneSource.includes("model.facilities.push("));
+});
+
+test("runtime source animates sliding room doors and autonomous resting-item trips", () => {
+  const sceneSource = readRuntimeSource("scene-source.ts");
+  const navigationSource = readRuntimeSource("navigation-source.ts");
+
+  assert.ok(sceneSource.includes('if (entry.autonomy && !entry.exiting && typeof renderer.updateAutonomousRestingMotion === "function") {'));
+  assert.ok(sceneSource.includes('if (entry.kind === "thrown-item") {'));
+  assert.ok(sceneSource.includes("renderer.roomDoorStates.forEach((doorState) => {"));
+  assert.ok(sceneSource.includes("doorState.leftSprite.x = pixelSnap(doorState.baseLeftX - slide);"));
+  assert.ok(navigationSource.includes("function updateAutonomousRestingMotion(motionState, now) {"));
+  assert.ok(navigationSource.includes("spawnThrownHeldItem(previousState);"));
+  assert.ok(navigationSource.includes("renderer.roomDoorStates.set(room.id, {"));
+  assert.ok(navigationSource.includes("routeMotionStateTo("));
+  assert.ok(navigationSource.includes("doorState.doorPulseUntil = performance.now() + sceneDoorConfig().holdOpenMs;"));
 });
 
 test("runtime source avoids doorway arrival animations for first-load historical sessions", () => {

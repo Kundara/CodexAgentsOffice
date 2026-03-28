@@ -602,32 +602,137 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         return sofas[index % sofas.length];
       }
 
+      function resolveScenePropSprite(spriteKey, fallback = null) {
+        if (typeof spriteKey === "string" && pixelOffice && pixelOffice.props && pixelOffice.props[spriteKey]) {
+          return pixelOffice.props[spriteKey];
+        }
+        return fallback;
+      }
+
+      function sceneHeldItemDefinition(itemId) {
+        if (!itemId || !sceneDefinitions || !sceneDefinitions.items) {
+          return null;
+        }
+        const definition = sceneDefinitions.items[itemId];
+        if (!definition) {
+          return null;
+        }
+        const sprite = resolveScenePropSprite(definition.spriteKey, null);
+        if (!sprite) {
+          return null;
+        }
+        const handOffset = definition.handOffsetPx || {};
+        return {
+          id: itemId,
+          sprite,
+          durationMs: Number.isFinite(definition.durationMs) ? Number(definition.durationMs) : null,
+          handOffsetPx: {
+            x: Number.isFinite(handOffset.x) ? Number(handOffset.x) : 7,
+            y: Number.isFinite(handOffset.y) ? Number(handOffset.y) : 10
+          }
+        };
+      }
+
+      function resolveConfiguredFurnitureColumn(column, roomWidthTiles, widthTiles, fallbackColumn = 0) {
+        const maxColumn = Math.max(0, roomWidthTiles - Math.max(1, widthTiles || 1));
+        if (Number.isFinite(column)) {
+          return Math.max(0, Math.min(maxColumn, Number(column)));
+        }
+        if (column && typeof column === "object") {
+          const anchor = typeof column.anchor === "string" ? column.anchor : "left";
+          const offset = Number.isFinite(column.offset) ? Number(column.offset) : 0;
+          if (anchor === "right") {
+            return Math.max(0, Math.min(maxColumn, roomWidthTiles - Math.max(1, widthTiles || 1) - offset));
+          }
+          if (anchor === "center") {
+            return Math.max(0, Math.min(maxColumn, Math.round((roomWidthTiles - Math.max(1, widthTiles || 1)) / 2) + offset));
+          }
+          return Math.max(0, Math.min(maxColumn, offset));
+        }
+        return Math.max(0, Math.min(maxColumn, Number.isFinite(fallbackColumn) ? Number(fallbackColumn) : 0));
+      }
+
+      function normalizeFurnitureFacilityProvider(item, roomWidthTiles) {
+        const provider = item && item.facilityProvider ? item.facilityProvider : null;
+        if (!provider || !Array.isArray(provider.items) || provider.items.length === 0) {
+          return null;
+        }
+        const serviceTile = provider.serviceTile || {};
+        const anchor = typeof serviceTile.anchor === "string" ? serviceTile.anchor : "center";
+        const offset = Number.isFinite(serviceTile.offset) ? Number(serviceTile.offset) : 0;
+        const widthTiles = Math.max(1, Number(item.widthTiles) || 1);
+        let column = Number(item.column) || 0;
+        if (anchor === "right") {
+          column += Math.max(0, widthTiles - 1) + offset;
+        } else if (anchor === "left") {
+          column += offset;
+        } else {
+          column += Math.floor((widthTiles - 1) / 2) + offset;
+        }
+        column = Math.max(0, Math.min(Math.max(0, roomWidthTiles - 1), column));
+        const row = Number.isFinite(serviceTile.row)
+          ? Number(serviceTile.row)
+          : Math.max(1, (Number(item.baseRow) || 0) + Math.max(1, Number(item.heightTiles) || 1));
+        return {
+          ...provider,
+          items: provider.items.slice(),
+          serviceTile: {
+            column,
+            row
+          }
+        };
+      }
+
       function recRoomSofaLayout(compact, roomPixelWidth, baseY) {
         const tile = sceneTileSize(compact);
         const roomWidthTiles = Math.round(roomPixelWidth / tile);
-        const rightColumn = roomWidthTiles - 7;
-        const leftColumn = rightColumn - 3;
+        const configuredFurniture = primaryFurnitureDefaults({ width: roomWidthTiles })
+          .map((item) => normalizeFurnitureItem(item, tile, roomWidthTiles));
+        const leftSofa = configuredFurniture.find((item) => item.id === "sofa-left") || null;
+        const rightSofa = configuredFurniture.find((item) => item.id === "sofa-right") || null;
+        const rightColumn = rightSofa ? rightSofa.column : roomWidthTiles - 7;
+        const leftColumn = leftSofa ? leftSofa.column : rightColumn - 3;
         return {
           scale: 1,
           sofaWidth: tile * 2,
           sofaHeight: tile,
           sofas: [
-            { id: "sofa-left", sprite: sofaSpriteAt(1), x: leftColumn * tile, y: baseY },
-            { id: "sofa-right", sprite: sofaSpriteAt(0), x: rightColumn * tile, y: baseY }
+            { id: "sofa-left", sprite: leftSofa?.sprite || sofaSpriteAt(1), x: leftColumn * tile, y: baseY },
+            { id: "sofa-right", sprite: rightSofa?.sprite || sofaSpriteAt(0), x: rightColumn * tile, y: baseY }
           ]
         };
       }
 
       function primaryFurnitureDefaults(room) {
+        const configured = Array.isArray(sceneDefinitions && sceneDefinitions.primaryRoomFurniture)
+          ? sceneDefinitions.primaryRoomFurniture
+          : null;
+        if (configured && configured.length > 0) {
+          return configured.map((item, index) => {
+            const fallbackSprite =
+              item.id === "sofa-left" ? sofaSpriteAt(1)
+              : item.id === "sofa-right" ? sofaSpriteAt(0)
+              : null;
+            return {
+              id: item.id || "furniture-" + index,
+              sprite: resolveScenePropSprite(item.spriteKey, fallbackSprite),
+              column: item.column,
+              baseRow: Number.isFinite(item.baseRow) ? Number(item.baseRow) : 0,
+              z: Number.isFinite(item.z) ? Number(item.z) : 3,
+              furniture: true,
+              facilityProvider: item.facilityProvider || null
+            };
+          }).filter((item) => item.sprite);
+        }
         const rightSofaColumn = room.width - 7;
         const leftSofaColumn = rightSofaColumn - 3;
         return [
-          { id: "vending", sprite: pixelOffice.props.vending, column: 0, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true },
-          { id: "cooler", sprite: pixelOffice.props.cooler, column: 2, baseRow: 0, widthTiles: 1, heightTiles: 1, z: 3, furniture: true },
+          { id: "vending", sprite: pixelOffice.props.vending, column: 0, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true, facilityProvider: { items: ["snack"], serviceTile: { anchor: "center", row: 2 } } },
+          { id: "cooler", sprite: pixelOffice.props.cooler, column: 2, baseRow: 0, widthTiles: 1, heightTiles: 1, z: 3, furniture: true, facilityProvider: { items: ["plastic-cup"], serviceTile: { anchor: "center", row: 2 } } },
           { id: "counter", sprite: pixelOffice.props.counter, column: 3, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 3, furniture: true },
           { id: "sofa-left", sprite: sofaSpriteAt(1), column: leftSofaColumn, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 3, furniture: true },
           { id: "sofa-right", sprite: sofaSpriteAt(0), column: rightSofaColumn, baseRow: 0, widthTiles: 2, heightTiles: 1, z: 4, furniture: true },
-          { id: "shelf", sprite: pixelOffice.props.bookshelf, column: room.width - 2, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true }
+          { id: "shelf", sprite: pixelOffice.props.bookshelf, column: room.width - 2, baseRow: 0, widthTiles: 1, heightTiles: 2, z: 3, furniture: true, facilityProvider: { items: ["book"], serviceTile: { anchor: "center", row: 2 } } }
         ];
       }
 
@@ -638,12 +743,18 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         };
       }
 
-      function normalizeFurnitureItem(item, tileSize) {
+      function normalizeFurnitureItem(item, tileSize, roomWidthTiles) {
         const footprint = tileFootprintForSprite(item.sprite, tileSize);
-        return {
+        const column = resolveConfiguredFurnitureColumn(item.column, roomWidthTiles, footprint.widthTiles, item.column);
+        const normalized = {
           ...item,
+          column,
           widthTiles: footprint.widthTiles,
           heightTiles: footprint.heightTiles
+        };
+        return {
+          ...normalized,
+          facilityProvider: normalizeFurnitureFacilityProvider(normalized, roomWidthTiles)
         };
       }
 
@@ -655,7 +766,7 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
       }
 
       function resolveFurnitureLayout(snapshot, room, tileSize) {
-        const defaults = primaryFurnitureDefaults(room).map((item) => normalizeFurnitureItem(item, tileSize));
+        const defaults = primaryFurnitureDefaults(room).map((item) => normalizeFurnitureItem(item, tileSize, room.width));
         const placed = [];
         defaults.forEach((item) => {
           const requested = furnitureColumnOverride(snapshot.projectRoot, room.id, item.id, item.column);
@@ -667,10 +778,26 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           while (placed.some((other) => rectanglesOverlap({ ...item, column }, other)) && column > 0) {
             column -= 1;
           }
-          const resolved = { ...item, column };
+          const resolved = normalizeFurnitureItem({ ...item, column }, tileSize, room.width);
           placed.push(resolved);
         });
         return placed;
+      }
+
+      function buildFacilityProviderModel(room, item) {
+        if (!room || !item || !item.facilityProvider) {
+          return null;
+        }
+        return {
+          id: room.id + "::facility::" + item.id,
+          roomId: room.id,
+          furnitureId: item.id,
+          items: item.facilityProvider.items.slice(),
+          serviceTile: {
+            column: item.facilityProvider.serviceTile.column,
+            row: item.facilityProvider.serviceTile.row
+          }
+        };
       }
 
       function recRoomSeatSlotAt(agent, index, compact, roomPixelWidth, baseY, sofaColumns = null) {
