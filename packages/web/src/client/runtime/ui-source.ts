@@ -1,1 +1,746 @@
-export const CLIENT_RUNTIME_UI_SOURCE = "          return \`<article class=\"session-card\" tabindex=\"0\" data-focus-keys=\"\${focusKeys}\"><div class=\"session-card-header\"><strong class=\"session-card-title\">\${escapeHtml(agent.label)}</strong><div class=\"card-actions\">\${appearanceAction}</div></div><div class=\"muted session-card-description\" title=\"\${escapeHtml(fullDescription)}\">\${escapeHtml(fullDescription)}</div></article>\`;\n        }).join(\"\");\n      }\n\n      function renderFleetSessions(projects) {\n        const entries = projects.flatMap((snapshot) =>\n          snapshot.agents.map((agent) => ({ snapshot, agent }))\n        );\n\n        if (entries.length === 0) {\n          return '<div class=\"empty\">No live or recent lead sessions across the tracked workspaces right now.</div>';\n        }\n\n        entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));\n        return renderNeedsAttention(projects) + entries.map(({ snapshot, agent }) => {\n          const appearanceAction = agent.network\n            ? \"\"\n            : \`<button data-action=\"cycle-look\" data-project-root=\"\${escapeHtml(snapshot.projectRoot)}\" data-agent-id=\"\${escapeHtml(agent.id)}\">Cycle look</button>\`;\n          const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));\n          const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail)\n            || latestAgentMessage(agent)\n            || \`[\${agent.state}]\`;\n          const sourceLabel = agentNetworkLabel(agent);\n          const description = projectLabel(snapshot.projectRoot) + \" · \" + (sourceLabel ? sourceLabel + \" · \" : \"\") + detail;\n          return \`<article class=\"session-card\" tabindex=\"0\" data-focus-keys=\"\${focusKeys}\"><div class=\"session-card-header\"><strong class=\"session-card-title\">\${escapeHtml(agent.label)}</strong><div class=\"card-actions\">\${appearanceAction}</div></div><div class=\"muted session-card-description\" title=\"\${escapeHtml(description)}\">\${escapeHtml(description)}</div></article>\`;\n        }).join(\"\");\n      }\n\n      function applySessionFocus() {\n        const focusedKeys = new Set(state.focusedSessionKeys);\n        const hasFocus = focusedKeys.size > 0;\n        document.querySelectorAll(\"[data-scene-grid]\").forEach((grid) => {\n          if (!(grid instanceof HTMLElement)) {\n            return;\n          }\n          if (hasFocus) {\n            grid.dataset.focusActive = \"true\";\n          } else {\n            delete grid.dataset.focusActive;\n          }\n        });\n        document.querySelectorAll(\"[data-focus-agent]\").forEach((element) => {\n          if (!(element instanceof HTMLElement)) {\n            return;\n          }\n          element.classList.toggle(\"is-focused\", hasFocus && focusedKeys.has(element.dataset.focusKey || \"\"));\n        });\n        document.querySelectorAll(\"[data-focus-line]\").forEach((element) => {\n          if (!(element instanceof SVGElement)) {\n            return;\n          }\n          element.classList.toggle(\"is-focused\", hasFocus && focusedKeys.has(element.dataset.focusBossKey || \"\"));\n        });\n        applyOfficeRendererFocusAll();\n      }\n\n      function setSessionFocusFromElement(element) {\n        if (!(element instanceof HTMLElement)) {\n          state.focusedSessionKeys = [];\n          applySessionFocus();\n          return;\n        }\n        try {\n          const parsed = JSON.parse(element.dataset.focusKeys || \"[]\");\n          state.focusedSessionKeys = Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];\n        } catch {\n          state.focusedSessionKeys = [];\n        }\n        applySessionFocus();\n      }\n\n      function syncSessionFocusFromDom() {\n        const activeSceneAgent = document.querySelector(\"[data-focus-agent]:focus-within, [data-focus-agent]:hover\");\n        if (activeSceneAgent instanceof HTMLElement) {\n          setSessionFocusFromElement(activeSceneAgent);\n          return;\n        }\n        const activeCard = document.querySelector(\".session-card:focus-within, .session-card:hover\");\n        if (activeCard instanceof HTMLElement) {\n          setSessionFocusFromElement(activeCard);\n          return;\n        }\n        state.focusedSessionKeys = [];\n        applySessionFocus();\n      }\n\n      function syncLiveAgentState(projects) {\n        const now = Date.now();\n        const previousKeys = new Set(liveAgentMemory.keys());\n        const nextMemory = new Map();\n\n        for (const snapshot of projects) {\n          for (const agent of snapshot.agents) {\n            const key = agentKey(snapshot.projectRoot, agent);\n            nextMemory.set(key, {\n              key,\n              projectRoot: snapshot.projectRoot,\n              roomId: agent.roomId,\n              agent\n            });\n          }\n        }\n\n        enteringAgentKeys = new Set(\n          [...nextMemory.keys()].filter((key) => !previousKeys.has(key))\n        );\n\n        for (const [key, entry] of liveAgentMemory.entries()) {\n          if (!nextMemory.has(key)) {\n            const sceneState = renderedAgentSceneState.get(key) || null;\n            if (!sceneState) {\n              continue;\n            }\n            departingAgents.push({\n              ...entry,\n              sceneState,\n              expiresAt: now + DEPARTING_AGENT_TTL_MS\n            });\n          }\n        }\n\n        departingAgents = departingAgents.filter((ghost) => ghost.expiresAt > now && !nextMemory.has(ghost.key));\n        liveAgentMemory.clear();\n        for (const [key, entry] of nextMemory.entries()) {\n          liveAgentMemory.set(key, entry);\n        }\n      }\n\n      function fitScenes() {\n        const wrappers = document.querySelectorAll(\"[data-scene-fit]\");\n        const canZoom = typeof CSS !== \"undefined\" && typeof CSS.supports === \"function\" && CSS.supports(\"zoom\", \"1\");\n        wrappers.forEach((wrapper) => {\n          const grid = wrapper.querySelector(\"[data-scene-grid]\");\n          if (!(wrapper instanceof HTMLElement) || !(grid instanceof HTMLElement)) {\n            return;\n          }\n\n          const rawWidth = Number.parseFloat(grid.style.width || \"0\");\n          const rawHeight = Number.parseFloat(grid.style.height || \"0\");\n          if (!rawWidth || !rawHeight) {\n            return;\n          }\n\n          const focusMode = wrapper.dataset.sceneMode === \"focus\";\n          const towerMode = wrapper.closest(\".tower-floor-body\") instanceof HTMLElement;\n          const availableWidth = Math.max(wrapper.clientWidth - (focusMode ? 0 : 4), 1);\n          const wrapperRect = wrapper.getBoundingClientRect();\n          const viewportRemaining = Math.max(window.innerHeight - wrapperRect.top - (focusMode ? 0 : 20), 1);\n          const availableHeight = focusMode\n            ? Math.max(wrapper.clientHeight || viewportRemaining, 1)\n            : Math.max(\n              Math.min(\n                viewportRemaining,\n                window.innerHeight * (\n                  towerMode\n                    ? (wrapper.classList.contains(\"compact\") ? 0.52 : 0.72)\n                    : (wrapper.classList.contains(\"compact\") ? 0.34 : 0.68)\n                )\n              ),\n              wrapper.classList.contains(\"compact\")\n                ? (towerMode ? 240 : 180)\n                : 220\n            );\n          if (focusMode) {\n            const coverScale = Math.max(availableWidth / rawWidth, availableHeight / rawHeight);\n            const boundedCoverScale = Number.isFinite(coverScale) && coverScale > 0\n              ? Math.min(Math.max(coverScale, 0.2), 6)\n              : 1;\n\n            wrapper.style.height = \`\${Math.max(1, Math.round(availableHeight))}px\`;\n            grid.style.zoom = \"\";\n            grid.style.transform = \`translate(-50%, -50%) scale(\${boundedCoverScale})\`;\n            wrapper.dataset.sceneFitted = \"true\";\n            return;\n          }\n\n          if (towerMode) {\n            const scale = availableWidth / rawWidth;\n            const boundedScale = Number.isFinite(scale) && scale > 0\n              ? Math.min(Math.max(scale, 0.2), 3.5)\n              : 1;\n\n            wrapper.style.height = \`\${Math.max(220, Math.round(rawHeight * boundedScale))}px\`;\n            if (canZoom) {\n              grid.style.zoom = String(boundedScale);\n              grid.style.transform = \"\";\n            } else {\n              grid.style.zoom = \"\";\n              grid.style.transform = \`scale(\${boundedScale})\`;\n            }\n            wrapper.dataset.sceneFitted = \"true\";\n            return;\n          }\n\n          const heightScale = wrapper.classList.contains(\"compact\")\n            ? availableHeight / rawHeight\n            : Math.max(1, availableHeight / rawHeight);\n          const scale = Math.min(availableWidth / rawWidth, heightScale);\n          const boundedScale = Number.isFinite(scale) && scale > 0\n            ? Math.min(Math.max(scale, 0.2), 3.5)\n            : 1;\n\n          wrapper.style.height = \`\${Math.max(160, Math.round(rawHeight * boundedScale))}px\`;\n          if (canZoom) {\n            grid.style.zoom = String(boundedScale);\n            grid.style.transform = \"\";\n          } else {\n            grid.style.zoom = \"\";\n            grid.style.transform = \`scale(\${boundedScale})\`;\n          }\n          wrapper.dataset.sceneFitted = \"true\";\n        });\n      }\n\n      async function postJson(path, payload = {}) {\n        const response = await fetch(path, {\n          method: \"POST\",\n          headers: { \"content-type\": \"application/json\" },\n          body: JSON.stringify(payload)\n        });\n\n        if (!response.ok) {\n          throw new Error(await response.text());\n        }\n\n        return response.json();\n      }\n\n      function setTextIfChanged(element, value) {\n        if (!element) {\n          return false;\n        }\n        const next = String(value ?? \"\");\n        if (element.textContent === next) {\n          return false;\n        }\n        element.textContent = next;\n        return true;\n      }\n\n      function setHtmlIfChanged(element, html, options = {}) {\n        if (!element) {\n          return false;\n        }\n        if (element.dataset.renderHtml === html) {\n          return false;\n        }\n\n        const preserveScroll = options.preserveScroll === true;\n        const scrollTop = preserveScroll ? element.scrollTop : 0;\n        const scrollLeft = preserveScroll ? element.scrollLeft : 0;\n        element.innerHTML = html;\n        element.dataset.renderHtml = html;\n        if (preserveScroll) {\n          element.scrollTop = scrollTop;\n          element.scrollLeft = scrollLeft;\n        }\n        return true;\n      }\n\n      function currentSnapshot() {\n        if (!state.fleet) return null;\n        if (state.selected === \"all\") return null;\n        return state.fleet.projects.find((snapshot) => snapshot.projectRoot === state.selected) || null;\n      }\n\n      function renderHeroSummary(counts) {\n        return [\n          [\"Agents\", counts.total, \"primary\"],\n          [\"Active\", counts.active, \"is-active\"],\n          [\"Waiting\", counts.waiting, \"is-waiting\"],\n          [\"Blocked\", counts.blocked, \"is-blocked\"],\n          [\"Cloud\", counts.cloud, \"is-cloud\"]\n        ].map(([label, value, className]) =>\n          \`<span class=\"hero-summary-item \${className}\"><strong>\${value}</strong><span>\${label}</span></span>\`\n        ).join(\"\");\n      }\n\n      function ingestFleet(fleet) {\n        state.localFleet = fleet;\n        applyFleet(fleet);\n        scheduleMultiplayerBroadcast();\n      }\n\n      function render() {\n        if (!state.fleet) return;\n\n        const fleet = state.fleet;\n        const rawProjects = visibleProjects(fleet);\n        updateRecentLeadReservations(rawProjects);\n        const displayedProjects = rawProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));\n        const sessionProjects = rawProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));\n        const selectedRawSnapshot = currentSnapshot();\n        const snapshot = selectedRawSnapshot ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT) : null;\n        const sessionSnapshot = selectedRawSnapshot ? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT) : null;\n        if (!snapshot && state.workspaceFullscreen) {\n          state.workspaceFullscreen = false;\n          syncUrl();\n        }\n        syncLiveAgentState(rawProjects);\n        sceneStateDraft = null;\n        const counts = fleetCounts({ projects: sessionProjects });\n        const nextSceneToken = state.view === \"map\"\n          ? (snapshot\n            ? \`project-shell::\${snapshot.projectRoot}::\${state.workspaceFullscreen ? \"focus\" : \"default\"}\`\n            : \`fleet-shell::\${displayedProjects.map((project) => project.projectRoot).join(\"||\")}\`)\n          : (snapshot\n            ? \`project::\${sceneSnapshotToken(snapshot)}\`\n            : \`fleet::\${displayedProjects.map(sceneSnapshotToken).join(\"||\")}\`);\n\n        setTextIfChanged(stamp, \`Updated \${fleet.generatedAt}\`);\n        setTextIfChanged(projectCount, \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live · \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`);\n        mapViewButton.classList.toggle(\"active\", state.view === \"map\");\n        terminalViewButton.classList.toggle(\"active\", state.view === \"terminal\");\n        setConnection(state.connection);\n        rememberVisibleRecentLeads(displayedProjects);\n        syncWorkspaceFullscreenUi();\n        syncFleetBackdrop();\n        syncSkyParallax();\n        if (state.view !== \"map\") {\n          cleanupOfficeRenderers();\n        }\n\n        setHtmlIfChanged(heroSummary, renderHeroSummary(counts));\n\n        setHtmlIfChanged(projectTabs, [\n          \`<button class=\"project-tab\${state.selected === \"all\" ? \" active\" : \"\"}\" data-action=\"select-project\" data-project-root=\"all\">All</button>\`,\n          ...displayedProjects.map((project) => {\n            const counts = countsForSnapshot(project);\n            const activeClass = project.projectRoot === state.selected ? \" active\" : \"\";\n            const badge = counts.active;\n            return \`<button class=\"project-tab\${activeClass}\" data-action=\"select-project\" data-project-root=\"\${escapeHtml(project.projectRoot)}\" title=\"\${escapeHtml(project.projectRoot)}\">\${escapeHtml(projectLabel(project.projectRoot))} <span class=\"muted\">\${badge}</span></button>\`;\n          })\n        ].join(\"\"));\n\n        try {\n          if (!snapshot) {\n            const shouldRenderScene = state.view !== \"map\" || nextSceneToken !== lastSceneRenderToken;\n            const centerChanged = shouldRenderScene\n              ? setHtmlIfChanged(centerContent, renderWorkspaceScroll(displayedProjects), { preserveScroll: true })\n              : false;\n            if (shouldRenderScene) {\n              lastSceneRenderToken = nextSceneToken;\n            }\n            setHtmlIfChanged(sessionList, renderFleetSessions(sessionProjects), { preserveScroll: true });\n            setTextIfChanged(centerTitle, \"All Workspaces\");\n            setTextIfChanged(roomsPath, \`Live agents on the floor plus \${SESSION_RECENT_LEAD_LIMIT} recent sessions in the panel across tracked workspaces\`);\n            if (centerChanged) {\n              fitScenes();\n            }\n            if (sceneStateDraft) {\n              renderedAgentSceneState = sceneStateDraft;\n            }\n            sceneStateDraft = null;\n            syncSessionFocusFromDom();\n            syncWorkstationEffects();\n            if (state.view === \"map\") {\n              void syncOfficeMapScenes(displayedProjects);\n            }\n            renderNotifications();\n            return;\n          }\n\n          setTextIfChanged(centerTitle, projectLabel(snapshot.projectRoot));\n          const shouldRenderScene = state.view !== \"map\" || nextSceneToken !== lastSceneRenderToken;\n          const centerChanged = shouldRenderScene\n            ? setHtmlIfChanged(\n              centerContent,\n              state.view === \"terminal\"\n                ? renderTerminalSnapshot(snapshot)\n                : \`<div class=\"workspace-tower workspace-tower-single\">\${renderWorkspaceFloor(snapshot, {\n                  compact: false,\n                  focusMode: state.workspaceFullscreen,\n                  action: {\n                    type: \"toggle-workspace-focus\",\n                    label: state.workspaceFullscreen ? \"Close\" : \"Expand\"\n                  }\n                })}</div>\`,\n              { preserveScroll: true }\n            )\n            : false;\n          if (shouldRenderScene) {\n            lastSceneRenderToken = nextSceneToken;\n          }\n          const sessionsHtml = renderSessions(sessionSnapshot || snapshot);\n          setHtmlIfChanged(sessionList, sessionsHtml, { preserveScroll: true });\n          setTextIfChanged(\n            roomsPath,\n            snapshot.rooms.generated\n              ? \`Auto rooms · floor shows live agents plus \${SCENE_RECENT_LEAD_LIMIT} recent leads · panel shows \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`\n              : \`.codex-agents/rooms.xml · floor shows live agents plus \${SCENE_RECENT_LEAD_LIMIT} recent leads · panel shows \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`\n          );\n          if (centerChanged) {\n            fitScenes();\n          }\n          if (sceneStateDraft) {\n            renderedAgentSceneState = sceneStateDraft;\n          }\n          sceneStateDraft = null;\n          syncSessionFocusFromDom();\n          syncWorkstationEffects();\n          if (state.view === \"map\") {\n            void syncOfficeMapScenes(snapshot ? [snapshot] : displayedProjects);\n          }\n          renderNotifications();\n        } catch (error) {\n          console.error(\"render failed\", error);\n          const message = error instanceof Error ? error.message : String(error);\n          setHtmlIfChanged(centerContent, '<div class=\"empty\">Render failed: ' + escapeHtml(message) + \"</div>\");\n          setHtmlIfChanged(sessionList, '<div class=\"empty\">Render failed: ' + escapeHtml(message) + \"</div>\");\n          setConnection(\"offline\");\n          lastSceneRenderToken = null;\n          renderedAgentSceneState = new Map();\n          sceneStateDraft = null;\n          syncWorkstationEffects();\n        }\n      }\n\n      async function refreshFleet() {\n        const response = await fetch(\"/api/fleet\");\n        ingestFleet(await response.json());\n      }\n\n      function connectEvents() {\n        if (events) {\n          events.close();\n        }\n\n        setConnection(\"connecting\");\n        events = new EventSource(\"/api/events\");\n        events.addEventListener(\"open\", () => {\n          setConnection(\"live\");\n        });\n        events.addEventListener(\"fleet\", (event) => {\n          ingestFleet(JSON.parse(event.data));\n          setConnection(\"live\");\n        });\n        events.addEventListener(\"error\", () => {\n          setConnection(navigator.onLine === false ? \"offline\" : \"reconnecting\");\n        });\n      }\n\n      document.body.addEventListener(\"click\", async (event) => {\n        const target = event.target instanceof HTMLElement ? event.target.closest(\"[data-action], [data-view], #workspace-focus-button\") : null;\n        if (!(target instanceof HTMLElement)) return;\n\n        if (target.dataset.view) {\n          setView(target.dataset.view);\n          return;\n        }\n\n        const action = target.dataset.action;\n        if (action === \"toggle-settings\") {\n          setSettingsOpen(!state.settingsOpen);\n          return;\n        }\n\n        if (action === \"close-settings\") {\n          setSettingsOpen(false);\n          return;\n        }\n\n        if (action === \"select-project\" && target.dataset.projectRoot) {\n          setSettingsOpen(false);\n          setSelection(target.dataset.projectRoot);\n          return;\n        }\n\n        if (action === \"toggle-workspace-focus\") {\n          toggleWorkspaceFullscreen();\n          return;\n        }\n\n        if (target === workspaceFocusButton) {\n          toggleWorkspaceFullscreen();\n          return;\n        }\n\n        if (action === \"cycle-look\" && target.dataset.projectRoot && target.dataset.agentId) {\n          await postJson(\"/api/appearance/cycle\", {\n            projectRoot: target.dataset.projectRoot,\n            agentId: target.dataset.agentId\n          });\n        }\n      });\n\n      document.body.addEventListener(\"pointerover\", (event) => {\n        const focusTarget = event.target instanceof HTMLElement\n          ? event.target.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")\n          : null;\n        const relatedTarget = event.relatedTarget;\n        if (!(focusTarget instanceof HTMLElement)) {\n          return;\n        }\n        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {\n          return;\n        }\n        setSessionFocusFromElement(focusTarget);\n      });\n\n      document.body.addEventListener(\"pointerout\", (event) => {\n        const focusTarget = event.target instanceof HTMLElement\n          ? event.target.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")\n          : null;\n        const relatedTarget = event.relatedTarget;\n        if (!(focusTarget instanceof HTMLElement)) {\n          return;\n        }\n        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {\n          return;\n        }\n        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")) {\n          return;\n        }\n        setSessionFocusFromElement(null);\n      });\n\n      document.body.addEventListener(\"focusin\", (event) => {\n        const focusTarget = event.target instanceof HTMLElement\n          ? event.target.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")\n          : null;\n        if (focusTarget instanceof HTMLElement) {\n          setSessionFocusFromElement(focusTarget);\n        }\n      });\n\n      document.addEventListener(\"pointerdown\", (event) => {\n        if (!state.settingsOpen) {\n          return;\n        }\n        const withinSettings = event.target instanceof HTMLElement\n          ? event.target.closest(\".settings-shell\")\n          : null;\n        if (!withinSettings) {\n          setSettingsOpen(false);\n        }\n      });\n\n      document.body.addEventListener(\"focusout\", (event) => {\n        const focusTarget = event.target instanceof HTMLElement\n          ? event.target.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")\n          : null;\n        const relatedTarget = event.relatedTarget;\n        if (!(focusTarget instanceof HTMLElement)) {\n          return;\n        }\n        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {\n          return;\n        }\n        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(\".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]\")) {\n          return;\n        }\n        setSessionFocusFromElement(null);\n      });\n\n      document.body.addEventListener(\"pointerdown\", (event) => {\n        const target = event.target instanceof HTMLElement ? event.target.closest(\".office-map-furniture-hit\") : null;\n        if (!(target instanceof HTMLElement)) {\n          return;\n        }\n        const host = target.closest(\"[data-office-map-host]\");\n        const renderer = rendererForHost(host);\n        if (!renderer || !renderer.model) {\n          return;\n        }\n        const item = renderer.model.furniture.find((entry) => entry.id === target.dataset.furnitureId && entry.roomId === target.dataset.roomId);\n        if (!item) {\n          return;\n        }\n        const rect = target.getBoundingClientRect();\n        const pointerOffsetTiles = ((event.clientX - rect.left) / (renderer.scale * renderer.model.tile));\n        furnitureDragState = {\n          renderer,\n          projectRoot: renderer.model.projectRoot,\n          item,\n          currentColumn: item.column,\n          pointerOffsetTiles,\n          hostRect: renderer.host.getBoundingClientRect()\n        };\n        window.addEventListener(\"pointermove\", handleFurnitureDragMove);\n        window.addEventListener(\"pointerup\", stopFurnitureDrag);\n        window.addEventListener(\"pointercancel\", stopFurnitureDrag);\n        event.preventDefault();\n      });\n\n      if (textScaleInput instanceof HTMLInputElement) {\n        textScaleInput.addEventListener(\"input\", () => {\n          syncTextScalePreview(textScaleInput.value);\n        });\n        textScaleInput.addEventListener(\"change\", () => {\n          commitTextScale(textScaleInput.value);\n        });\n      }\n      if (debugTilesButton instanceof HTMLButtonElement) {\n        debugTilesButton.addEventListener(\"click\", () => {\n          state.globalSceneSettings = {\n            ...state.globalSceneSettings,\n            debugTiles: !state.globalSceneSettings.debugTiles\n          };\n          applyGlobalSceneSettings();\n          saveGlobalSceneSettings();\n          render();\n        });\n      }\n      if (cursorApiKeyInput instanceof HTMLInputElement) {\n        cursorApiKeyInput.addEventListener(\"keydown\", (event) => {\n          if (event.key === \"Enter\") {\n            event.preventDefault();\n            void saveCursorApiKey();\n          }\n        });\n      }\n      if (cursorApiKeySaveButton instanceof HTMLButtonElement) {\n        cursorApiKeySaveButton.addEventListener(\"click\", () => {\n          void saveCursorApiKey();\n        });\n      }\n      if (cursorApiKeyClearButton instanceof HTMLButtonElement) {\n        cursorApiKeyClearButton.addEventListener(\"click\", () => {\n          void clearCursorApiKey();\n        });\n      }\n      const commitMultiplayerInputs = () => {\n        commitMultiplayerSettings({\n          host: multiplayerHostInput instanceof HTMLInputElement ? multiplayerHostInput.value : \"\",\n          room: multiplayerRoomInput instanceof HTMLInputElement ? multiplayerRoomInput.value : \"\",\n          nickname: multiplayerNicknameInput instanceof HTMLInputElement ? multiplayerNicknameInput.value : \"\"\n        });\n      };\n      if (multiplayerHostInput instanceof HTMLInputElement) {\n        multiplayerHostInput.addEventListener(\"change\", commitMultiplayerInputs);\n        multiplayerHostInput.addEventListener(\"blur\", commitMultiplayerInputs);\n        multiplayerHostInput.addEventListener(\"keydown\", (event) => {\n          if (event.key === \"Enter\") {\n            event.preventDefault();\n            commitMultiplayerInputs();\n          }\n        });\n      }\n      if (multiplayerRoomInput instanceof HTMLInputElement) {\n        multiplayerRoomInput.addEventListener(\"change\", commitMultiplayerInputs);\n        multiplayerRoomInput.addEventListener(\"blur\", commitMultiplayerInputs);\n        multiplayerRoomInput.addEventListener(\"keydown\", (event) => {\n          if (event.key === \"Enter\") {\n            event.preventDefault();\n            commitMultiplayerInputs();\n          }\n        });\n      }\n      if (multiplayerNicknameInput instanceof HTMLInputElement) {\n        multiplayerNicknameInput.addEventListener(\"change\", commitMultiplayerInputs);\n        multiplayerNicknameInput.addEventListener(\"blur\", commitMultiplayerInputs);\n        multiplayerNicknameInput.addEventListener(\"keydown\", (event) => {\n          if (event.key === \"Enter\") {\n            event.preventDefault();\n            commitMultiplayerInputs();\n          }\n        });\n      }\n      if (multiplayerEnabledButton instanceof HTMLButtonElement) {\n        multiplayerEnabledButton.addEventListener(\"click\", () => {\n          commitMultiplayerSettings({\n            ...state.multiplayerSettings,\n            enabled: !state.multiplayerSettings.enabled\n          });\n        });\n      }\n      void refreshMultiplayerConnection();\n\n      if (!screenshotMode) {\n        window.addEventListener(\"online\", () => setConnection(\"reconnecting\"));\n        window.addEventListener(\"offline\", () => setConnection(\"offline\"));\n        window.addEventListener(\"scroll\", syncSkyParallax, { passive: true });\n      }\n      document.addEventListener(\"keydown\", (event) => {\n        if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {\n          return;\n        }\n        if (isTypingTarget(event.target)) {\n          return;\n        }\n        if (event.key === \"Escape\" && state.settingsOpen) {\n          event.preventDefault();\n          setSettingsOpen(false);\n          return;\n        }\n        if (event.key === \"Escape\" && state.workspaceFullscreen) {\n          event.preventDefault();\n          setWorkspaceFullscreen(false);\n          return;\n        }\n        if ((event.key === \"f\" || event.key === \"F\") && canFocusWorkspace()) {\n          event.preventDefault();\n          toggleWorkspaceFullscreen();\n        }\n      });\n      window.addEventListener(\"resize\", () => {\n        syncSkyParallax();\n        fitScenes();\n        renderNotifications();\n      });\n\n      refreshFleet()\n        .then(() => {\n          if (screenshotMode) {\n            setConnection(\"snapshot\");\n            return;\n          }\n          connectEvents();\n        })\n        .catch((error) => {\n          console.error(\"initial refresh failed\", error);\n          setConnection(\"offline\");\n        });\n\n";
+export const CLIENT_RUNTIME_UI_SOURCE = `          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div class="session-card-header"><strong class="session-card-title">\${escapeHtml(agent.label)}</strong><div class="card-actions">\${appearanceAction}</div></div><div class="muted session-card-description" title="\${escapeHtml(fullDescription)}">\${escapeHtml(fullDescription)}</div></article>\`;
+        }).join("");
+      }
+
+      function renderFleetSessions(projects) {
+        const entries = projects.flatMap((snapshot) =>
+          snapshot.agents.map((agent) => ({ snapshot, agent }))
+        );
+
+        if (entries.length === 0) {
+          return '<div class="empty">No live or recent lead sessions across the tracked workspaces right now.</div>';
+        }
+
+        entries.sort((left, right) => right.agent.updatedAt.localeCompare(left.agent.updatedAt));
+        return renderNeedsAttention(projects) + entries.map(({ snapshot, agent }) => {
+          const appearanceAction = agent.network
+            ? ""
+            : \`<button data-action="cycle-look" data-project-root="\${escapeHtml(snapshot.projectRoot)}" data-agent-id="\${escapeHtml(agent.id)}">Cycle look</button>\`;
+          const focusKeys = escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)));
+          const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail)
+            || latestAgentMessage(agent)
+            || \`[\${agent.state}]\`;
+          const sourceLabel = agentNetworkLabel(agent);
+          const description = projectLabel(snapshot.projectRoot) + " · " + (sourceLabel ? sourceLabel + " · " : "") + detail;
+          return \`<article class="session-card" tabindex="0" data-focus-keys="\${focusKeys}"><div class="session-card-header"><strong class="session-card-title">\${escapeHtml(agent.label)}</strong><div class="card-actions">\${appearanceAction}</div></div><div class="muted session-card-description" title="\${escapeHtml(description)}">\${escapeHtml(description)}</div></article>\`;
+        }).join("");
+      }
+
+      function applySessionFocus() {
+        const focusedKeys = new Set(state.focusedSessionKeys);
+        const hasFocus = focusedKeys.size > 0;
+        const hoveredRelationshipBossKey = typeof state.hoveredRelationshipBossKey === "string"
+          ? state.hoveredRelationshipBossKey
+          : "";
+        document.querySelectorAll("[data-scene-grid]").forEach((grid) => {
+          if (!(grid instanceof HTMLElement)) {
+            return;
+          }
+          if (hasFocus) {
+            grid.dataset.focusActive = "true";
+          } else {
+            delete grid.dataset.focusActive;
+          }
+        });
+        document.querySelectorAll("[data-focus-agent]").forEach((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return;
+          }
+          element.classList.toggle("is-focused", hasFocus && focusedKeys.has(element.dataset.focusKey || ""));
+        });
+        document.querySelectorAll("[data-focus-line]").forEach((element) => {
+          if (!(element instanceof SVGElement)) {
+            return;
+          }
+          element.classList.toggle(
+            "is-focused",
+            hoveredRelationshipBossKey.length > 0 && hoveredRelationshipBossKey === (element.dataset.focusBossKey || "")
+          );
+        });
+        applyOfficeRendererFocusAll();
+      }
+
+      function setSessionFocusFromElement(element) {
+        if (!(element instanceof HTMLElement)) {
+          state.focusedSessionKeys = [];
+          state.hoveredRelationshipBossKey = null;
+          applySessionFocus();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(element.dataset.focusKeys || "[]");
+          state.focusedSessionKeys = Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+        } catch {
+          state.focusedSessionKeys = [];
+        }
+        state.hoveredRelationshipBossKey = (
+          element.dataset.focusAgent === "true"
+          && typeof element.dataset.focusKey === "string"
+          && element.dataset.focusKey.length > 0
+          && state.focusedSessionKeys.length > 1
+        )
+          ? element.dataset.focusKey
+          : null;
+        applySessionFocus();
+      }
+
+      function syncSessionFocusFromDom() {
+        const activeSceneAgent = document.querySelector("[data-focus-agent]:focus-within, [data-focus-agent]:hover");
+        if (activeSceneAgent instanceof HTMLElement) {
+          setSessionFocusFromElement(activeSceneAgent);
+          return;
+        }
+        const activeCard = document.querySelector(".session-card:focus-within, .session-card:hover");
+        if (activeCard instanceof HTMLElement) {
+          setSessionFocusFromElement(activeCard);
+          return;
+        }
+        state.focusedSessionKeys = [];
+        applySessionFocus();
+      }
+
+      function syncLiveAgentState(projects) {
+        const now = Date.now();
+        const previousKeys = new Set(liveAgentMemory.keys());
+        const nextMemory = new Map();
+
+        for (const snapshot of projects) {
+          for (const agent of snapshot.agents) {
+            const key = agentKey(snapshot.projectRoot, agent);
+            nextMemory.set(key, {
+              key,
+              projectRoot: snapshot.projectRoot,
+              roomId: agent.roomId,
+              agent
+            });
+          }
+        }
+
+        enteringAgentKeys = previousKeys.size === 0 || screenshotMode
+          ? new Set()
+          : new Set(
+              [...nextMemory.keys()].filter((key) => !previousKeys.has(key))
+            );
+
+        for (const [key, entry] of liveAgentMemory.entries()) {
+          if (!nextMemory.has(key)) {
+            const sceneState = renderedAgentSceneState.get(key) || null;
+            if (!sceneState) {
+              continue;
+            }
+            const existingGhost = departingAgents.find((ghost) => ghost.key === key) || null;
+            if (existingGhost) {
+              existingGhost.projectRoot = entry.projectRoot;
+              existingGhost.roomId = entry.roomId;
+              existingGhost.agent = entry.agent;
+              existingGhost.sceneState = sceneState;
+              existingGhost.expiresAt = now + DEPARTING_AGENT_TTL_MS;
+              continue;
+            }
+            departingAgents.push({
+              ...entry,
+              sceneState,
+              expiresAt: now + DEPARTING_AGENT_TTL_MS
+            });
+          }
+        }
+
+        departingAgents = departingAgents.filter((ghost) => ghost.expiresAt > now && !nextMemory.has(ghost.key));
+        liveAgentMemory.clear();
+        for (const [key, entry] of nextMemory.entries()) {
+          liveAgentMemory.set(key, entry);
+        }
+      }
+
+      function fitScenes() {
+        const wrappers = document.querySelectorAll("[data-scene-fit]");
+        const canZoom = typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("zoom", "1");
+        wrappers.forEach((wrapper) => {
+          const grid = wrapper.querySelector("[data-scene-grid]");
+          if (!(wrapper instanceof HTMLElement) || !(grid instanceof HTMLElement)) {
+            return;
+          }
+
+          const rawWidth = Number.parseFloat(grid.style.width || "0");
+          const rawHeight = Number.parseFloat(grid.style.height || "0");
+          if (!rawWidth || !rawHeight) {
+            return;
+          }
+
+          const focusMode = wrapper.dataset.sceneMode === "focus";
+          const towerMode = wrapper.closest(".tower-floor-body") instanceof HTMLElement;
+          const availableWidth = Math.max(wrapper.clientWidth - (focusMode ? 0 : 4), 1);
+          const wrapperRect = wrapper.getBoundingClientRect();
+          const viewportRemaining = Math.max(window.innerHeight - wrapperRect.top - (focusMode ? 0 : 20), 1);
+          const availableHeight = focusMode
+            ? Math.max(wrapper.clientHeight || viewportRemaining, 1)
+            : Math.max(
+              Math.min(
+                viewportRemaining,
+                window.innerHeight * (
+                  towerMode
+                    ? (wrapper.classList.contains("compact") ? 0.52 : 0.72)
+                    : (wrapper.classList.contains("compact") ? 0.34 : 0.68)
+                )
+              ),
+              wrapper.classList.contains("compact")
+                ? (towerMode ? 240 : 180)
+                : 220
+            );
+          if (focusMode) {
+            const coverScale = Math.max(availableWidth / rawWidth, availableHeight / rawHeight);
+            const boundedCoverScale = Number.isFinite(coverScale) && coverScale > 0
+              ? Math.min(Math.max(coverScale, 0.2), 6)
+              : 1;
+
+            wrapper.style.height = \`\${Math.max(1, Math.round(availableHeight))}px\`;
+            grid.style.zoom = "";
+            grid.style.transform = \`translate(-50%, -50%) scale(\${boundedCoverScale})\`;
+            wrapper.dataset.sceneFitted = "true";
+            return;
+          }
+
+          if (towerMode) {
+            const scale = availableWidth / rawWidth;
+            const boundedScale = Number.isFinite(scale) && scale > 0
+              ? Math.min(Math.max(scale, 0.2), 3.5)
+              : 1;
+
+            wrapper.style.height = \`\${Math.max(220, Math.round(rawHeight * boundedScale))}px\`;
+            if (canZoom) {
+              grid.style.zoom = String(boundedScale);
+              grid.style.transform = "";
+            } else {
+              grid.style.zoom = "";
+              grid.style.transform = \`scale(\${boundedScale})\`;
+            }
+            wrapper.dataset.sceneFitted = "true";
+            return;
+          }
+
+          const heightScale = wrapper.classList.contains("compact")
+            ? availableHeight / rawHeight
+            : Math.max(1, availableHeight / rawHeight);
+          const scale = Math.min(availableWidth / rawWidth, heightScale);
+          const boundedScale = Number.isFinite(scale) && scale > 0
+            ? Math.min(Math.max(scale, 0.2), 3.5)
+            : 1;
+
+          wrapper.style.height = \`\${Math.max(160, Math.round(rawHeight * boundedScale))}px\`;
+          if (canZoom) {
+            grid.style.zoom = String(boundedScale);
+            grid.style.transform = "";
+          } else {
+            grid.style.zoom = "";
+            grid.style.transform = \`scale(\${boundedScale})\`;
+          }
+          wrapper.dataset.sceneFitted = "true";
+        });
+      }
+
+      async function postJson(path, payload = {}) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        return response.json();
+      }
+
+      function setTextIfChanged(element, value) {
+        if (!element) {
+          return false;
+        }
+        const next = String(value ?? "");
+        if (element.textContent === next) {
+          return false;
+        }
+        element.textContent = next;
+        return true;
+      }
+
+      function setHtmlIfChanged(element, html, options = {}) {
+        if (!element) {
+          return false;
+        }
+        if (element.dataset.renderHtml === html) {
+          return false;
+        }
+
+        const preserveScroll = options.preserveScroll === true;
+        const scrollTop = preserveScroll ? element.scrollTop : 0;
+        const scrollLeft = preserveScroll ? element.scrollLeft : 0;
+        element.innerHTML = html;
+        element.dataset.renderHtml = html;
+        if (preserveScroll) {
+          element.scrollTop = scrollTop;
+          element.scrollLeft = scrollLeft;
+        }
+        return true;
+      }
+
+      function currentSnapshot() {
+        if (!state.fleet) return null;
+        if (state.selected === "all") return null;
+        return state.fleet.projects.find((snapshot) => snapshot.projectRoot === state.selected) || null;
+      }
+
+      function renderHeroSummary(counts) {
+        return [
+          ["Agents", counts.total, "primary"],
+          ["Active", counts.active, "is-active"],
+          ["Waiting", counts.waiting, "is-waiting"],
+          ["Blocked", counts.blocked, "is-blocked"],
+          ["Cloud", counts.cloud, "is-cloud"]
+        ].map(([label, value, className]) =>
+          \`<span class="hero-summary-item \${className}"><strong>\${value}</strong><span>\${label}</span></span>\`
+        ).join("");
+      }
+
+      function ingestFleet(fleet) {
+        state.localFleet = fleet;
+        applyFleet(fleet);
+        scheduleMultiplayerBroadcast();
+      }
+
+      function render() {
+        if (!state.fleet) return;
+
+        const fleet = state.fleet;
+        const rawProjects = visibleProjects(fleet);
+        updateRecentLeadReservations(rawProjects);
+        const displayedProjects = rawProjects.map((project) => viewSnapshot(project, SCENE_RECENT_LEAD_LIMIT));
+        const sessionProjects = rawProjects.map((project) => viewSessionSnapshot(project, SESSION_RECENT_LEAD_LIMIT));
+        const selectedRawSnapshot = currentSnapshot();
+        const snapshot = selectedRawSnapshot
+          ? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)
+          : null;
+        const sessionSnapshot = selectedRawSnapshot
+          ? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)
+          : null;
+        if (!snapshot && state.workspaceFullscreen) {
+          state.workspaceFullscreen = false;
+          syncUrl();
+        }
+        syncLiveAgentState(rawProjects);
+        sceneStateDraft = null;
+        const counts = fleetCounts({ projects: sessionProjects });
+        const nextSceneToken = state.view === "map"
+          ? (snapshot
+            ? \`project-shell::\${snapshot.projectRoot}::\${state.workspaceFullscreen ? "focus" : "default"}\`
+            : \`fleet-shell::\${displayedProjects.map((project) => project.projectRoot).join("||")}\`)
+          : (snapshot
+            ? \`project::\${sceneSnapshotToken(snapshot)}\`
+            : \`fleet::\${displayedProjects.map(sceneSnapshotToken).join("||")}\`);
+
+        setTextIfChanged(stamp, \`Updated \${fleet.generatedAt}\`);
+        setTextIfChanged(projectCount, \`\${fleet.projects.length} tracked · \${displayedProjects.filter((project) => busyCount(project) > 0).length} live · \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`);
+        mapViewButton.classList.toggle("active", state.view === "map");
+        terminalViewButton.classList.toggle("active", state.view === "terminal");
+        setConnection(state.connection);
+        rememberVisibleRecentLeads(displayedProjects);
+        syncWorkspaceFullscreenUi();
+        syncFleetBackdrop();
+        syncSkyParallax();
+        if (state.view !== "map") {
+          cleanupOfficeRenderers();
+        }
+
+        setHtmlIfChanged(heroSummary, renderHeroSummary(counts));
+
+        setHtmlIfChanged(projectTabs, [
+          \`<button class="project-tab\${state.selected === "all" ? " active" : ""}" data-action="select-project" data-project-root="all">All</button>\`,
+          ...displayedProjects.map((project) => {
+            const counts = countsForSnapshot(project);
+            const activeClass = project.projectRoot === state.selected ? " active" : "";
+            const badge = counts.active;
+            return \`<button class="project-tab\${activeClass}" data-action="select-project" data-project-root="\${escapeHtml(project.projectRoot)}" title="\${escapeHtml(project.projectRoot)}">\${escapeHtml(projectLabel(project.projectRoot))} <span class="muted">\${badge}</span></button>\`;
+          })
+        ].join(""));
+
+        try {
+          if (!snapshot) {
+            const shouldRenderScene = state.view !== "map" || nextSceneToken !== lastSceneRenderToken;
+            const centerChanged = shouldRenderScene
+              ? setHtmlIfChanged(centerContent, renderWorkspaceScroll(displayedProjects), { preserveScroll: true })
+              : false;
+            if (shouldRenderScene) {
+              lastSceneRenderToken = nextSceneToken;
+            }
+            setHtmlIfChanged(sessionList, renderFleetSessions(sessionProjects), { preserveScroll: true });
+            setTextIfChanged(centerTitle, "All Workspaces");
+            setTextIfChanged(roomsPath, \`Live agents on the floor plus \${SESSION_RECENT_LEAD_LIMIT} recent sessions in the panel across tracked workspaces\`);
+            if (centerChanged) {
+              fitScenes();
+            }
+            if (sceneStateDraft) {
+              renderedAgentSceneState = sceneStateDraft;
+            }
+            sceneStateDraft = null;
+            syncSessionFocusFromDom();
+            syncWorkstationEffects();
+            if (state.view === "map") {
+              void syncOfficeMapScenes(displayedProjects);
+            }
+            renderNotifications();
+            return;
+          }
+
+          setTextIfChanged(centerTitle, projectLabel(snapshot.projectRoot));
+          const shouldRenderScene = state.view !== "map" || nextSceneToken !== lastSceneRenderToken;
+          const centerChanged = shouldRenderScene
+            ? setHtmlIfChanged(
+              centerContent,
+              state.view === "terminal"
+                ? renderTerminalSnapshot(snapshot)
+                : \`<div class="workspace-tower workspace-tower-single">\${renderWorkspaceFloor(snapshot, {
+                  compact: true,
+                  focusMode: state.workspaceFullscreen,
+                  action: {
+                    type: "toggle-workspace-focus",
+                    label: state.workspaceFullscreen ? "Close" : "Expand"
+                  }
+                })}</div>\`,
+              { preserveScroll: true }
+            )
+            : false;
+          if (shouldRenderScene) {
+            lastSceneRenderToken = nextSceneToken;
+          }
+          const sessionsHtml = renderSessions(sessionSnapshot || snapshot);
+          setHtmlIfChanged(sessionList, sessionsHtml, { preserveScroll: true });
+          setTextIfChanged(
+            roomsPath,
+            snapshot.rooms.generated
+              ? \`Auto rooms · floor shows live agents plus \${SCENE_RECENT_LEAD_LIMIT} recent leads · panel shows \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`
+              : \`.codex-agents/rooms.xml · floor shows live agents plus \${SCENE_RECENT_LEAD_LIMIT} recent leads · panel shows \${SESSION_RECENT_LEAD_LIMIT} recent sessions\`
+          );
+          if (centerChanged) {
+            fitScenes();
+          }
+          if (sceneStateDraft) {
+            renderedAgentSceneState = sceneStateDraft;
+          }
+          sceneStateDraft = null;
+          syncSessionFocusFromDom();
+          syncWorkstationEffects();
+          if (state.view === "map") {
+            void syncOfficeMapScenes(snapshot ? [snapshot] : displayedProjects);
+          }
+          renderNotifications();
+        } catch (error) {
+          console.error("render failed", error);
+          const message = error instanceof Error ? error.message : String(error);
+          setHtmlIfChanged(centerContent, '<div class="empty">Render failed: ' + escapeHtml(message) + "</div>");
+          setHtmlIfChanged(sessionList, '<div class="empty">Render failed: ' + escapeHtml(message) + "</div>");
+          setConnection("offline");
+          lastSceneRenderToken = null;
+          renderedAgentSceneState = new Map();
+          sceneStateDraft = null;
+          syncWorkstationEffects();
+        }
+      }
+
+      async function refreshFleet() {
+        const response = await fetch("/api/fleet");
+        ingestFleet(await response.json());
+      }
+
+      function connectEvents() {
+        if (events) {
+          events.close();
+        }
+
+        setConnection("connecting");
+        events = new EventSource("/api/events");
+        events.addEventListener("open", () => {
+          setConnection("live");
+        });
+        events.addEventListener("fleet", (event) => {
+          ingestFleet(JSON.parse(event.data));
+          setConnection("live");
+        });
+        events.addEventListener("error", () => {
+          setConnection(navigator.onLine === false ? "offline" : "reconnecting");
+        });
+      }
+
+      document.body.addEventListener("click", async (event) => {
+        const target = event.target instanceof HTMLElement ? event.target.closest("[data-action], [data-view], #workspace-focus-button") : null;
+        if (!(target instanceof HTMLElement)) return;
+
+        if (target.dataset.view) {
+          setView(target.dataset.view);
+          return;
+        }
+
+        const action = target.dataset.action;
+        if (action === "toggle-settings") {
+          setSettingsOpen(!state.settingsOpen);
+          return;
+        }
+
+        if (action === "close-settings") {
+          setSettingsOpen(false);
+          return;
+        }
+
+        if (action === "select-project" && target.dataset.projectRoot) {
+          setSettingsOpen(false);
+          setSelection(target.dataset.projectRoot);
+          return;
+        }
+
+        if (action === "toggle-workspace-focus") {
+          toggleWorkspaceFullscreen();
+          return;
+        }
+
+        if (target === workspaceFocusButton) {
+          toggleWorkspaceFullscreen();
+          return;
+        }
+
+        if (action === "cycle-look" && target.dataset.projectRoot && target.dataset.agentId) {
+          await postJson("/api/appearance/cycle", {
+            projectRoot: target.dataset.projectRoot,
+            agentId: target.dataset.agentId
+          });
+        }
+      });
+
+      document.body.addEventListener("pointerover", (event) => {
+        const focusTarget = event.target instanceof HTMLElement
+          ? event.target.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")
+          : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(focusTarget instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {
+          return;
+        }
+        setSessionFocusFromElement(focusTarget);
+      });
+
+      document.body.addEventListener("pointerout", (event) => {
+        const focusTarget = event.target instanceof HTMLElement
+          ? event.target.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")
+          : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(focusTarget instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {
+          return;
+        }
+        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")) {
+          return;
+        }
+        setSessionFocusFromElement(null);
+      });
+
+      document.body.addEventListener("focusin", (event) => {
+        const focusTarget = event.target instanceof HTMLElement
+          ? event.target.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")
+          : null;
+        if (focusTarget instanceof HTMLElement) {
+          setSessionFocusFromElement(focusTarget);
+        }
+      });
+
+      document.addEventListener("pointerdown", (event) => {
+        if (!state.settingsOpen) {
+          return;
+        }
+        const withinSettings = event.target instanceof HTMLElement
+          ? event.target.closest(".settings-shell")
+          : null;
+        if (!withinSettings) {
+          setSettingsOpen(false);
+        }
+      });
+
+      document.body.addEventListener("focusout", (event) => {
+        const focusTarget = event.target instanceof HTMLElement
+          ? event.target.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")
+          : null;
+        const relatedTarget = event.relatedTarget;
+        if (!(focusTarget instanceof HTMLElement)) {
+          return;
+        }
+        if (relatedTarget instanceof Node && focusTarget.contains(relatedTarget)) {
+          return;
+        }
+        if (relatedTarget instanceof HTMLElement && relatedTarget.closest(".session-card[data-focus-keys], [data-focus-agent][data-focus-keys]")) {
+          return;
+        }
+        setSessionFocusFromElement(null);
+      });
+
+      document.body.addEventListener("pointerdown", (event) => {
+        const target = event.target instanceof HTMLElement ? event.target.closest(".office-map-furniture-hit") : null;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        const host = target.closest("[data-office-map-host]");
+        const renderer = rendererForHost(host);
+        if (!renderer || !renderer.model) {
+          return;
+        }
+        const item = renderer.model.furniture.find((entry) => entry.id === target.dataset.furnitureId && entry.roomId === target.dataset.roomId);
+        if (!item) {
+          return;
+        }
+        const rect = target.getBoundingClientRect();
+        const pointerOffsetTiles = ((event.clientX - rect.left) / (renderer.scale * renderer.model.tile));
+        furnitureDragState = {
+          renderer,
+          projectRoot: renderer.model.projectRoot,
+          item,
+          currentColumn: item.column,
+          pointerOffsetTiles,
+          hostRect: renderer.host.getBoundingClientRect()
+        };
+        window.addEventListener("pointermove", handleFurnitureDragMove);
+        window.addEventListener("pointerup", stopFurnitureDrag);
+        window.addEventListener("pointercancel", stopFurnitureDrag);
+        event.preventDefault();
+      });
+
+      if (textScaleInput instanceof HTMLInputElement) {
+        textScaleInput.addEventListener("input", () => {
+          syncTextScalePreview(textScaleInput.value);
+        });
+        textScaleInput.addEventListener("change", () => {
+          commitTextScale(textScaleInput.value);
+        });
+      }
+      if (debugTilesButton instanceof HTMLButtonElement) {
+        debugTilesButton.addEventListener("click", () => {
+          state.globalSceneSettings = {
+            ...state.globalSceneSettings,
+            debugTiles: !state.globalSceneSettings.debugTiles
+          };
+          applyGlobalSceneSettings();
+          saveGlobalSceneSettings();
+          render();
+        });
+      }
+      if (cursorApiKeyInput instanceof HTMLInputElement) {
+        cursorApiKeyInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void saveCursorApiKey();
+          }
+        });
+      }
+      if (cursorApiKeySaveButton instanceof HTMLButtonElement) {
+        cursorApiKeySaveButton.addEventListener("click", () => {
+          void saveCursorApiKey();
+        });
+      }
+      if (cursorApiKeyClearButton instanceof HTMLButtonElement) {
+        cursorApiKeyClearButton.addEventListener("click", () => {
+          void clearCursorApiKey();
+        });
+      }
+      const commitMultiplayerInputs = () => {
+        commitMultiplayerSettings({
+          host: multiplayerHostInput instanceof HTMLInputElement ? multiplayerHostInput.value : "",
+          room: multiplayerRoomInput instanceof HTMLInputElement ? multiplayerRoomInput.value : "",
+          nickname: multiplayerNicknameInput instanceof HTMLInputElement ? multiplayerNicknameInput.value : ""
+        });
+      };
+      if (multiplayerHostInput instanceof HTMLInputElement) {
+        multiplayerHostInput.addEventListener("change", commitMultiplayerInputs);
+        multiplayerHostInput.addEventListener("blur", commitMultiplayerInputs);
+        multiplayerHostInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitMultiplayerInputs();
+          }
+        });
+      }
+      if (multiplayerRoomInput instanceof HTMLInputElement) {
+        multiplayerRoomInput.addEventListener("change", commitMultiplayerInputs);
+        multiplayerRoomInput.addEventListener("blur", commitMultiplayerInputs);
+        multiplayerRoomInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitMultiplayerInputs();
+          }
+        });
+      }
+      if (multiplayerNicknameInput instanceof HTMLInputElement) {
+        multiplayerNicknameInput.addEventListener("change", commitMultiplayerInputs);
+        multiplayerNicknameInput.addEventListener("blur", commitMultiplayerInputs);
+        multiplayerNicknameInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitMultiplayerInputs();
+          }
+        });
+      }
+      if (multiplayerEnabledButton instanceof HTMLButtonElement) {
+        multiplayerEnabledButton.addEventListener("click", () => {
+          commitMultiplayerSettings({
+            ...state.multiplayerSettings,
+            enabled: !state.multiplayerSettings.enabled
+          });
+        });
+      }
+      void refreshMultiplayerConnection();
+
+      if (!screenshotMode) {
+        window.addEventListener("online", () => setConnection("reconnecting"));
+        window.addEventListener("offline", () => setConnection("offline"));
+        window.addEventListener("scroll", syncSkyParallax, { passive: true });
+      }
+      document.addEventListener("keydown", (event) => {
+        if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey) {
+          return;
+        }
+        if (isTypingTarget(event.target)) {
+          return;
+        }
+        if (event.key === "Escape" && state.settingsOpen) {
+          event.preventDefault();
+          setSettingsOpen(false);
+          return;
+        }
+        if (event.key === "Escape" && state.workspaceFullscreen) {
+          event.preventDefault();
+          setWorkspaceFullscreen(false);
+          return;
+        }
+        if ((event.key === "f" || event.key === "F") && canFocusWorkspace()) {
+          event.preventDefault();
+          toggleWorkspaceFullscreen();
+        }
+      });
+      window.addEventListener("resize", () => {
+        syncSkyParallax();
+        fitScenes();
+        renderNotifications();
+      });
+
+      refreshFleet()
+        .then(() => {
+          if (screenshotMode) {
+            setConnection("snapshot");
+            return;
+          }
+          connectEvents();
+        })
+        .catch((error) => {
+          console.error("initial refresh failed", error);
+          setConnection("offline");
+        });
+
+`;

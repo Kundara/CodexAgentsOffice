@@ -2,24 +2,23 @@
 
 const { statSync } = require("node:fs");
 const { join, relative } = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { listSourceFiles } = require("./list-source-files");
 
 const repoRoot = join(__dirname, "..");
 const maxBytes = 65 * 1024;
 
-const files = execFileSync("rg", [
-  "--files",
-  "packages/core/src",
-  "packages/web/src",
-  "packages/cli/src",
-  "packages/vscode/src"
-], {
-  cwd: repoRoot,
-  encoding: "utf8"
-}).trim().split("\n").filter(Boolean);
+const files = listSourceFiles(
+  repoRoot,
+  [
+    "packages/core/src",
+    "packages/web/src",
+    "packages/cli/src",
+    "packages/vscode/src"
+  ],
+  [".ts", ".tsx", ".js", ".mjs", ".cjs", ".css"]
+).map((filePath) => relative(repoRoot, filePath));
 
 const violations = files
-  .filter((filePath) => /\.(ts|tsx|js|mjs|cjs|css)$/.test(filePath))
   .map((filePath) => ({
     filePath,
     size: statSync(join(repoRoot, filePath)).size

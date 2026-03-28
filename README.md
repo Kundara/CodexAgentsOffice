@@ -28,6 +28,8 @@ Browser office view, terminal snapshot, and VS Code panel for current Codex, Cla
 - Current-workload-first scene with subtle recent history.
 - Shared model across all renderers.
 - External bundled browser assets under `packages/web/dist/client` instead of inline HTML script/style payloads.
+- Split browser runtime sections by responsibility under `packages/web/src/client/runtime/*.ts` instead of assembling behavior through string patch overrides.
+- Split core snapshot, live-monitor, and Cursor loaders into focused helper modules so local discovery, cloud adapters, event normalization, and thread summarization are no longer stacked in one file.
 
 Browser workload behavior:
 
@@ -218,6 +220,9 @@ Important product rule:
 ## Repo layout
 
 - `packages/core`: shared discovery, adapter contracts, services, domain policies, rooms, appearance, and snapshot plumbing
+- `packages/core/src/snapshot-lib`: thread summarization and dashboard snapshot builders
+- `packages/core/src/live-monitor-lib`: app-server event normalization and rollout hook parsing
+- `packages/core/src/cursor-lib`: Cursor local discovery and shared repository helpers
 - `packages/web`: browser server, render shell, and bundled client runtime
 - `packages/cli`: `watch`, `snapshot`, demo, and web entrypoints
 - `packages/vscode`: VS Code activity-bar integration

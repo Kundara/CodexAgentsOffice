@@ -102,7 +102,7 @@ Used in:
 
 - `packages/core/src/app-server.ts`
 - `packages/core/src/project-paths.ts`
-- `packages/core/src/snapshot.ts`
+- `packages/core/src/snapshot-lib/dashboard-builder.ts`
 - `packages/core/src/live-monitor.ts`
 
 What we read:
@@ -141,7 +141,7 @@ How we use it:
 Used in:
 
 - `packages/core/src/app-server.ts`
-- `packages/core/src/snapshot.ts`
+- `packages/core/src/adapters/codex-local.ts`
 - `packages/core/src/live-monitor.ts`
 
 What we read:
@@ -190,7 +190,7 @@ Fleet mode also shares one `codex cloud list --json` poller across those monitor
 
 Consumed in:
 
-- `packages/core/src/snapshot.ts`
+- `packages/core/src/snapshot-lib/thread-summary.ts`
 
 Codex status hooks we currently use:
 

@@ -142,6 +142,12 @@ The web package now separates transport, lifecycle, rendering, and client delive
 
 - `packages/core/src/adapters`
   Defines the shared `ProjectAdapter` and `ProjectSource` contracts plus the built-in source registry for Codex local/cloud, Claude, Cursor local/cloud, OpenClaw, and presence.
+- `packages/core/src/snapshot-lib`
+  Holds thread summarization and dashboard-building helpers so `snapshot.ts` stays a thin public surface instead of a cross-layer sink.
+- `packages/core/src/live-monitor-lib`
+  Holds app-server event normalization plus rollout-hook parsing so `ProjectLiveMonitor` keeps orchestration responsibility without also owning every parser.
+- `packages/core/src/cursor-lib`
+  Holds Cursor local discovery and shared repository normalization helpers so local workspace parsing, cloud API loading, and repo identity are separated.
 - `packages/core/src/services`
   Holds cross-cutting orchestration such as project discovery re-exports, refresh scheduling, snapshot assembly, and the live-monitor compatibility surface.
 - `packages/core/src/domain`
@@ -166,7 +172,9 @@ Snapshot assembly now happens in one place through `SnapshotAssembler`, which me
 - `packages/web/src/client/index.ts`
   Bundled browser entrypoint that loads the external client assets and executes the current runtime source against server-injected bootstrap config.
 - `packages/web/src/client/runtime-source.ts`
-  Transitional browser runtime source, now delivered as a built asset instead of an inline HTML script payload.
+  Thin browser runtime composition entry that joins the focused runtime section literals instead of rewriting them through string-patch helpers.
+- `packages/web/src/client/runtime`
+  Holds focused runtime sections such as layout, scene, navigation, render, settings, UI, and seating so browser behavior can be edited by concern instead of by patch order.
 - `packages/web/src/client/multiplayer-source.ts`
   Holds the browser-side PartyKit room sync overlay, shared-room settings persistence, and remote fleet merge helpers so the realtime room transport stays outside the main renderer script.
 - `packages/party`
@@ -178,7 +186,7 @@ Snapshot assembly now happens in one place through `SnapshotAssembler`, which me
 - `packages/web/src/http-helpers.ts`
   Centralizes JSON/body helpers and static/project-file response handling.
 
-This keeps the browser behavior broadly the same, but it stops HTML responses from embedding giant JS/CSS strings and gives the repo clearer seams for future adapter and client-runtime work.
+This keeps the browser behavior broadly the same, but it stops HTML responses from embedding giant JS/CSS strings, removes brittle runtime string surgery, and gives the repo clearer seams for future adapter and client-runtime work.
 
 ## Room XML
 

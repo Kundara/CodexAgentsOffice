@@ -5,6 +5,14 @@ const { join } = require("node:path");
 
 const { renderHtml } = require("../dist/render-html.js");
 
+function readClientSource(...segments) {
+  return readFileSync(join(__dirname, "../src/client", ...segments), "utf8");
+}
+
+function readRuntimeSource(fileName) {
+  return readClientSource("runtime", fileName);
+}
+
 test("renderHtml loads external client assets and bootstrap config", () => {
   const html = renderHtml({
     host: "127.0.0.1",
@@ -37,34 +45,14 @@ test("renderHtml can bootstrap a discovered fleet project list distinct from the
 });
 
 test("client runtime keeps current local desk-live work on a workstation through notLoaded transport gaps", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
-  const seatingSource = readFileSync(
-    join(__dirname, "../src/client/runtime/seating-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const seatingSource = readRuntimeSource("seating-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_CURRENT_LOCAL_DESK_GRACE = patchRuntimeSection('),
-    "runtime source should patch a short current-local desk grace into the assembled layout runtime"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_NOTLOADED_DESK_GRACE = patchRuntimeSection('),
-    "runtime source should patch notLoaded desk grace into the assembled layout runtime"
-  );
-  assert.ok(
-    runtimeSource.includes('const CURRENT_LOCAL_LIVE_WORKSTATION_GRACE_MS = 8000;'),
-    "layout runtime should bound current local desk grace to a short window"
-  );
-  assert.ok(
-    runtimeSource.includes('return agent.isOngoing === true || hasCurrentLocalDeskGrace(agent);'),
-    "layout runtime should keep current desk-live work seated through notLoaded gaps"
-  );
-  assert.ok(
-    runtimeSource.includes('if (agent.state === "done") {\n              const updatedAt = parseAgentUpdatedAt(agent.updatedAt);'),
-    "layout runtime should honor a short done grace before cooling a notLoaded current thread into the rec area"
+  assert.match(layoutSource, /const CURRENT_LOCAL_LIVE_WORKSTATION_GRACE_MS = 8000;/);
+  assert.match(layoutSource, /return agent\.isOngoing === true \|\| hasCurrentLocalDeskGrace\(agent\);/);
+  assert.match(
+    layoutSource,
+    /if \(agent\.state === "done"\) {\n\s+const updatedAt = parseAgentUpdatedAt\(agent\.updatedAt\);/
   );
   assert.match(
     seatingSource,
@@ -89,34 +77,17 @@ test("client runtime keeps current local desk-live work on a workstation through
 });
 
 test("client runtime keeps active local desks live, leaves waiting in the rec area, and gives current idle/done work a short settle window", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
-  const seatingSource = readFileSync(
-    join(__dirname, "../src/client/runtime/seating-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const seatingSource = readRuntimeSource("seating-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_WAITING_ACTIVE_DESKS = patchRuntimeSection('),
-    "runtime source should patch waiting active threads out of workstation seating"
+  assert.match(layoutSource, /if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}/);
+  assert.match(
+    layoutSource,
+    /if \(\(agent\.state === "idle" \|\| agent\.state === "done"\) && hasCurrentLocalSeatCooldown\(agent\)\) {\n\s+return true;\n\s+}/
   );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_ACTIVE_SEAT_COOLDOWN = patchRuntimeSection('),
-    "runtime source should patch a short active-seat cooldown for current local idle/done threads"
-  );
-  assert.ok(
-    runtimeSource.includes('if (agent.state === "waiting") {\n              return false;\n            }'),
-    "layout runtime should keep waiting agents out of workstation seating"
-  );
-  assert.ok(
-    runtimeSource.includes('if ((agent.state === "idle" || agent.state === "done") && hasCurrentLocalSeatCooldown(agent)) {\n              return true;\n            }'),
-    "layout runtime should keep current local idle/done work on the desk through a short settle window"
-  );
-  assert.ok(
-    runtimeSource.includes('return agent.isCurrent === true\n              && agent.state !== "idle"\n              && agent.state !== "done";'),
-    "layout runtime should still require current non-resting work after the settle window"
+  assert.match(
+    layoutSource,
+    /return agent\.isCurrent === true\n\s+&& agent\.state !== "idle"\n\s+&& agent\.state !== "done";/
   );
   assert.match(
     seatingSource,
@@ -129,187 +100,57 @@ test("client runtime keeps active local desks live, leaves waiting in the rec ar
 });
 
 test("client runtime only keeps ordinary local desks for current workload", () => {
-  const layoutSource = readFileSync(
-    join(__dirname, "../src/client/runtime/layout-source.ts"),
-    "utf8"
-  );
-  const seatingSource = readFileSync(
-    join(__dirname, "../src/client/runtime/seating-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const seatingSource = readRuntimeSource("seating-source.ts");
 
-  assert.match(layoutSource, /if \(agent\.isCurrent !== true\) \{\\n\s+return false;/);
+  assert.match(layoutSource, /if \(agent\.isCurrent !== true\) {\n\s+return false;/);
   assert.doesNotMatch(layoutSource, /const recentlyLive = Number\.isFinite\(updatedAt\)/);
   assert.match(seatingSource, /if \(agent\.isCurrent !== true\) {\n\s+return false;/);
   assert.doesNotMatch(seatingSource, /const recentlyLive = Number\.isFinite\(updatedAt\)/);
 });
 
 test("runtime source keeps desk seats stable when a second workstation appears in a pod", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const sceneSource = readRuntimeSource("scene-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_STABLE_DESK_SEATS = patchRuntimeSection('),
-    "runtime source should patch the raw scene source for stable desk seats"
-  );
-  assert.ok(
-    runtimeSource.includes('const tile = sceneTileSize(compact);'),
-    "desk seating should derive seat cells from the scene tile size"
-  );
-  assert.ok(
-    runtimeSource.includes('const leftCellX = 0;'),
-    "single-seat pods should anchor to the left seat cell"
-  );
-  assert.ok(
-    runtimeSource.includes('const rightCellX = Math.max(0, entry.slot.width - cellWidth);'),
-    "second-seat pods should use the grid-aligned right seat cell"
-  );
-  assert.ok(
-    runtimeSource.includes('const seatMirrored = hasBothSides'),
-    "desk seating should preserve a stable left/right seat choice"
-  );
-  assert.ok(
-    runtimeSource.includes('const cellX = seatMirrored ? rightCellX : leftCellX;'),
-    "desk seating should derive workstation X from stable seat cells"
-  );
-  assert.ok(
-    runtimeSource.includes('mirrored: seatMirrored,'),
-    "desk visuals should propagate the stable seat choice into mirrored workstation state"
-  );
-  assert.ok(
-    runtimeSource.includes('function patchRuntimeSectionIfPresent(source: string, from: string, to: string): string {'),
-    "runtime source should provide an optional patch helper for scene fragments that may drift in generated literals"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_STABLE_DESK_GEOMETRY = patchRuntimeSectionIfPresent('),
-    "stable desk geometry should no longer hard-fail startup when the raw scene literal shape changes"
-  );
-  assert.ok(
-    runtimeSource.includes('return source.includes(from) ? source.replace(from, to) : source;'),
-    "optional runtime patches should leave the assembled source unchanged when a fragment is absent"
-  );
-  assert.ok(
-    runtimeSource.includes('`        const centerInset = options.sharedCenter ? 0 : innerInset;\n        const deskEdgeClamp = options.sharedCenter ? 0 : 2;`'),
-    "desk geometry patch should still target the shared-center recentering branch when that fragment exists"
-  );
-  assert.ok(
-    runtimeSource.includes('`        const centerInset = innerInset;\n        const deskEdgeClamp = 2;`'),
-    "desk geometry patch should still replace the shared-center recentering branch with fixed insets when present"
-  );
+  assert.ok(sceneSource.includes("const tile = sceneTileSize(compact);"));
+  assert.ok(sceneSource.includes("const leftCellX = 0;"));
+  assert.ok(sceneSource.includes("const rightCellX = Math.max(0, entry.slot.width - cellWidth);"));
+  assert.ok(sceneSource.includes("const seatMirrored = hasBothSides"));
+  assert.ok(sceneSource.includes("const cellX = seatMirrored ? rightCellX : leftCellX;"));
+  assert.ok(sceneSource.includes("mirrored: seatMirrored,"));
 });
 
 test("runtime source keeps running and validating workers seated at their workstation", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const sceneSource = readRuntimeSource("scene-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_SEATED_ACTIVE_WORK = patchRuntimeSection('),
-    "runtime source should patch the raw scene source for seated active workstation poses"
-  );
-  assert.ok(
-    runtimeSource.includes('if (state === "running" || state === "validating") {'),
-    "running and validating workers should share the seated active workstation pose"
-  );
-  assert.ok(
-    runtimeSource.includes('if (state === "blocked") {'),
-    "blocked workers should keep their separate non-seated pose"
-  );
+  assert.ok(sceneSource.includes('if (state === "running" || state === "validating") {'));
+  assert.ok(sceneSource.includes('if (state === "blocked") {'));
 });
 
 test("runtime source preserves workstation entering-reveal flags for the Pixi flicker animation", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
-  const navigationSource = readFileSync(
-    join(__dirname, "../src/client/runtime/navigation-source.ts"),
-    "utf8"
-  );
+  const sceneSource = readRuntimeSource("scene-source.ts");
+  const navigationSource = readRuntimeSource("navigation-source.ts");
 
+  assert.ok(sceneSource.includes("enteringReveal: options.enteringReveal === true,"));
+  assert.ok(sceneSource.includes("enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),"));
+  assert.ok(sceneSource.includes("enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),"));
+  assert.ok(sceneSource.includes("function shouldRevealWorkstation(projectRoot, agent, slotId) {"));
+  assert.ok(sceneSource.includes("const previousSceneState = renderedAgentSceneState.get(key) || null;"));
+  assert.ok(sceneSource.includes("return previousSlotId !== slotId;"));
   assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_WORKSTATION_REVEAL_FLAGS = patchRuntimeSectionIfPresent('),
-    "runtime source should patch workstation reveal flags into the assembled scene source without crashing when the raw fragment already drifted"
+    navigationSource.includes('if (!screenshotMode && definition.enteringReveal === true) {\n            sprite.visible = false;\n          }')
   );
   assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_SPRITE_REVEAL_FLAGS = (() => {'),
-    "runtime source should assemble sprite reveal flags through a tolerant patch wrapper"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_BOSS_OFFICE_SEATING = patchRuntimeSection('),
-    "runtime source should patch the boss-office seating layout before it rewrites workstation reveal triggers"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE = (() => {'),
-    "runtime source should assemble the final scene source through a post-office reveal-trigger pass"
-  );
-  assert.ok(
-    runtimeSource.includes('return source.includes("function buildPixiSpriteDef")'),
-    "runtime source should skip the helper fallback once the raw scene source already defines buildPixiSpriteDef"
-  );
-  assert.ok(
-    runtimeSource.includes(': source + `'),
-    "runtime source should inject a fallback buildPixiSpriteDef helper when the raw scene source omits it"
-  );
-  assert.ok(
-    runtimeSource.includes('enteringReveal: options.enteringReveal === true,'),
-    "assembled scene source should preserve enteringReveal on sprite definitions"
-  );
-  assert.ok(
-    runtimeSource.includes('enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),'),
-    "desk workstation reveal should trigger when an agent newly occupies a slot, not only when the agent key is brand new"
-  );
-  assert.ok(
-    runtimeSource.includes('enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),'),
-    "office workstation reveal should share the slot-based reveal trigger"
-  );
-  assert.ok(
-    runtimeSource.includes('height: Math.max(5, Math.round(workstationHeight * 0.16)),\n                enteringReveal: options.enteringReveal === true'),
-    "assembled scene source should preserve enteringReveal on workstation glow effects"
-  );
-  assert.ok(
-    runtimeSource.includes('function shouldRevealWorkstation(projectRoot, agent, slotId) {'),
-    "assembled scene source should inject a workstation reveal helper when the raw scene literal omits one"
-  );
-  assert.ok(
-    runtimeSource.includes('const previousSceneState = renderedAgentSceneState.get(key) || null;'),
-    "workstation reveal helper should compare against the previous rendered slot state"
-  );
-  assert.ok(
-    runtimeSource.includes('return previousSlotId !== slotId;'),
-    "workstation reveal helper should blink when an agent gains or changes desk slots"
-  );
-  assert.ok(
-    navigationSource.includes('if (!screenshotMode && definition.enteringReveal === true) {\\n            sprite.visible = false;\\n          }'),
-    "Pixi navigation should hide entering-reveal sprites until the blink animation makes them visible"
-  );
-  assert.ok(
-    navigationSource.includes('renderer.animatedSprites.push({\\n              kind: \\"blink\\",\\n              nodes: enteringRevealNodes,'),
-    "Pixi navigation should enqueue a blink animation for entering workstation nodes"
+    navigationSource.includes('renderer.animatedSprites.push({\n              kind: "blink",\n              nodes: enteringRevealNodes,')
   );
 });
 
 test("workspace focus reuses compact scene geometry and grid-snapped desk starts", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
-  const sceneGridSource = readFileSync(
-    join(__dirname, "../src/client/scene-grid-source.ts"),
-    "utf8"
-  );
+  const uiSource = readRuntimeSource("ui-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts");
+  const sceneGridSource = readClientSource("scene-grid-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_UI_SOURCE_FINAL = patchRuntimeSection('),
-    "runtime source should patch the single-workspace render path"
-  );
-  assert.ok(
-    runtimeSource.includes('compact: true,'),
-    "single-workspace rendering should reuse compact scene geometry"
-  );
+  assert.ok(uiSource.includes("compact: true,"));
   assert.ok(
     sceneGridSource.includes('const deskStartColumn = Math.max('),
     "desk columns should start from a snapped tile column"
@@ -319,11 +160,7 @@ test("workspace focus reuses compact scene geometry and grid-snapped desk starts
     "desk pod origins should convert the snapped column back into tile pixels"
   );
   assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_WORKSTATION_FOOTPRINT = patchRuntimeSection('),
-    "runtime source should patch the workstation footprint onto the lower desk row"
-  );
-  assert.ok(
-    runtimeSource.includes('tileHeight: 1'),
+    sceneSource.includes("tileHeight: 1"),
     "workstation footprint should occupy only the bottom row"
   );
 });
@@ -349,43 +186,15 @@ test("workspace focus lets the expanded floor fill the full panel rect", () => {
 });
 
 test("runtime source strips markdown formatting markers from display text", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const renderSource = readRuntimeSource("render-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_MARKDOWN = patchRuntimeSection('),
-    "runtime source should patch display-text cleanup into the layout section"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_DISPLAY_PATH_SCAN = patchRuntimeSection('),
-    "runtime source should patch path scanning onto the stripped display text"
-  );
-  assert.ok(
-    runtimeSource.includes('function stripDisplayMarkdown(value) {'),
-    "runtime source should define a display markdown stripper"
-  );
-  assert.ok(
-    runtimeSource.includes('.replace(/\\\\[([^\\\\]]+)\\\\]\\\\(([^)]+)\\\\)/g, "$1")'),
-    "display text cleanup should collapse markdown links to their visible label"
-  );
-  assert.ok(
-    runtimeSource.includes('.split(String.fromCharCode(96)).join("")'),
-    "display text cleanup should strip inline code markers without leaking backticks"
-  );
-  assert.ok(
-    runtimeSource.includes('const plainText = stripDisplayMarkdown(normalized);'),
-    "normalizeDisplayText should strip markdown before path cleanup"
-  );
-  assert.ok(
-    runtimeSource.includes('const next = plainText.indexOf("/mnt/", index);'),
-    "path discovery should run against stripped display text"
-  );
-  assert.ok(
-    runtimeSource.includes('output += plainText.slice(index, next) + (cleaned || wslToWindowsPath(candidate));'),
-    "path cleanup should run against stripped display text"
-  );
+  assert.ok(layoutSource.includes("function stripDisplayMarkdown(value) {"));
+  assert.ok(layoutSource.includes('.replace(/\\\\[([^\\\\]]+)\\\\]\\\\(([^)]+)\\\\)/g, "$1")'));
+  assert.ok(layoutSource.includes('.split(String.fromCharCode(96)).join("")'));
+  assert.ok(layoutSource.includes("const plainText = stripDisplayMarkdown(normalized);"));
+  assert.ok(layoutSource.includes('const next = plainText.indexOf("/mnt/", index);'));
+  assert.ok(renderSource.includes("output += plainText.slice(index, next) + (cleaned || wslToWindowsPath(candidate));"));
 });
 
 test("rec-room roster keeps space for recently visible resting leads that went active", () => {
@@ -417,179 +226,55 @@ test("rec-room roster keeps space for recently visible resting leads that went a
 });
 
 test("runtime source limits visible rec-room resters to recent top-level leads", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const sceneSource = readRuntimeSource("scene-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_RECENT_RESTING_LEADS = patchRuntimeSection('),
-    "runtime source should patch the raw scene source for visible resting lead limits"
-  );
-  assert.ok(
-    runtimeSource.includes('const allRestingAgents = restingAgentsFor(snapshot, compact);'),
-    "scene runtime should keep all resting agents off desks before choosing visible rec leads"
-  );
-  assert.ok(
-    runtimeSource.includes('.filter((agent) =>\n            !agent.parentThreadId'),
-    "rec-room visibility should exclude subagents from the limited resting lead display"
-  );
-  assert.ok(
-    runtimeSource.includes('.slice(0, 4);'),
-    "rec-room visibility should cap visible resting leads at four seats"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SCENE_SOURCE_WITH_BOUNDED_REC_ASSIGNMENTS = patchRuntimeSection('),
-    "runtime source should patch the resting assignment call site for the 4-seat rec limit"
-  );
-  assert.ok(
-    runtimeSource.includes('const restingAssignments = stableSceneSlotAssignments(snapshot.projectRoot, "resting", restingAgents, 4);'),
-    "resting rec assignments should use the bounded 4-seat allocator"
-  );
+  assert.ok(sceneSource.includes('const allRestingAgents = restingAgentsFor(snapshot, compact);'));
+  assert.ok(sceneSource.includes('.filter((agent) =>\n            !agent.parentThreadId'));
+  assert.ok(sceneSource.includes(".slice(0, 4);"));
+  assert.ok(sceneSource.includes('const restingAssignments = stableSceneSlotAssignments(snapshot.projectRoot, "resting", restingAgents, 4);'));
 });
 
 test("runtime source can borrow recent rec-room leads for an empty selected workspace", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const uiSource = readRuntimeSource("ui-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_REC_FALLBACK = patchRuntimeSection('),
-    "runtime source should patch empty-project rec fallback into the layout runtime"
-  );
-  assert.ok(
-    runtimeSource.includes('function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {'),
-    "layout runtime should define an explicit empty-project recent-agent fallback helper"
-  );
-  assert.ok(
-    runtimeSource.includes('detail: projectPrefix + " · " + summary,'),
-    "fallback agents should preserve their source project label in synthesized summaries"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_EMPTY_PROJECT_SCENE_FALLBACK = patchRuntimeSection('),
-    "runtime source should patch scene-level empty-project fallback separately"
-  );
-  assert.ok(
-    runtimeSource.includes('const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);'),
-    "scene view should use the empty-project fallback when local recent leads are absent"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_UI_SOURCE_WITH_EMPTY_PROJECT_FALLBACK = patchRuntimeSection('),
-    "UI runtime should opt the selected workspace into the empty-project fallback"
-  );
-  assert.ok(
-    runtimeSource.includes('? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)'),
-    "selected workspace scene rendering should pass the fleet project list into the scene fallback"
-  );
-  assert.ok(
-    runtimeSource.includes('? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)'),
-    "selected workspace session rendering should pass the fleet project list into the session fallback"
-  );
+  assert.ok(layoutSource.includes("function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {"));
+  assert.ok(layoutSource.includes('detail: projectPrefix + " · " + summary,'));
+  assert.ok(layoutSource.includes('const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);'));
+  assert.ok(uiSource.includes('? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)'));
+  assert.ok(uiSource.includes('? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)'));
 });
 
 test("runtime source falls back to default rec layout when saved sofa columns overlap", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const renderSource = readRuntimeSource("render-source.ts");
+  const settingsSource = readRuntimeSource("settings-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_RENDER_SOURCE_WITH_SAFE_REC_SEATS = patchRuntimeSection('),
-    "runtime source should patch rec seat placement safety into the render source"
-  );
-  assert.ok(
-    runtimeSource.includes('const defaultLayout = recRoomSofaLayout(compact, roomPixelWidth, baseY);'),
-    "rec seat placement should retain a default layout fallback"
-  );
-  assert.ok(
-    runtimeSource.includes('{ ...defaultLayout.sofas[0], x: sofaColumns.left * tile, y: baseY }'),
-    "saved sofa-column overrides should retain the default sofa sprite metadata for seat anchoring"
-  );
-  assert.ok(
-    runtimeSource.includes('Math.abs(requestedLayout.sofas[1].x - requestedLayout.sofas[0].x) >= tile * 3'),
-    "rec seat placement should reject overlapping saved sofa positions"
-  );
-  assert.ok(
-    runtimeSource.includes(': defaultLayout;'),
-    "rec seat placement should fall back to the default sofa layout when overrides collapse"
-  );
-  assert.ok(
-    runtimeSource.includes('const sofaWidth = Number(sofa?.sprite?.w) || layout.sofaWidth;'),
-    "rec seat anchors should use the real sofa sprite width when available"
-  );
-  assert.ok(
-    runtimeSource.includes('const seatOffsetRatio = seatWithinSofa === 0 ? 0.18 : 0.62;'),
-    "rec seat anchors should use centered per-sofa seat offsets"
-  );
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_SETTINGS_SOURCE_WITH_BOUNDED_REC_SLOTS = patchRuntimeSection('),
-    "runtime source should patch bounded resting slot memory into the settings section"
-  );
-  assert.ok(
-    runtimeSource.includes('function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {'),
-    "stable scene slot memory should accept an optional max-slot bound"
-  );
-  assert.ok(
-    runtimeSource.includes('|| (slotLimit !== null && slotIndex >= slotLimit)'),
-    "resting slot memory should discard remembered indexes outside the visible seat bound"
-  );
-  assert.ok(
-    runtimeSource.includes('if (slotLimit !== null && nextSlotIndex >= slotLimit) {'),
-    "resting slot allocation should stop before assigning a seat beyond the visible seat bound"
-  );
+  assert.ok(renderSource.includes("const defaultLayout = recRoomSofaLayout(compact, roomPixelWidth, baseY);"));
+  assert.ok(renderSource.includes("{ ...defaultLayout.sofas[0], x: sofaColumns.left * tile, y: baseY }"));
+  assert.ok(renderSource.includes("Math.abs(requestedLayout.sofas[1].x - requestedLayout.sofas[0].x) >= tile * 3"));
+  assert.ok(renderSource.includes(": defaultLayout;"));
+  assert.ok(renderSource.includes("const sofaWidth = Number(sofa?.sprite?.w) || layout.sofaWidth;"));
+  assert.ok(renderSource.includes("const seatOffsetRatio = seatWithinSofa === 0 ? 0.18 : 0.62;"));
+  assert.ok(settingsSource.includes("function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {"));
+  assert.ok(settingsSource.includes("|| (slotLimit !== null && slotIndex >= slotLimit)"));
+  assert.ok(settingsSource.includes("if (slotLimit !== null && nextSlotIndex >= slotLimit) {"));
 });
 
 test("runtime source avoids doorway arrival animations for first-load historical sessions", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const uiSource = readRuntimeSource("ui-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_UI_SOURCE_WITH_STABLE_INITIAL_PRESENCE = patchRuntimeSection('),
-    "runtime source should patch stable initial presence into the UI runtime"
-  );
-  assert.ok(
-    runtimeSource.includes('enteringAgentKeys = previousKeys.size === 0 || screenshotMode'),
-    "initial hydrate and screenshot mode should not mark all visible agents as doorway arrivals"
-  );
-  assert.ok(
-    runtimeSource.includes('? new Set()'),
-    "stable initial presence should clear entering agent keys on first-load historical renders"
-  );
+  assert.ok(uiSource.includes("enteringAgentKeys = previousKeys.size === 0 || screenshotMode"));
+  assert.ok(uiSource.includes("? new Set()"));
 });
 
 test("runtime source keeps current agents in the map scene even when they are between desk and rec placement states", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
-  const seatingSource = readFileSync(
-    join(__dirname, "../src/client/runtime/seating-source.ts"),
-    "utf8"
-  );
+  const layoutSource = readRuntimeSource("layout-source.ts");
+  const seatingSource = readRuntimeSource("seating-source.ts");
 
-  assert.ok(
-    runtimeSource.includes('const CLIENT_RUNTIME_LAYOUT_SOURCE_WITH_VISIBLE_CURRENT_SCENE_AGENTS = patchRuntimeSection('),
-    "runtime source should patch current-agent scene visibility into the layout runtime"
-  );
-  assert.ok(
-    runtimeSource.includes('function isLiveSceneAgent(agent) {'),
-    "layout runtime should define a live-scene agent predicate"
-  );
-  assert.ok(
-    runtimeSource.includes('return shouldSeatAtWorkstation(agent) || agent.isCurrent === true;'),
-    "current agents should stay visible in the map scene even when not currently desk-seated"
-  );
-  assert.ok(
-    runtimeSource.includes('const liveAgents = snapshot.agents.filter(isLiveSceneAgent);'),
-    "view snapshots should start from live-scene agents instead of workstation-only agents"
-  );
-  assert.ok(
-    runtimeSource.includes('const seenAgentIds = new Set();'),
-    "view snapshots should dedupe current and recent-lead agents by id"
-  );
+  assert.ok(layoutSource.includes("function isLiveSceneAgent(agent) {"));
+  assert.ok(layoutSource.includes("return shouldSeatAtWorkstation(agent) || agent.isCurrent === true;"));
+  assert.ok(layoutSource.includes("const liveAgents = snapshot.agents.filter(isLiveSceneAgent);"));
+  assert.ok(layoutSource.includes("const seenAgentIds = new Set();"));
   assert.match(
     seatingSource,
     /function isLiveSceneAgent\(agent\) {\n\s+if \(!agent \|\| agent\.source === "cloud" \|\| agent\.source === "presence"\) {\n\s+return false;\n\s+}\n\s+return shouldSeatAtWorkstation\(agent\) \|\| agent\.isCurrent === true;\n\s+}/
@@ -641,25 +326,22 @@ test("toast renderer keeps the message, file-change, and command toast classes a
 });
 
 test("toast runtime preserves read command summaries and text-message priority", () => {
-  const renderSource = readFileSync(
-    join(__dirname, "../src/client/runtime/render-source.ts"),
-    "utf8"
-  );
+  const renderSource = readRuntimeSource("render-source.ts");
 
   assert.match(
     renderSource,
-    /if \(executable === \\"sed\\" \|\| executable === \\"cat\\" \|\| executable === \\"head\\" \|\| executable === \\"tail\\" \|\| executable === \\"less\\" \|\| executable === \\"more\\" \|\| executable === \\"bat\\"\) \{\\n\s+title = \\"Read \\" \+ firstPathLabel;/,
+    /if \(executable === "sed" \|\| executable === "cat" \|\| executable === "head" \|\| executable === "tail" \|\| executable === "less" \|\| executable === "more" \|\| executable === "bat"\) {\n\s+title = "Read " \+ firstPathLabel;/,
   );
   assert.match(
     renderSource,
-    /else if \(executable === \\"rg\\" \|\| executable === \\"grep\\"\) \{\\n\s+title =\\n\s+pathTokens\.length > 1 \? \\"Exploring \\" \+ pathTokens\.length \+ \\" files\\"\\n\s+: firstPath \? \\"Search \\" \+ firstPathLabel\\n\s+: \\"Search files\\";/,
+    /else if \(executable === "rg" \|\| executable === "grep"\) {\n\s+title =\n\s+pathTokens\.length > 1 \? "Exploring " \+ pathTokens\.length \+ " files"\n\s+: firstPath \? "Search " \+ firstPathLabel\n\s+: "Search files";/,
   );
   assert.match(
     renderSource,
-    /else if \(executable === \\"ls\\" \|\| executable === \\"find\\" \|\| executable === \\"tree\\"\) \{\\n\s+title =\\n\s+pathTokens\.length > 1 \? \\"Exploring \\" \+ pathTokens\.length \+ \\" files\\"\\n\s+: firstPath \? \\"Explore \\" \+ cleanReportedPath\(snapshot\.projectRoot, firstPath\)\\n\s+: \\"Explore files\\";/,
+    /else if \(executable === "ls" \|\| executable === "find" \|\| executable === "tree"\) {\n\s+title =\n\s+pathTokens\.length > 1 \? "Exploring " \+ pathTokens\.length \+ " files"\n\s+: firstPath \? "Explore " \+ cleanReportedPath\(snapshot\.projectRoot, firstPath\)\n\s+: "Explore files";/,
   );
   assert.ok(
-    renderSource.includes('if (latestMessageChanged) {\\n          return {'),
+    renderSource.includes("if (latestMessageChanged) {\n          return {"),
     "latest message changes should still build a notification descriptor"
   );
   assert.ok(
@@ -685,31 +367,15 @@ test("typed snapshot events still allow message toasts even when the agent is no
 });
 
 test("boss relationship arrows are hover-only curved overlays with arrowheads", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const navigationSource = readRuntimeSource("navigation-source.ts");
   const specSource = readFileSync(
     join(__dirname, "../../../docs/spec.md"),
     "utf8"
   );
 
-  assert.ok(
-    runtimeSource.includes("const CLIENT_RUNTIME_NAVIGATION_SOURCE_WITH_RELATIONSHIP_LINES = patchRuntimeSection("),
-    "runtime source should patch relationship arrow rendering in the navigation section"
-  );
-  assert.ok(
-    runtimeSource.includes(".bezierCurveTo(control1X, control1Y, control2X, control2Y, line.x2, line.y2)"),
-    "relationship arrows should use curved bezier paths"
-  );
-  assert.ok(
-    runtimeSource.includes("const arrowHead = new PIXI.Graphics()"),
-    "relationship arrows should draw explicit arrowheads"
-  );
-  assert.ok(
-    runtimeSource.includes("state.hoveredRelationshipBossKey"),
-    "relationship arrows should only appear for the currently hovered boss"
-  );
+  assert.ok(navigationSource.includes(".bezierCurveTo(control1X, control1Y, control2X, control2Y, line.x2, line.y2)"));
+  assert.ok(navigationSource.includes("const arrowHead = new PIXI.Graphics()"));
+  assert.ok(navigationSource.includes("state.hoveredRelationshipBossKey"));
   assert.match(
     specSource,
     /Boss-to-subagent relationship arrows should only appear when the user is hovering or focusing that boss in the scene;/,
@@ -737,33 +403,11 @@ test("spec defines door-based arrivals and departures for visible agents", () =>
 });
 
 test("runtime source only animates exit ghosts for explicit departures and dedupes them", () => {
-  const runtimeSource = readFileSync(
-    join(__dirname, "../src/client/runtime-source.ts"),
-    "utf8"
-  );
+  const navigationSource = readRuntimeSource("navigation-source.ts");
+  const uiSource = readRuntimeSource("ui-source.ts");
 
-  assert.ok(
-    runtimeSource.includes("const CLIENT_RUNTIME_NAVIGATION_SOURCE_WITH_EXPLICIT_DEPARTURES = patchRuntimeSection("),
-    "runtime source should patch navigation ghosting to require explicit departures"
-  );
-  assert.ok(
-    runtimeSource.includes("const departingAgentKeys = new Set(departingAgents.map((agent) => agent.key));"),
-    "exit ghost generation should key off explicit departing agents"
-  );
-  assert.ok(
-    runtimeSource.includes("!motionState || currentAgentKeys.has(key) || motionState.exiting || !departingAgentKeys.has(key)"),
-    "transient scene churn should not manufacture exit ghosts"
-  );
-  assert.ok(
-    runtimeSource.includes("const CLIENT_RUNTIME_UI_SOURCE_WITH_DEDUPED_DEPARTURES = patchRuntimeSection("),
-    "runtime source should patch UI departure bookkeeping"
-  );
-  assert.ok(
-    runtimeSource.includes("const existingGhost = departingAgents.find((ghost) => ghost.key === key) || null;"),
-    "departure bookkeeping should reuse an existing ghost for the same agent"
-  );
-  assert.ok(
-    runtimeSource.includes("existingGhost.expiresAt = now + DEPARTING_AGENT_TTL_MS;"),
-    "reused departure ghosts should refresh their expiry window"
-  );
+  assert.ok(navigationSource.includes("const departingAgentKeys = new Set(departingAgents.map((agent) => agent.key));"));
+  assert.ok(navigationSource.includes("!motionState || currentAgentKeys.has(key) || motionState.exiting || !departingAgentKeys.has(key)"));
+  assert.ok(uiSource.includes("const existingGhost = departingAgents.find((ghost) => ghost.key === key) || null;"));
+  assert.ok(uiSource.includes("existingGhost.expiresAt = now + DEPARTING_AGENT_TTL_MS;"));
 });

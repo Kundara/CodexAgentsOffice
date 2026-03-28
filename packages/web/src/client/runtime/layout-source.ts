@@ -1,1 +1,1144 @@
-export const CLIENT_RUNTIME_LAYOUT_SOURCE = "\n      const mapViewButton = document.getElementById(\"map-view-button\");\n      const terminalViewButton = document.getElementById(\"terminal-view-button\");\n      const settingsButton = document.getElementById(\"settings-button\");\n      const settingsPopup = document.getElementById(\"settings-popup\");\n      const debugTilesButton = document.getElementById(\"debug-tiles-button\");\n      const textScaleInput = document.getElementById(\"text-scale-input\");\n      const textScaleOutput = document.getElementById(\"text-scale-output\");\n      const cursorApiKeyInput = document.getElementById(\"cursor-api-key-input\");\n      const cursorApiKeySaveButton = document.getElementById(\"cursor-api-key-save-button\");\n      const cursorApiKeyClearButton = document.getElementById(\"cursor-api-key-clear-button\");\n      const cursorApiKeyStatus = document.getElementById(\"cursor-api-key-status\");\n      const multiplayerEnabledButton = document.getElementById(\"multiplayer-enabled-button\");\n      const multiplayerHostInput = document.getElementById(\"multiplayer-host-input\");\n      const multiplayerRoomInput = document.getElementById(\"multiplayer-room-input\");\n      const multiplayerNicknameInput = document.getElementById(\"multiplayer-nickname-input\");\n      const multiplayerStatus = document.getElementById(\"multiplayer-status\");\n      const connectionPill = document.getElementById(\"connection-pill\");\n      const stamp = document.getElementById(\"stamp\");\n      const heroSummary = document.getElementById(\"hero-summary\");\n      const projectCount = document.getElementById(\"project-count\");\n      const projectTabs = document.getElementById(\"project-tabs\");\n      const centerTitle = document.getElementById(\"center-title\");\n      const workspaceFocusButton = document.getElementById(\"workspace-focus-button\");\n      const workspacePanel = document.getElementById(\"workspace-panel\");\n      const centerContent = document.getElementById(\"center-content\");\n      const sessionList = document.getElementById(\"session-list\");\n      const roomsPath = document.getElementById(\"rooms-path\");\n      applyGlobalSceneSettings();\n      syncSettingsPopup();\n      syncCursorIntegrationUi();\n      syncMultiplayerSettingsUi();\n      void refreshIntegrationSettings();\n      multiplayerPruneTimer = setInterval(pruneMultiplayerPeers, 5000);\n\n      function syncSettingsPopup() {\n        if (settingsButton instanceof HTMLButtonElement) {\n          settingsButton.classList.toggle(\"active\", state.settingsOpen);\n          settingsButton.setAttribute(\"aria-expanded\", state.settingsOpen ? \"true\" : \"false\");\n        }\n        if (settingsPopup instanceof HTMLElement) {\n          settingsPopup.hidden = !state.settingsOpen;\n        }\n      }\n\n      function setSettingsOpen(nextOpen) {\n        state.settingsOpen = Boolean(nextOpen);\n        syncSettingsPopup();\n      }\n\n      function cursorIntegrationStatusText() {\n        if (typeof state.integrationSettingsError === \"string\" && state.integrationSettingsError.length > 0) {\n          return state.integrationSettingsError;\n        }\n\n        const cursor = state.integrationSettings && state.integrationSettings.cursor\n          ? state.integrationSettings.cursor\n          : defaultIntegrationSettings().cursor;\n\n        if (state.integrationSettingsPending) {\n          return \"Saving Cursor API key on this machine...\";\n        }\n\n        if (cursor.source === \"env\") {\n          const storedSuffix = cursor.storedConfigured && cursor.storedMaskedKey\n            ? \" A saved key is also present and can be cleared here.\"\n            : \"\";\n          return \"Cursor API key is coming from CURSOR_API_KEY in the server process\" + (cursor.maskedKey ? \" (\" + cursor.maskedKey + \").\" : \".\") + storedSuffix;\n        }\n\n        if (cursor.source === \"stored\") {\n          return \"Saved on this machine for Agents Office\" + (cursor.maskedKey ? \" (\" + cursor.maskedKey + \").\" : \".\");\n        }\n\n        return \"No local Cursor API key is saved. Local Cursor sessions may still appear automatically; save a key only to include official Cursor background agents for matching repos.\";\n      }\n\n      function syncCursorIntegrationUi() {\n        const cursor = state.integrationSettings && state.integrationSettings.cursor\n          ? state.integrationSettings.cursor\n          : defaultIntegrationSettings().cursor;\n        const busy = state.integrationSettingsPending === true;\n\n        if (cursorApiKeyInput instanceof HTMLInputElement) {\n          cursorApiKeyInput.disabled = busy;\n          if (cursorApiKeyInput.value.length === 0) {\n            cursorApiKeyInput.placeholder = cursor.source === \"stored\"\n              ? \"Saved on this machine\"\n              : cursor.source === \"env\"\n                ? \"Provided by CURSOR_API_KEY\"\n                : \"cursor_...\";\n          }\n        }\n\n        if (cursorApiKeySaveButton instanceof HTMLButtonElement) {\n          cursorApiKeySaveButton.disabled = busy;\n          cursorApiKeySaveButton.textContent = busy ? \"Saving...\" : \"Save Key\";\n        }\n\n        if (cursorApiKeyClearButton instanceof HTMLButtonElement) {\n          cursorApiKeyClearButton.disabled = busy || cursor.storedConfigured !== true;\n        }\n\n        setTextIfChanged(cursorApiKeyStatus, cursorIntegrationStatusText());\n      }\n\n      async function refreshIntegrationSettings() {\n        try {\n          const response = await fetch(\"/api/settings/integrations\");\n          if (!response.ok) {\n            throw new Error(await response.text());\n          }\n          state.integrationSettings = await response.json();\n          state.integrationSettingsError = null;\n        } catch (error) {\n          const message = error instanceof Error ? error.message : String(error);\n          state.integrationSettings = defaultIntegrationSettings();\n          state.integrationSettingsError = \"Cursor settings unavailable: \" + message;\n        } finally {\n          state.integrationSettingsPending = false;\n          syncCursorIntegrationUi();\n        }\n      }\n\n      async function saveCursorApiKey() {\n        if (!(cursorApiKeyInput instanceof HTMLInputElement)) {\n          return;\n        }\n\n        const cursorApiKey = cursorApiKeyInput.value.trim();\n        if (!cursorApiKey) {\n          state.integrationSettingsError = \"Enter a Cursor API key before saving.\";\n          syncCursorIntegrationUi();\n          return;\n        }\n\n        state.integrationSettingsPending = true;\n        state.integrationSettingsError = null;\n        syncCursorIntegrationUi();\n\n        try {\n          state.integrationSettings = await postJson(\"/api/settings/integrations\", { cursorApiKey });\n          state.integrationSettingsError = null;\n          cursorApiKeyInput.value = \"\";\n        } catch (error) {\n          const message = error instanceof Error ? error.message : String(error);\n          state.integrationSettingsError = \"Failed to save Cursor API key: \" + message;\n        } finally {\n          state.integrationSettingsPending = false;\n          syncCursorIntegrationUi();\n        }\n      }\n\n      async function clearCursorApiKey() {\n        state.integrationSettingsPending = true;\n        state.integrationSettingsError = null;\n        syncCursorIntegrationUi();\n\n        try {\n          state.integrationSettings = await postJson(\"/api/settings/integrations\", { cursorApiKey: null });\n          state.integrationSettingsError = null;\n          if (cursorApiKeyInput instanceof HTMLInputElement) {\n            cursorApiKeyInput.value = \"\";\n          }\n        } catch (error) {\n          const message = error instanceof Error ? error.message : String(error);\n          state.integrationSettingsError = \"Failed to clear saved Cursor API key: \" + message;\n        } finally {\n          state.integrationSettingsPending = false;\n          syncCursorIntegrationUi();\n        }\n      }\n\n      function syncFleetBackdrop() {\n        const towerMode = state.view === \"map\";\n        document.body.classList.toggle(\"fleet-sky-active\", towerMode);\n        if (workspacePanel instanceof HTMLElement) {\n          workspacePanel.dataset.panelMode = towerMode ? \"tower\" : \"default\";\n        }\n        if (centerContent instanceof HTMLElement) {\n          centerContent.dataset.contentMode = towerMode ? \"tower\" : \"default\";\n        }\n      }\n\n      function syncSkyParallax() {\n        const scrollY = Math.max(window.scrollY || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);\n        document.documentElement.style.setProperty(\"--tower-scroll-y\", Math.round(scrollY) + \"px\");\n      }\n\n      function syncUrl() {\n        const url = new URL(window.location.href);\n        if (state.selected === \"all\") url.searchParams.delete(\"project\");\n        else url.searchParams.set(\"project\", state.selected);\n        if (state.view === \"map\") url.searchParams.delete(\"view\");\n        else url.searchParams.set(\"view\", state.view);\n        if (state.workspaceFullscreen && state.selected !== \"all\") url.searchParams.set(\"focus\", \"1\");\n        else url.searchParams.delete(\"focus\");\n        url.searchParams.delete(\"active\");\n        url.searchParams.delete(\"history\");\n        window.history.replaceState({}, \"\", url);\n      }\n\n      function setSelection(nextSelection) {\n        state.selected = nextSelection;\n        if (nextSelection === \"all\") {\n          state.workspaceFullscreen = false;\n        }\n        syncUrl();\n        render();\n      }\n\n      function setView(nextView) {\n        state.view = nextView === \"terminal\" ? \"terminal\" : \"map\";\n        syncUrl();\n        render();\n      }\n\n      function canFocusWorkspace() {\n        return Boolean(state.fleet && state.selected !== \"all\" && currentSnapshot());\n      }\n\n      function syncWorkspaceFullscreenUi() {\n        const isVisible = canFocusWorkspace();\n        const isActive = isVisible && state.workspaceFullscreen;\n        document.body.classList.toggle(\"workspace-focus\", isActive);\n        if (!(workspaceFocusButton instanceof HTMLButtonElement)) {\n          return;\n        }\n        workspaceFocusButton.hidden = !isVisible;\n        workspaceFocusButton.classList.toggle(\"active\", isActive);\n        workspaceFocusButton.setAttribute(\"aria-pressed\", isActive ? \"true\" : \"false\");\n        workspaceFocusButton.textContent = isActive ? \"Close\" : \"[] Expand\";\n        workspaceFocusButton.title = isActive\n          ? \"Close workspace focus (F)\"\n          : \"Expand selected workspace (F)\";\n      }\n\n      function setWorkspaceFullscreen(nextValue) {\n        const normalized = Boolean(nextValue) && canFocusWorkspace();\n        if (state.workspaceFullscreen === normalized) {\n          syncWorkspaceFullscreenUi();\n          return;\n        }\n        if (normalized) {\n          setSettingsOpen(false);\n        }\n        state.workspaceFullscreen = normalized;\n        lastSceneRenderToken = null;\n        syncUrl();\n        render();\n      }\n\n      function toggleWorkspaceFullscreen() {\n        if (!canFocusWorkspace()) {\n          return;\n        }\n        setWorkspaceFullscreen(!state.workspaceFullscreen);\n      }\n\n      function isTypingTarget(target) {\n        if (!(target instanceof HTMLElement)) {\n          return false;\n        }\n        if (target.isContentEditable) {\n          return true;\n        }\n        return Boolean(target.closest(\"input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']\"));\n      }\n\n      function setConnection(nextConnection) {\n        state.connection = nextConnection;\n        if (!connectionPill) return;\n        connectionPill.className = \`status-pill state-\${nextConnection}\`;\n        connectionPill.textContent =\n          nextConnection === \"live\" ? \"Live stream\"\n          : nextConnection === \"snapshot\" ? \"Snapshot mode\"\n          : nextConnection === \"offline\" ? \"Offline\"\n          : nextConnection === \"reconnecting\" ? \"Reconnecting\"\n          : \"Connecting\";\n      }\n\n      function countsForSnapshot(snapshot) {\n        const counters = { total: 0, active: 0, waiting: 0, blocked: 0, cloud: 0 };\n        for (const agent of snapshot.agents) {\n          if (!isBusyAgent(agent)) {\n            continue;\n          }\n          counters.total += 1;\n          if (agent.state === \"waiting\") counters.waiting += 1;\n          else if (agent.state === \"blocked\") counters.blocked += 1;\n          else if (agent.state === \"cloud\") counters.cloud += 1;\n          else if (agent.state !== \"done\" && agent.state !== \"idle\") counters.active += 1;\n        }\n        return counters;\n      }\n\n      function isBusyAgent(agent) {\n        return agent.isCurrent === true;\n      }\n\n      function parseAgentUpdatedAt(value) {\n        const parsed = Date.parse(value || \"\");\n        return Number.isFinite(parsed) ? parsed : Number.NaN;\n      }\n\n      function isDeskLiveLocalState(state) {\n        return [\n          \"editing\",\n          \"running\",\n          \"validating\",\n          \"scanning\",\n          \"thinking\",\n          \"planning\",\n          \"delegating\",\n          \"blocked\"\n        ].includes(String(state || \"\").toLowerCase());\n      }\n\n      const TOP_LEVEL_DONE_WORKSTATION_GRACE_MS = 5000;\n      const SUBAGENT_DONE_WORKSTATION_GRACE_MS = 1200;\n\n      function workstationDoneGraceMs(agent) {\n        return agent && agent.parentThreadId\n          ? SUBAGENT_DONE_WORKSTATION_GRACE_MS\n          : TOP_LEVEL_DONE_WORKSTATION_GRACE_MS;\n      }\n\n      function shouldSeatAtWorkstation(agent) {\n        if (!agent || agent.source === \"cloud\" || agent.source === \"presence\") {\n          return false;\n        }\n        if (agent.source === \"local\") {\n          const stoppedAt = parseAgentUpdatedAt(agent.stoppedAt);\n          if (Number.isFinite(stoppedAt)) {\n            return Date.now() - stoppedAt <= workstationDoneGraceMs(agent);\n          }\n          if (agent.statusText === \"notLoaded\") {\n            return agent.isOngoing === true;\n          }\n          if (agent.statusText === \"active\") {\n            return agent.isCurrent === true;\n          }\n          if (agent.state === \"done\") {\n            return agent.isCurrent === true;\n          }\n        }\n        if (agent.state === \"waiting\" || agent.state === \"idle\" || agent.state === \"done\") {\n          return false;\n        }\n        if (agent.source === \"local\") {\n          if (agent.isOngoing === true) {\n            return true;\n          }\n          if (agent.isCurrent !== true) {\n            return false;\n          }\n          return agent.statusText !== \"notLoaded\" && isDeskLiveLocalState(agent.state);\n        }\n        return agent.isCurrent === true;\n      }\n\n      function isFinishedLeadForRec(agent) {\n        return isRecentLeadCandidate(agent)\n          && !shouldSeatAtWorkstation(agent)\n          && (agent.state === \"waiting\" || agent.state === \"idle\" || agent.state === \"done\");\n      }\n\n      function isRecentLeadCandidate(agent) {\n        return agent.source !== \"cloud\"\n          && agent.source !== \"presence\"\n          && !agent.parentThreadId\n          && Boolean(agent.threadId || agent.taskId || agent.url || agent.source === \"claude\");\n      }\n\n      function reservedRecentLeadSlots(snapshot) {\n        const reservations = activeRecentLeadReservations.get(snapshot.projectRoot);\n        return reservations ? reservations.size : 0;\n      }\n\n      function updateRecentLeadReservations(projects) {\n        for (const snapshot of projects) {\n          const previousVisibleIds = recentLeadDisplayMemory.get(snapshot.projectRoot) || [];\n          const activeIds = new Set(\n            snapshot.agents\n              .filter((agent) => shouldSeatAtWorkstation(agent) && isRecentLeadCandidate(agent))\n              .map((agent) => agent.id)\n          );\n          const nextReservations = new Set(\n            [...(activeRecentLeadReservations.get(snapshot.projectRoot) || new Set())]\n              .filter((agentId) => activeIds.has(agentId))\n          );\n\n          for (const agentId of previousVisibleIds) {\n            if (activeIds.has(agentId)) {\n              nextReservations.add(agentId);\n            }\n          }\n\n          if (nextReservations.size > 0) {\n            activeRecentLeadReservations.set(snapshot.projectRoot, nextReservations);\n          } else {\n            activeRecentLeadReservations.delete(snapshot.projectRoot);\n          }\n        }\n      }\n\n      function rememberVisibleRecentLeads(projects) {\n        for (const snapshot of projects) {\n          const visibleIds = snapshot.agents\n            .filter((agent) => isFinishedLeadForRec(agent))\n            .map((agent) => agent.id);\n          recentLeadDisplayMemory.set(snapshot.projectRoot, visibleIds);\n        }\n      }\n\n      function isRecentSessionCandidate(agent) {\n        return agent.source !== \"cloud\" && agent.source !== \"presence\";\n      }\n\n      function recentLeadAgents(snapshot, limit = SCENE_RECENT_LEAD_LIMIT) {\n        const activeIds = new Set(snapshot.agents.filter(shouldSeatAtWorkstation).map((agent) => agent.id));\n        const effectiveLimit = Math.max(0, limit - reservedRecentLeadSlots(snapshot));\n        return [...snapshot.agents]\n          .filter((agent) => isFinishedLeadForRec(agent) && !activeIds.has(agent.id))\n          .sort(compareAgentsByRecencyStable)\n          .slice(0, effectiveLimit);\n      }\n\n      function recentSessionAgents(snapshot, limit = SESSION_RECENT_LEAD_LIMIT) {\n        const activeIds = new Set(snapshot.agents.filter(isBusyAgent).map((agent) => agent.id));\n        return [...snapshot.agents]\n          .filter((agent) => isRecentSessionCandidate(agent) && !activeIds.has(agent.id))\n          .sort(compareAgentsByRecencyStable)\n          .slice(0, limit);\n      }\n\n      function busyCount(snapshot) {\n        return snapshot.agents.filter(isBusyAgent).length;\n      }\n\n      function notificationSubjectKey(projectRoot, agent, threadId) {\n        const explicitThreadId = typeof threadId === \"string\" && threadId.length > 0 ? threadId : null;\n        const agentThreadId = agent && typeof agent.threadId === \"string\" && agent.threadId.length > 0\n          ? agent.threadId\n          : null;\n        const subjectThreadId = explicitThreadId || agentThreadId;\n        if (subjectThreadId) {\n          return \`\${projectRoot}::thread::\${subjectThreadId}\`;\n        }\n        return \`\${projectRoot}::agent::\${agent && agent.id ? agent.id : \"unknown\"}\`;\n      }\n\n      function sceneAgentToken(agent) {\n        return [\n          agent.id,\n          agent.state,\n          agent.roomId || \"\",\n          agent.parentThreadId || \"\",\n          agent.isCurrent ? \"1\" : \"0\",\n          agent.appearance?.id || \"\",\n          agent.source,\n          agent.sourceKind || \"\"\n        ].join(\":\");\n      }\n\n      function sceneSnapshotToken(snapshot) {\n        return [\n          snapshot.projectRoot,\n          ...snapshot.agents.map(sceneAgentToken)\n        ].join(\"::\");\n      }\n\n      function eventSnapshotToken(event) {\n        if (!event) {\n          return \"\";\n        }\n        return [\n          event.id || \"\",\n          event.threadId || \"\",\n          event.kind || \"\",\n          event.phase || \"\",\n          event.method || \"\",\n          event.createdAt || \"\",\n          event.itemId || \"\",\n          event.requestId || \"\",\n          event.title || \"\",\n          event.detail || \"\",\n          event.command || \"\",\n          event.path || \"\"\n        ].join(\":\");\n      }\n\n      function roomsSnapshotToken(rooms) {\n        if (!rooms) {\n          return \"\";\n        }\n        return JSON.stringify({\n          generated: rooms.generated,\n          filePath: rooms.filePath,\n          rooms: rooms.rooms\n        });\n      }\n\n      function projectSemanticToken(snapshot) {\n        return [\n          snapshot.projectRoot,\n          roomsSnapshotToken(snapshot.rooms),\n          ...snapshot.agents.map(sceneAgentToken),\n          ...((snapshot.events || []).map(eventSnapshotToken)),\n          ...((snapshot.notes || []).map((note) => String(note || \"\")))\n        ].join(\"::\");\n      }\n\n      function fleetSemanticToken(fleet) {\n        if (!fleet || !Array.isArray(fleet.projects)) {\n          return \"\";\n        }\n        return fleet.projects.map(projectSemanticToken).join(\"||\");\n      }\n\n      function viewSnapshot(snapshot, recentLeadLimit = SCENE_RECENT_LEAD_LIMIT) {\n        const activeAgents = snapshot.agents.filter(shouldSeatAtWorkstation);\n        const recentLeads = recentLeadAgents(snapshot, recentLeadLimit);\n        return {\n          ...snapshot,\n          agents: [...activeAgents, ...recentLeads]\n        };\n      }\n\n      function viewSessionSnapshot(snapshot, recentSessionLimit = SESSION_RECENT_LEAD_LIMIT) {\n        const activeAgents = snapshot.agents.filter(isBusyAgent);\n        const recentAgents = recentSessionAgents(snapshot, recentSessionLimit);\n        return {\n          ...snapshot,\n          agents: [...activeAgents, ...recentAgents]\n        };\n      }\n\n      function visibleProjects(fleet) {\n        return fleet.projects;\n      }\n\n      function fleetCounts(fleet) {\n        return fleet.projects.reduce((acc, snapshot) => {\n          const next = countsForSnapshot(snapshot);\n          acc.total += next.total;\n          acc.active += next.active;\n          acc.waiting += next.waiting;\n          acc.blocked += next.blocked;\n          acc.cloud += next.cloud;\n          return acc;\n        }, { total: 0, active: 0, waiting: 0, blocked: 0, cloud: 0 });\n      }\n\n      function stableHash(input) {\n        let hash = 2166136261;\n        for (const char of String(input)) {\n          hash ^= char.charCodeAt(0);\n          hash = Math.imul(hash, 16777619);\n        }\n        return Math.abs(hash >>> 0);\n      }\n\n      function agentRole(agent) {\n        if (agent.role) {\n          return String(agent.role).toLowerCase();\n        }\n        if (agent.source === \"cloud\") {\n          return \"cloud\";\n        }\n        if (agent.source === \"claude\") {\n          return \"claude\";\n        }\n        if (agent.source === \"cursor\") {\n          return \"cursor\";\n        }\n        if (agent.source === \"openclaw\") {\n          return \"openclaw\";\n        }\n        return \"default\";\n      }\n\n      function titleCaseWords(value) {\n        return String(value)\n          .split(/\\s+/)\n          .filter(Boolean)\n          .map((word) => word[0] ? word[0].toUpperCase() + word.slice(1) : word)\n          .join(\" \");\n      }\n\n      function pluralizeWord(word, count) {\n        if (count === 1) {\n          return word;\n        }\n        if (/[^aeiou]y$/i.test(word)) {\n          return word.slice(0, -1) + \"ies\";\n        }\n        if (/(s|x|z|ch|sh)$/i.test(word)) {\n          return word + \"es\";\n        }\n        return word + \"s\";\n      }\n\n      function pluralizePhrase(phrase, count) {\n        if (count === 1) {\n          return phrase;\n        }\n        const words = String(phrase).split(/\\s+/).filter(Boolean);\n        if (words.length === 0) {\n          return phrase;\n        }\n        words[words.length - 1] = pluralizeWord(words[words.length - 1], count);\n        return words.join(\" \");\n      }\n\n      function agentRoleLabel(agent) {\n        return titleCaseWords(agentRole(agent).replace(/[_-]+/g, \" \"));\n      }\n\n      function childAgentsFor(snapshot, parentThreadId) {\n        return snapshot.agents.filter((agent) => agent.parentThreadId === parentThreadId);\n      }\n\n      function liveChildAgentsFor(snapshot, parentThreadId) {\n        return childAgentsFor(snapshot, parentThreadId).filter((agent) => isBusyAgent(agent));\n      }\n\n      function isLeadSession(snapshot, agent) {\n        return agent.source !== \"cloud\"\n          && !agent.parentThreadId\n          && (Boolean(agent.threadId || agent.taskId || agent.url || agent.source === \"claude\") || childAgentsFor(snapshot, agent.id).length > 0);\n      }\n\n      function agentRankLabel(snapshot, agent) {\n        if (isLeadSession(snapshot, agent)) {\n          return \"mini-boss\";\n        }\n        if (agent.parentThreadId) {\n          return \"subagent\";\n        }\n        return agent.sourceKind || agentRole(agent);\n      }\n\n      function parentLabelFor(snapshot, agent) {\n        if (!agent.parentThreadId) {\n          return null;\n        }\n        return snapshot.agents.find((candidate) => candidate.id === agent.parentThreadId)?.label ?? null;\n      }\n\n      function focusAgentKey(snapshot, agent) {\n        return agentKey(snapshot.projectRoot, agent);\n      }\n\n      function collectFocusedSessionKeys(snapshot, agent) {\n        const queue = [agent.id];\n        const visited = new Set(queue);\n        const keys = new Set([focusAgentKey(snapshot, agent)]);\n        while (queue.length > 0) {\n          const currentId = queue.shift();\n          for (const candidate of snapshot.agents) {\n            if (candidate.parentThreadId !== currentId || visited.has(candidate.id)) {\n              continue;\n            }\n            visited.add(candidate.id);\n            queue.push(candidate.id);\n            keys.add(focusAgentKey(snapshot, candidate));\n          }\n        }\n        return [...keys];\n      }\n\n      function focusWrapperAttrs(snapshot, agent) {\n        if (!agent) {\n          return \"\";\n        }\n        return \` data-focus-agent=\"true\" data-focus-key=\"\${escapeHtml(focusAgentKey(snapshot, agent))}\" data-focus-keys=\"\${escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)))}\"\`;\n      }\n\n      function stationRoleLabel(role, count) {\n        const normalized = String(role || \"default\").trim().toLowerCase().replace(/[_-]+/g, \" \");\n        const base =\n          normalized === \"default\" ? \"generalist\"\n          : normalized === \"cloud\" ? \"cloud operator\"\n          : normalized;\n        return titleCaseWords(pluralizePhrase(base, count));\n      }\n\n      function groupAgentsByRole(agents) {\n        const buckets = new Map();\n        for (const agent of agents) {\n          const role = agentRole(agent);\n          const list = buckets.get(role) || [];\n          list.push(agent);\n          buckets.set(role, list);\n        }\n\n        return [...buckets.entries()]\n          .map(([role, roleAgents]) => ({\n            role,\n            agents: [...roleAgents].sort(compareAgentsByRecencyStable)\n          }))\n          .sort((left, right) => {\n            if (right.agents.length !== left.agents.length) {\n              return right.agents.length - left.agents.length;\n            }\n            return stationRoleLabel(left.role, left.agents.length)\n              .localeCompare(stationRoleLabel(right.role, right.agents.length));\n          });\n      }\n\n      function compareAgentsForDeskLayout(snapshot, left, right) {\n        const leadDelta = Number(isLeadSession(snapshot, right)) - Number(isLeadSession(snapshot, left));\n        if (leadDelta !== 0) {\n          return leadDelta;\n        }\n\n        const depthDelta = left.depth - right.depth;\n        if (depthDelta !== 0) {\n          return depthDelta;\n        }\n\n        const parentDelta = String(left.parentThreadId || \"\").localeCompare(String(right.parentThreadId || \"\"));\n        if (parentDelta !== 0) {\n          return parentDelta;\n        }\n\n        const roleDelta = agentRole(left).localeCompare(agentRole(right));\n        if (roleDelta !== 0) {\n          return roleDelta;\n        }\n\n        const labelDelta = String(left.label || \"\").localeCompare(String(right.label || \"\"));\n        if (labelDelta !== 0) {\n          return labelDelta;\n        }\n\n        return String(left.id || \"\").localeCompare(String(right.id || \"\"));\n      }\n\n      function compareAgentsByRecencyStable(left, right) {\n        const updatedAtDelta = String(right.updatedAt || \"\").localeCompare(String(left.updatedAt || \"\"));\n        if (updatedAtDelta !== 0) {\n          return updatedAtDelta;\n        }\n        return String(left.id || \"\").localeCompare(String(right.id || \"\"));\n      }\n\n      function roleTone(role) {\n        const normalized = String(role || \"default\").toLowerCase();\n        switch (normalized) {\n          case \"boss\":\n            return \"#ffcf4d\";\n          case \"worker\":\n            return \"#4bd69f\";\n          case \"explorer\":\n            return \"#f5b74f\";\n          case \"cloud\":\n            return \"#98d8ff\";\n          case \"claude\":\n            return \"#ffab91\";\n          case \"cursor\":\n            return \"#9fd6a4\";\n          case \"openclaw\":\n            return \"#7ad0b3\";\n          case \"default\":\n            return \"#f2ead7\";\n          default:\n            if (normalized.includes(\"design\") || normalized.includes(\"copy\") || normalized.includes(\"writer\")) {\n              return \"#ff9a7a\";\n            }\n            if (normalized.includes(\"map\") || normalized.includes(\"research\") || normalized.includes(\"docs\")) {\n              return \"#8cd5ff\";\n            }\n            if (normalized.includes(\"review\") || normalized.includes(\"qa\")) {\n              return \"#ffd479\";\n            }\n            return \"#d7b7ff\";\n        }\n      }\n\n      function isBossOfficeCandidate(snapshot, agent) {\n        return isLeadSession(snapshot, agent) && liveChildAgentsFor(snapshot, agent.id).length > 1;\n      }\n\n      function sortedBossOfficeAgents(snapshot, agents) {\n        return [...agents].sort((left, right) => {\n          const childDelta = liveChildAgentsFor(snapshot, right.id).length - liveChildAgentsFor(snapshot, left.id).length;\n          if (childDelta !== 0) {\n            return childDelta;\n          }\n          return compareAgentsForDeskLayout(snapshot, left, right);\n        });\n      }\n\n      function previousSceneSlotId(snapshot, agent) {\n        const sceneState = sceneStateForAgent(snapshot, agent.id);\n        return sceneState && sceneState.slotId ? String(sceneState.slotId) : null;\n      }\n\n      function previousSceneMirrored(snapshot, agent) {\n        const sceneState = sceneStateForAgent(snapshot, agent.id);\n        return sceneState && typeof sceneState.mirrored === \"boolean\" ? sceneState.mirrored : null;\n      }\n\n      function assignAgentsToOfficeSlots(snapshot, agents, slots) {\n        const sortedAgents = sortedBossOfficeAgents(snapshot, agents);\n        const slotById = new Map(slots.map((slot) => [slot.id, slot]));\n        const assignments = [];\n        const usedSlots = new Set();\n        const remaining = [];\n\n        for (const agent of sortedAgents) {\n          const previousSlotId = previousSceneSlotId(snapshot, agent);\n          if (previousSlotId && slotById.has(previousSlotId) && !usedSlots.has(previousSlotId)) {\n            assignments.push({ slot: slotById.get(previousSlotId), agent });\n            usedSlots.add(previousSlotId);\n            continue;\n          }\n          remaining.push(agent);\n        }\n\n        const freeSlots = slots.filter((slot) => !usedSlots.has(slot.id)).sort((left, right) => left.order - right.order);\n        remaining.forEach((agent, index) => {\n          const slot = freeSlots[index];\n          if (slot) {\n            assignments.push({ slot, agent });\n          }\n        });\n\n        return assignments.sort((left, right) => left.slot.order - right.slot.order);\n      }\n\n      function assignAgentsToDeskSlots(snapshot, agents, slots) {\n        const slotById = new Map(slots.map((slot) => [slot.id, slot]));\n        const cubicles = new Map();\n        slots.forEach((slot) => {\n          const existing = cubicles.get(slot.cubicleId) || { id: slot.cubicleId, slots: [], agents: [] };\n          existing.slots.push(slot);\n          cubicles.set(slot.cubicleId, existing);\n        });\n        cubicles.forEach((cubicle) => {\n          cubicle.slots.sort((left, right) => left.order - right.order);\n        });\n\n        const slotAgents = new Map();\n        const remainingAgents = [];\n\n        for (const agent of [...agents].sort((left, right) => compareAgentsForDeskLayout(snapshot, left, right))) {\n          const previousSlotId = previousSceneSlotId(snapshot, agent);\n          const slot = previousSlotId ? slotById.get(previousSlotId) : null;\n          if (!slot) {\n            remainingAgents.push(agent);\n            continue;\n          }\n          const assigned = slotAgents.get(slot.id) || [];\n          if (assigned.length >= (slot.capacity || 1)) {\n            remainingAgents.push(agent);\n            continue;\n          }\n          assigned.push(agent);\n          slotAgents.set(slot.id, assigned);\n          cubicles.get(slot.cubicleId)?.agents.push(agent);\n        }\n\n        const roleGroups = groupAgentsByRole(remainingAgents);\n        for (const group of roleGroups) {\n          const queue = [...group.agents];\n          const preferredCubicles = [...cubicles.values()].sort((left, right) => {\n            const leftRoles = new Set(left.agents.map((agent) => agentRole(agent)));\n            const rightRoles = new Set(right.agents.map((agent) => agentRole(agent)));\n            const leftMatches = leftRoles.has(group.role) ? 2 : leftRoles.size === 0 ? 1 : 0;\n            const rightMatches = rightRoles.has(group.role) ? 2 : rightRoles.size === 0 ? 1 : 0;\n            if (rightMatches !== leftMatches) {\n              return rightMatches - leftMatches;\n            }\n            return left.slots[0].order - right.slots[0].order;\n          });\n\n          preferredCubicles.forEach((cubicle) => {\n            while (queue.length > 0) {\n              const nextSlot = cubicle.slots.find((slot) => {\n                const assigned = slotAgents.get(slot.id) || [];\n                return assigned.length < (slot.capacity || 1);\n              });\n              if (!nextSlot) {\n                break;\n              }\n              const agent = queue.shift();\n              const assigned = slotAgents.get(nextSlot.id) || [];\n              assigned.push(agent);\n              slotAgents.set(nextSlot.id, assigned);\n              cubicle.agents.push(agent);\n            }\n          });\n        }\n\n        return [...slots]\n          .filter((slot) => (slotAgents.get(slot.id) || []).length > 0)\n          .map((slot) => ({\n            slot,\n            agents: slotAgents.get(slot.id)\n              .slice(0, slot.capacity || 1)\n              .sort((left, right) => {\n                const leftMirrored = previousSceneMirrored(snapshot, left);\n                const rightMirrored = previousSceneMirrored(snapshot, right);\n                if (leftMirrored !== rightMirrored) {\n                  if (leftMirrored === null) return 1;\n                  if (rightMirrored === null) return -1;\n                  return Number(leftMirrored) - Number(rightMirrored);\n                }\n                return compareAgentsForDeskLayout(snapshot, left, right);\n              })\n          }))\n          .sort((left, right) => left.slot.order - right.slot.order);\n      }\n\n      function renderBossRelationshipLines(snapshot, roomId, roomPixelWidth, roomPixelHeight) {\n        const lineEntries = [];\n        for (const agent of snapshot.agents) {\n          if (!isBossOfficeCandidate(snapshot, agent)) {\n            continue;\n          }\n          const bossScene = sceneStateForAgent(snapshot, agent.id);\n          if (!bossScene || bossScene.roomId !== roomId) {\n            continue;\n          }\n          const childStates = childAgentsFor(snapshot, agent.id)\n            .map((child) => ({ child, sceneState: sceneStateForAgent(snapshot, child.id) }))\n            .filter((entry) => entry.sceneState && entry.sceneState.roomId === roomId);\n          if (childStates.length === 0) {\n            continue;\n          }\n          const bossFocusKey = focusAgentKey(snapshot, agent);\n          const startX = Math.round(Number(bossScene.avatarX) + Number(bossScene.avatarWidth || 18) * 0.62);\n          const startY = Math.round(Number(bossScene.avatarY) + Number(bossScene.avatarHeight || 24) * 0.46);\n          for (const entry of childStates) {\n            const childScene = entry.sceneState;\n            const endX = Math.round(Number(childScene.avatarX) + Number(childScene.avatarWidth || 18) * 0.4);\n            const endY = Math.round(Number(childScene.avatarY) + Number(childScene.avatarHeight || 24) * 0.48);\n            const controlOffset = Math.max(18, Math.round((endX - startX) * 0.35));\n            const path = \`M \${startX} \${startY} C \${startX + controlOffset} \${startY}, \${endX - controlOffset} \${endY}, \${endX} \${endY}\`;\n            lineEntries.push(\n              \`<path class=\"relationship-line\" data-focus-line=\"true\" data-focus-boss-key=\"\${escapeHtml(bossFocusKey)}\" d=\"\${path}\" />\`\n            );\n          }\n        }\n        if (lineEntries.length === 0) {\n          return \"\";\n        }\n        return \`<svg class=\"relationship-lines\" viewBox=\"0 0 \${roomPixelWidth} \${roomPixelHeight}\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><defs><marker id=\"relationship-arrow-\${escapeHtml(roomId)}\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 Z\" fill=\"rgba(255, 221, 120, 0.9)\"></path></marker></defs>\${lineEntries.join(\"\").replaceAll('class=\"relationship-line\"', \`class=\"relationship-line\" marker-end=\"url(#relationship-arrow-\${escapeHtml(roomId)})\"\`)}</svg>\`;\n      }\n\n      function avatarForAgent(agent) {\n        const roster = pixelOffice.avatars;\n        return roster[stableHash(\`\${agent.appearance.id}:\${agentRole(agent)}:\${agent.id}\`) % roster.length];\n      }\n\n      function escapeHtml(value) {\n        return String(value)\n          .replaceAll(\"&\", \"&amp;\")\n          .replaceAll(\"<\", \"&lt;\")\n          .replaceAll(\">\", \"&gt;\")\n          .replaceAll('\"', \"&quot;\");\n      }\n\n      function relativeLocation(projectRoot, location) {\n        if (!location) return \"\";\n        if (/^https?:\\/\\//.test(location)) return location;\n        if (location === projectRoot) return \".\";\n        if (location.startsWith(projectRoot + \"/\")) {\n          return location.slice(projectRoot.length + 1);\n        }\n        return location;\n      }\n\n      function wslToWindowsPath(location) {\n        const normalized = String(location || \"\").trim();\n        if (!normalized.startsWith(\"/mnt/\") || normalized.length < 6) {\n          return normalized;\n        }\n        const drive = normalized[5];\n        const lowerDrive = drive.toLowerCase();\n        if (lowerDrive < \"a\" || lowerDrive > \"z\") {\n          return normalized;\n        }\n        const rest = normalized.startsWith(\"/mnt/\" + drive + \"/\")\n          ? normalized.slice(7)\n          : normalized.length === 6\n            ? \"\"\n            : null;\n        if (rest === null) {\n          return normalized;\n        }\n        const restWindows = String(rest).replaceAll(\"/\", \"\\\\\");\n        return restWindows ? drive.toUpperCase() + \":\\\\\" + restWindows : drive.toUpperCase() + \":\\\\\";\n      }\n\n      function normalizeDisplayText(projectRoot, value) {\n        const normalized = String(value || \"\").trim();\n        if (!normalized) {\n          return \"\";\n        }\n        const isPathBoundary = (character) => {\n          if (!character) {\n            return true;\n          }\n          const code = character.charCodeAt(0);\n          return (\n            code === 32 || code === 9 || code === 10 || code === 13 ||\n            code === 34 || code === 39 || code === 40 || code === 41 ||\n            code === 44 || code === 58 || code === 59 || code === 60 ||\n            code === 62 || code === 63 || code === 91 || code === 92 ||\n            code === 93 || code === 123 || code === 124 || code === 125 ||\n            code === 33\n          );\n        };\n        let output = \"\";\n        let index = 0;\n        while (index < normalized.length) {\n          const next = normalized.indexOf(\"/mnt/\", index);\n          if (next === -1) {\n            output += normalized.slice(index);\n            break;\n          }\n          const previousChar = next > 0 ? normalized[next - 1] : \"\";\n";
+export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
+      const mapViewButton = document.getElementById("map-view-button");
+      const terminalViewButton = document.getElementById("terminal-view-button");
+      const settingsButton = document.getElementById("settings-button");
+      const settingsPopup = document.getElementById("settings-popup");
+      const debugTilesButton = document.getElementById("debug-tiles-button");
+      const textScaleInput = document.getElementById("text-scale-input");
+      const textScaleOutput = document.getElementById("text-scale-output");
+      const cursorApiKeyInput = document.getElementById("cursor-api-key-input");
+      const cursorApiKeySaveButton = document.getElementById("cursor-api-key-save-button");
+      const cursorApiKeyClearButton = document.getElementById("cursor-api-key-clear-button");
+      const cursorApiKeyStatus = document.getElementById("cursor-api-key-status");
+      const multiplayerEnabledButton = document.getElementById("multiplayer-enabled-button");
+      const multiplayerHostInput = document.getElementById("multiplayer-host-input");
+      const multiplayerRoomInput = document.getElementById("multiplayer-room-input");
+      const multiplayerNicknameInput = document.getElementById("multiplayer-nickname-input");
+      const multiplayerStatus = document.getElementById("multiplayer-status");
+      const connectionPill = document.getElementById("connection-pill");
+      const stamp = document.getElementById("stamp");
+      const heroSummary = document.getElementById("hero-summary");
+      const projectCount = document.getElementById("project-count");
+      const projectTabs = document.getElementById("project-tabs");
+      const centerTitle = document.getElementById("center-title");
+      const workspaceFocusButton = document.getElementById("workspace-focus-button");
+      const workspacePanel = document.getElementById("workspace-panel");
+      const centerContent = document.getElementById("center-content");
+      const sessionList = document.getElementById("session-list");
+      const roomsPath = document.getElementById("rooms-path");
+      applyGlobalSceneSettings();
+      syncSettingsPopup();
+      syncCursorIntegrationUi();
+      syncMultiplayerSettingsUi();
+      void refreshIntegrationSettings();
+      multiplayerPruneTimer = setInterval(pruneMultiplayerPeers, 5000);
+
+      function syncSettingsPopup() {
+        if (settingsButton instanceof HTMLButtonElement) {
+          settingsButton.classList.toggle("active", state.settingsOpen);
+          settingsButton.setAttribute("aria-expanded", state.settingsOpen ? "true" : "false");
+        }
+        if (settingsPopup instanceof HTMLElement) {
+          settingsPopup.hidden = !state.settingsOpen;
+        }
+      }
+
+      function setSettingsOpen(nextOpen) {
+        state.settingsOpen = Boolean(nextOpen);
+        syncSettingsPopup();
+      }
+
+      function cursorIntegrationStatusText() {
+        if (typeof state.integrationSettingsError === "string" && state.integrationSettingsError.length > 0) {
+          return state.integrationSettingsError;
+        }
+
+        const cursor = state.integrationSettings && state.integrationSettings.cursor
+          ? state.integrationSettings.cursor
+          : defaultIntegrationSettings().cursor;
+
+        if (state.integrationSettingsPending) {
+          return "Saving Cursor API key on this machine...";
+        }
+
+        if (cursor.source === "env") {
+          const storedSuffix = cursor.storedConfigured && cursor.storedMaskedKey
+            ? " A saved key is also present and can be cleared here."
+            : "";
+          return "Cursor API key is coming from CURSOR_API_KEY in the server process" + (cursor.maskedKey ? " (" + cursor.maskedKey + ")." : ".") + storedSuffix;
+        }
+
+        if (cursor.source === "stored") {
+          return "Saved on this machine for Agents Office" + (cursor.maskedKey ? " (" + cursor.maskedKey + ")." : ".");
+        }
+
+        return "No local Cursor API key is saved. Local Cursor sessions may still appear automatically; save a key only to include official Cursor background agents for matching repos.";
+      }
+
+      function syncCursorIntegrationUi() {
+        const cursor = state.integrationSettings && state.integrationSettings.cursor
+          ? state.integrationSettings.cursor
+          : defaultIntegrationSettings().cursor;
+        const busy = state.integrationSettingsPending === true;
+
+        if (cursorApiKeyInput instanceof HTMLInputElement) {
+          cursorApiKeyInput.disabled = busy;
+          if (cursorApiKeyInput.value.length === 0) {
+            cursorApiKeyInput.placeholder = cursor.source === "stored"
+              ? "Saved on this machine"
+              : cursor.source === "env"
+                ? "Provided by CURSOR_API_KEY"
+                : "cursor_...";
+          }
+        }
+
+        if (cursorApiKeySaveButton instanceof HTMLButtonElement) {
+          cursorApiKeySaveButton.disabled = busy;
+          cursorApiKeySaveButton.textContent = busy ? "Saving..." : "Save Key";
+        }
+
+        if (cursorApiKeyClearButton instanceof HTMLButtonElement) {
+          cursorApiKeyClearButton.disabled = busy || cursor.storedConfigured !== true;
+        }
+
+        setTextIfChanged(cursorApiKeyStatus, cursorIntegrationStatusText());
+      }
+
+      async function refreshIntegrationSettings() {
+        try {
+          const response = await fetch("/api/settings/integrations");
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          state.integrationSettings = await response.json();
+          state.integrationSettingsError = null;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.integrationSettings = defaultIntegrationSettings();
+          state.integrationSettingsError = "Cursor settings unavailable: " + message;
+        } finally {
+          state.integrationSettingsPending = false;
+          syncCursorIntegrationUi();
+        }
+      }
+
+      async function saveCursorApiKey() {
+        if (!(cursorApiKeyInput instanceof HTMLInputElement)) {
+          return;
+        }
+
+        const cursorApiKey = cursorApiKeyInput.value.trim();
+        if (!cursorApiKey) {
+          state.integrationSettingsError = "Enter a Cursor API key before saving.";
+          syncCursorIntegrationUi();
+          return;
+        }
+
+        state.integrationSettingsPending = true;
+        state.integrationSettingsError = null;
+        syncCursorIntegrationUi();
+
+        try {
+          state.integrationSettings = await postJson("/api/settings/integrations", { cursorApiKey });
+          state.integrationSettingsError = null;
+          cursorApiKeyInput.value = "";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.integrationSettingsError = "Failed to save Cursor API key: " + message;
+        } finally {
+          state.integrationSettingsPending = false;
+          syncCursorIntegrationUi();
+        }
+      }
+
+      async function clearCursorApiKey() {
+        state.integrationSettingsPending = true;
+        state.integrationSettingsError = null;
+        syncCursorIntegrationUi();
+
+        try {
+          state.integrationSettings = await postJson("/api/settings/integrations", { cursorApiKey: null });
+          state.integrationSettingsError = null;
+          if (cursorApiKeyInput instanceof HTMLInputElement) {
+            cursorApiKeyInput.value = "";
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          state.integrationSettingsError = "Failed to clear saved Cursor API key: " + message;
+        } finally {
+          state.integrationSettingsPending = false;
+          syncCursorIntegrationUi();
+        }
+      }
+
+      function syncFleetBackdrop() {
+        const towerMode = state.view === "map";
+        document.body.classList.toggle("fleet-sky-active", towerMode);
+        if (workspacePanel instanceof HTMLElement) {
+          workspacePanel.dataset.panelMode = towerMode ? "tower" : "default";
+        }
+        if (centerContent instanceof HTMLElement) {
+          centerContent.dataset.contentMode = towerMode ? "tower" : "default";
+        }
+      }
+
+      function syncSkyParallax() {
+        const scrollY = Math.max(window.scrollY || 0, document.documentElement.scrollTop || 0, document.body.scrollTop || 0);
+        document.documentElement.style.setProperty("--tower-scroll-y", Math.round(scrollY) + "px");
+      }
+
+      function syncUrl() {
+        const url = new URL(window.location.href);
+        if (state.selected === "all") url.searchParams.delete("project");
+        else url.searchParams.set("project", state.selected);
+        if (state.view === "map") url.searchParams.delete("view");
+        else url.searchParams.set("view", state.view);
+        if (state.workspaceFullscreen && state.selected !== "all") url.searchParams.set("focus", "1");
+        else url.searchParams.delete("focus");
+        url.searchParams.delete("active");
+        url.searchParams.delete("history");
+        window.history.replaceState({}, "", url);
+      }
+
+      function setSelection(nextSelection) {
+        state.selected = nextSelection;
+        if (nextSelection === "all") {
+          state.workspaceFullscreen = false;
+        }
+        syncUrl();
+        render();
+      }
+
+      function setView(nextView) {
+        state.view = nextView === "terminal" ? "terminal" : "map";
+        syncUrl();
+        render();
+      }
+
+      function canFocusWorkspace() {
+        return Boolean(state.fleet && state.selected !== "all" && currentSnapshot());
+      }
+
+      function syncWorkspaceFullscreenUi() {
+        const isVisible = canFocusWorkspace();
+        const isActive = isVisible && state.workspaceFullscreen;
+        document.body.classList.toggle("workspace-focus", isActive);
+        if (!(workspaceFocusButton instanceof HTMLButtonElement)) {
+          return;
+        }
+        workspaceFocusButton.hidden = !isVisible;
+        workspaceFocusButton.classList.toggle("active", isActive);
+        workspaceFocusButton.setAttribute("aria-pressed", isActive ? "true" : "false");
+        workspaceFocusButton.textContent = isActive ? "Close" : "[] Expand";
+        workspaceFocusButton.title = isActive
+          ? "Close workspace focus (F)"
+          : "Expand selected workspace (F)";
+      }
+
+      function setWorkspaceFullscreen(nextValue) {
+        const normalized = Boolean(nextValue) && canFocusWorkspace();
+        if (state.workspaceFullscreen === normalized) {
+          syncWorkspaceFullscreenUi();
+          return;
+        }
+        if (normalized) {
+          setSettingsOpen(false);
+        }
+        state.workspaceFullscreen = normalized;
+        lastSceneRenderToken = null;
+        syncUrl();
+        render();
+      }
+
+      function toggleWorkspaceFullscreen() {
+        if (!canFocusWorkspace()) {
+          return;
+        }
+        setWorkspaceFullscreen(!state.workspaceFullscreen);
+      }
+
+      function isTypingTarget(target) {
+        if (!(target instanceof HTMLElement)) {
+          return false;
+        }
+        if (target.isContentEditable) {
+          return true;
+        }
+        return Boolean(target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='plaintext-only']"));
+      }
+
+      function setConnection(nextConnection) {
+        state.connection = nextConnection;
+        if (!connectionPill) return;
+        connectionPill.className = \`status-pill state-\${nextConnection}\`;
+        connectionPill.textContent =
+          nextConnection === "live" ? "Live stream"
+          : nextConnection === "snapshot" ? "Snapshot mode"
+          : nextConnection === "offline" ? "Offline"
+          : nextConnection === "reconnecting" ? "Reconnecting"
+          : "Connecting";
+      }
+
+      function countsForSnapshot(snapshot) {
+        const counters = { total: 0, active: 0, waiting: 0, blocked: 0, cloud: 0 };
+        for (const agent of snapshot.agents) {
+          if (!isBusyAgent(agent)) {
+            continue;
+          }
+          counters.total += 1;
+          if (agent.state === "waiting") counters.waiting += 1;
+          else if (agent.state === "blocked") counters.blocked += 1;
+          else if (agent.state === "cloud") counters.cloud += 1;
+          else if (agent.state !== "done" && agent.state !== "idle") counters.active += 1;
+        }
+        return counters;
+      }
+
+      function isBusyAgent(agent) {
+        return agent.isCurrent === true;
+      }
+
+      function parseAgentUpdatedAt(value) {
+        const parsed = Date.parse(value || "");
+        return Number.isFinite(parsed) ? parsed : Number.NaN;
+      }
+
+      function isDeskLiveLocalState(state) {
+        return [
+          "editing",
+          "running",
+          "validating",
+          "scanning",
+          "thinking",
+          "planning",
+          "delegating",
+          "blocked"
+        ].includes(String(state || "").toLowerCase());
+      }
+
+      const TOP_LEVEL_DONE_WORKSTATION_GRACE_MS = 5000;
+      const SUBAGENT_DONE_WORKSTATION_GRACE_MS = 1200;
+      const CURRENT_LOCAL_LIVE_WORKSTATION_GRACE_MS = 8000;
+
+      function hasCurrentLocalDeskGrace(agent) {
+        const updatedAt = parseAgentUpdatedAt(agent && agent.updatedAt);
+        return agent && agent.isCurrent === true
+          && isDeskLiveLocalState(agent.state)
+          && Number.isFinite(updatedAt)
+          && Date.now() - updatedAt <= CURRENT_LOCAL_LIVE_WORKSTATION_GRACE_MS;
+      }
+
+      function hasCurrentLocalSeatCooldown(agent) {
+        const updatedAt = parseAgentUpdatedAt(agent && agent.updatedAt);
+        return agent && agent.source === "local"
+          && agent.isCurrent === true
+          && Number.isFinite(updatedAt)
+          && Date.now() - updatedAt <= CURRENT_LOCAL_LIVE_WORKSTATION_GRACE_MS;
+      }
+
+      function workstationDoneGraceMs(agent) {
+        return agent && agent.parentThreadId
+          ? SUBAGENT_DONE_WORKSTATION_GRACE_MS
+          : TOP_LEVEL_DONE_WORKSTATION_GRACE_MS;
+      }
+
+      function shouldSeatAtWorkstation(agent) {
+        if (!agent || agent.source === "cloud" || agent.source === "presence") {
+          return false;
+        }
+        if (agent.source === "local") {
+          const stoppedAt = parseAgentUpdatedAt(agent.stoppedAt);
+          if (Number.isFinite(stoppedAt)) {
+            return Date.now() - stoppedAt <= workstationDoneGraceMs(agent);
+          }
+          if (agent.statusText === "notLoaded") {
+            if (agent.state === "done") {
+              const updatedAt = parseAgentUpdatedAt(agent.updatedAt);
+              return agent.isCurrent === true
+                && Number.isFinite(updatedAt)
+                && Date.now() - updatedAt <= workstationDoneGraceMs(agent);
+            }
+            return agent.isOngoing === true || hasCurrentLocalDeskGrace(agent);
+          }
+          if (agent.statusText === "active") {
+            if (agent.state === "waiting") {
+              return false;
+            }
+            if ((agent.state === "idle" || agent.state === "done") && hasCurrentLocalSeatCooldown(agent)) {
+              return true;
+            }
+            return agent.isCurrent === true
+              && agent.state !== "idle"
+              && agent.state !== "done";
+          }
+          if (agent.state === "done") {
+            return agent.isCurrent === true;
+          }
+        }
+        if (agent.state === "waiting" || agent.state === "idle" || agent.state === "done") {
+          return false;
+        }
+        if (agent.source === "local") {
+          if (agent.isOngoing === true) {
+            return true;
+          }
+          if (agent.isCurrent !== true) {
+            return false;
+          }
+          return agent.statusText !== "notLoaded" && isDeskLiveLocalState(agent.state);
+        }
+        return agent.isCurrent === true;
+      }
+
+      function isFinishedLeadForRec(agent) {
+        return isRecentLeadCandidate(agent)
+          && !shouldSeatAtWorkstation(agent)
+          && (agent.state === "waiting" || agent.state === "idle" || agent.state === "done");
+      }
+
+      function isRecentLeadCandidate(agent) {
+        return agent.source !== "cloud"
+          && agent.source !== "presence"
+          && !agent.parentThreadId
+          && Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude");
+      }
+
+      function reservedRecentLeadSlots(snapshot) {
+        const reservations = activeRecentLeadReservations.get(snapshot.projectRoot);
+        return reservations ? reservations.size : 0;
+      }
+
+      function updateRecentLeadReservations(projects) {
+        for (const snapshot of projects) {
+          const previousVisibleIds = recentLeadDisplayMemory.get(snapshot.projectRoot) || [];
+          const activeIds = new Set(
+            snapshot.agents
+              .filter((agent) => shouldSeatAtWorkstation(agent) && isRecentLeadCandidate(agent))
+              .map((agent) => agent.id)
+          );
+          const nextReservations = new Set(
+            [...(activeRecentLeadReservations.get(snapshot.projectRoot) || new Set())]
+              .filter((agentId) => activeIds.has(agentId))
+          );
+
+          for (const agentId of previousVisibleIds) {
+            if (activeIds.has(agentId)) {
+              nextReservations.add(agentId);
+            }
+          }
+
+          if (nextReservations.size > 0) {
+            activeRecentLeadReservations.set(snapshot.projectRoot, nextReservations);
+          } else {
+            activeRecentLeadReservations.delete(snapshot.projectRoot);
+          }
+        }
+      }
+
+      function rememberVisibleRecentLeads(projects) {
+        for (const snapshot of projects) {
+          const visibleIds = snapshot.agents
+            .filter((agent) => isFinishedLeadForRec(agent))
+            .map((agent) => agent.id);
+          recentLeadDisplayMemory.set(snapshot.projectRoot, visibleIds);
+        }
+      }
+
+      function isRecentSessionCandidate(agent) {
+        return agent.source !== "cloud" && agent.source !== "presence";
+      }
+
+      function recentLeadAgents(snapshot, limit = SCENE_RECENT_LEAD_LIMIT) {
+        const activeIds = new Set(snapshot.agents.filter(shouldSeatAtWorkstation).map((agent) => agent.id));
+        const effectiveLimit = Math.max(0, limit - reservedRecentLeadSlots(snapshot));
+        return [...snapshot.agents]
+          .filter((agent) => isFinishedLeadForRec(agent) && !activeIds.has(agent.id))
+          .sort(compareAgentsByRecencyStable)
+          .slice(0, effectiveLimit);
+      }
+
+      function recentSessionAgents(snapshot, limit = SESSION_RECENT_LEAD_LIMIT) {
+        const activeIds = new Set(snapshot.agents.filter(isBusyAgent).map((agent) => agent.id));
+        return [...snapshot.agents]
+          .filter((agent) => isRecentSessionCandidate(agent) && !activeIds.has(agent.id))
+          .sort(compareAgentsByRecencyStable)
+          .slice(0, limit);
+      }
+
+      function busyCount(snapshot) {
+        return snapshot.agents.filter(isBusyAgent).length;
+      }
+
+      function notificationSubjectKey(projectRoot, agent, threadId) {
+        const explicitThreadId = typeof threadId === "string" && threadId.length > 0 ? threadId : null;
+        const agentThreadId = agent && typeof agent.threadId === "string" && agent.threadId.length > 0
+          ? agent.threadId
+          : null;
+        const subjectThreadId = explicitThreadId || agentThreadId;
+        if (subjectThreadId) {
+          return \`\${projectRoot}::thread::\${subjectThreadId}\`;
+        }
+        return \`\${projectRoot}::agent::\${agent && agent.id ? agent.id : "unknown"}\`;
+      }
+
+      function sceneAgentToken(agent) {
+        return [
+          agent.id,
+          agent.state,
+          agent.roomId || "",
+          agent.parentThreadId || "",
+          agent.isCurrent ? "1" : "0",
+          agent.appearance?.id || "",
+          agent.source,
+          agent.sourceKind || ""
+        ].join(":");
+      }
+
+      function sceneSnapshotToken(snapshot) {
+        return [
+          snapshot.projectRoot,
+          ...snapshot.agents.map(sceneAgentToken)
+        ].join("::");
+      }
+
+      function eventSnapshotToken(event) {
+        if (!event) {
+          return "";
+        }
+        return [
+          event.id || "",
+          event.threadId || "",
+          event.kind || "",
+          event.phase || "",
+          event.method || "",
+          event.createdAt || "",
+          event.itemId || "",
+          event.requestId || "",
+          event.title || "",
+          event.detail || "",
+          event.command || "",
+          event.path || ""
+        ].join(":");
+      }
+
+      function roomsSnapshotToken(rooms) {
+        if (!rooms) {
+          return "";
+        }
+        return JSON.stringify({
+          generated: rooms.generated,
+          filePath: rooms.filePath,
+          rooms: rooms.rooms
+        });
+      }
+
+      function projectSemanticToken(snapshot) {
+        return [
+          snapshot.projectRoot,
+          roomsSnapshotToken(snapshot.rooms),
+          ...snapshot.agents.map(sceneAgentToken),
+          ...((snapshot.events || []).map(eventSnapshotToken)),
+          ...((snapshot.notes || []).map((note) => String(note || "")))
+        ].join("::");
+      }
+
+      function fleetSemanticToken(fleet) {
+        if (!fleet || !Array.isArray(fleet.projects)) {
+          return "";
+        }
+        return fleet.projects.map(projectSemanticToken).join("||");
+      }
+
+      function isLiveSceneAgent(agent) {
+        if (!agent || agent.source === "cloud" || agent.source === "presence") {
+          return false;
+        }
+        return shouldSeatAtWorkstation(agent) || agent.isCurrent === true;
+      }
+
+      function viewSnapshot(snapshot, recentLeadLimit = SCENE_RECENT_LEAD_LIMIT, allProjects = null) {
+        const liveAgents = snapshot.agents.filter(isLiveSceneAgent);
+        const recentLeads = recentLeadAgents(snapshot, recentLeadLimit);
+        const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);
+        const seenAgentIds = new Set();
+        const visibleAgents = liveAgents.length > 0 || recentLeads.length > 0
+          ? [...liveAgents, ...recentLeads]
+          : fallbackAgents;
+        return {
+          ...snapshot,
+          agents: visibleAgents.filter((agent) => {
+            const agentId = String(agent && agent.id || "");
+            if (!agentId || seenAgentIds.has(agentId)) {
+              return false;
+            }
+            seenAgentIds.add(agentId);
+            return true;
+          })
+        };
+      }
+
+      function emptyProjectNeedsRecentFallback(snapshot) {
+        return Boolean(snapshot) && !snapshot.agents.some((agent) => agent.source !== "cloud" && agent.source !== "presence");
+      }
+
+      function cloneRecentFallbackAgent(sourceSnapshot, agent) {
+        const summary = normalizeDisplayText(sourceSnapshot.projectRoot, agent.detail)
+          || latestAgentMessage(agent)
+          || "[" + String(agent.state || "idle") + "]";
+        const projectPrefix = projectLabel(sourceSnapshot.projectRoot);
+        const latestMessage = latestAgentMessage(agent);
+        return {
+          ...agent,
+          isCurrent: false,
+          isOngoing: false,
+          needsUser: null,
+          detail: projectPrefix + " · " + summary,
+          latestMessage: latestMessage ? projectPrefix + " · " + latestMessage : null
+        };
+      }
+
+      function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {
+        if (!emptyProjectNeedsRecentFallback(snapshot) || !Array.isArray(allProjects) || allProjects.length === 0) {
+          return [];
+        }
+        const seenAgentIds = new Set();
+        return allProjects
+          .flatMap((project) =>
+            project.projectRoot === snapshot.projectRoot
+              ? []
+              : project.agents
+                .filter((agent) => isFinishedLeadForRec(agent))
+                .map((agent) => cloneRecentFallbackAgent(project, agent))
+          )
+          .sort(compareAgentsByRecencyStable)
+          .filter((agent) => {
+            const agentId = String(agent && agent.id || "");
+            if (!agentId || seenAgentIds.has(agentId)) {
+              return false;
+            }
+            seenAgentIds.add(agentId);
+            return true;
+          })
+          .slice(0, Math.max(0, limit));
+      }
+
+      function viewSessionSnapshot(snapshot, recentSessionLimit = SESSION_RECENT_LEAD_LIMIT, allProjects = null) {
+        const activeAgents = snapshot.agents.filter(isBusyAgent);
+        const recentAgents = recentSessionAgents(snapshot, recentSessionLimit);
+        const fallbackAgents = recentFallbackAgentsForEmptyProject(
+          snapshot,
+          allProjects,
+          Math.min(SCENE_RECENT_LEAD_LIMIT, recentSessionLimit)
+        );
+        return {
+          ...snapshot,
+          agents: activeAgents.length > 0 || recentAgents.length > 0
+            ? [...activeAgents, ...recentAgents]
+            : fallbackAgents
+        };
+      }
+
+      function visibleProjects(fleet) {
+        return fleet.projects;
+      }
+
+      function fleetCounts(fleet) {
+        return fleet.projects.reduce((acc, snapshot) => {
+          const next = countsForSnapshot(snapshot);
+          acc.total += next.total;
+          acc.active += next.active;
+          acc.waiting += next.waiting;
+          acc.blocked += next.blocked;
+          acc.cloud += next.cloud;
+          return acc;
+        }, { total: 0, active: 0, waiting: 0, blocked: 0, cloud: 0 });
+      }
+
+      function stableHash(input) {
+        let hash = 2166136261;
+        for (const char of String(input)) {
+          hash ^= char.charCodeAt(0);
+          hash = Math.imul(hash, 16777619);
+        }
+        return Math.abs(hash >>> 0);
+      }
+
+      function agentRole(agent) {
+        if (agent.role) {
+          return String(agent.role).toLowerCase();
+        }
+        if (agent.source === "cloud") {
+          return "cloud";
+        }
+        if (agent.source === "claude") {
+          return "claude";
+        }
+        if (agent.source === "cursor") {
+          return "cursor";
+        }
+        if (agent.source === "openclaw") {
+          return "openclaw";
+        }
+        return "default";
+      }
+
+      function titleCaseWords(value) {
+        return String(value)
+          .split(/\\s+/)
+          .filter(Boolean)
+          .map((word) => word[0] ? word[0].toUpperCase() + word.slice(1) : word)
+          .join(" ");
+      }
+
+      function pluralizeWord(word, count) {
+        if (count === 1) {
+          return word;
+        }
+        if (/[^aeiou]y$/i.test(word)) {
+          return word.slice(0, -1) + "ies";
+        }
+        if (/(s|x|z|ch|sh)$/i.test(word)) {
+          return word + "es";
+        }
+        return word + "s";
+      }
+
+      function pluralizePhrase(phrase, count) {
+        if (count === 1) {
+          return phrase;
+        }
+        const words = String(phrase).split(/\\s+/).filter(Boolean);
+        if (words.length === 0) {
+          return phrase;
+        }
+        words[words.length - 1] = pluralizeWord(words[words.length - 1], count);
+        return words.join(" ");
+      }
+
+      function agentRoleLabel(agent) {
+        return titleCaseWords(agentRole(agent).replace(/[_-]+/g, " "));
+      }
+
+      function childAgentsFor(snapshot, parentThreadId) {
+        return snapshot.agents.filter((agent) => agent.parentThreadId === parentThreadId);
+      }
+
+      function liveChildAgentsFor(snapshot, parentThreadId) {
+        return childAgentsFor(snapshot, parentThreadId).filter((agent) => isBusyAgent(agent));
+      }
+
+      function isLeadSession(snapshot, agent) {
+        return agent.source !== "cloud"
+          && !agent.parentThreadId
+          && (Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude") || childAgentsFor(snapshot, agent.id).length > 0);
+      }
+
+      function agentRankLabel(snapshot, agent) {
+        if (isLeadSession(snapshot, agent)) {
+          return "mini-boss";
+        }
+        if (agent.parentThreadId) {
+          return "subagent";
+        }
+        return agent.sourceKind || agentRole(agent);
+      }
+
+      function parentLabelFor(snapshot, agent) {
+        if (!agent.parentThreadId) {
+          return null;
+        }
+        return snapshot.agents.find((candidate) => candidate.id === agent.parentThreadId)?.label ?? null;
+      }
+
+      function focusAgentKey(snapshot, agent) {
+        return agentKey(snapshot.projectRoot, agent);
+      }
+
+      function collectFocusedSessionKeys(snapshot, agent) {
+        const queue = [agent.id];
+        const visited = new Set(queue);
+        const keys = new Set([focusAgentKey(snapshot, agent)]);
+        while (queue.length > 0) {
+          const currentId = queue.shift();
+          for (const candidate of snapshot.agents) {
+            if (candidate.parentThreadId !== currentId || visited.has(candidate.id)) {
+              continue;
+            }
+            visited.add(candidate.id);
+            queue.push(candidate.id);
+            keys.add(focusAgentKey(snapshot, candidate));
+          }
+        }
+        return [...keys];
+      }
+
+      function focusWrapperAttrs(snapshot, agent) {
+        if (!agent) {
+          return "";
+        }
+        return \` data-focus-agent="true" data-focus-key="\${escapeHtml(focusAgentKey(snapshot, agent))}" data-focus-keys="\${escapeHtml(JSON.stringify(collectFocusedSessionKeys(snapshot, agent)))}"\`;
+      }
+
+      function stationRoleLabel(role, count) {
+        const normalized = String(role || "default").trim().toLowerCase().replace(/[_-]+/g, " ");
+        const base =
+          normalized === "default" ? "generalist"
+          : normalized === "cloud" ? "cloud operator"
+          : normalized;
+        return titleCaseWords(pluralizePhrase(base, count));
+      }
+
+      function groupAgentsByRole(agents) {
+        const buckets = new Map();
+        for (const agent of agents) {
+          const role = agentRole(agent);
+          const list = buckets.get(role) || [];
+          list.push(agent);
+          buckets.set(role, list);
+        }
+
+        return [...buckets.entries()]
+          .map(([role, roleAgents]) => ({
+            role,
+            agents: [...roleAgents].sort(compareAgentsByRecencyStable)
+          }))
+          .sort((left, right) => {
+            if (right.agents.length !== left.agents.length) {
+              return right.agents.length - left.agents.length;
+            }
+            return stationRoleLabel(left.role, left.agents.length)
+              .localeCompare(stationRoleLabel(right.role, right.agents.length));
+          });
+      }
+
+      function compareAgentsForDeskLayout(snapshot, left, right) {
+        const leadDelta = Number(isLeadSession(snapshot, right)) - Number(isLeadSession(snapshot, left));
+        if (leadDelta !== 0) {
+          return leadDelta;
+        }
+
+        const depthDelta = left.depth - right.depth;
+        if (depthDelta !== 0) {
+          return depthDelta;
+        }
+
+        const parentDelta = String(left.parentThreadId || "").localeCompare(String(right.parentThreadId || ""));
+        if (parentDelta !== 0) {
+          return parentDelta;
+        }
+
+        const roleDelta = agentRole(left).localeCompare(agentRole(right));
+        if (roleDelta !== 0) {
+          return roleDelta;
+        }
+
+        const labelDelta = String(left.label || "").localeCompare(String(right.label || ""));
+        if (labelDelta !== 0) {
+          return labelDelta;
+        }
+
+        return String(left.id || "").localeCompare(String(right.id || ""));
+      }
+
+      function compareAgentsByRecencyStable(left, right) {
+        const updatedAtDelta = String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+        if (updatedAtDelta !== 0) {
+          return updatedAtDelta;
+        }
+        return String(left.id || "").localeCompare(String(right.id || ""));
+      }
+
+      function roleTone(role) {
+        const normalized = String(role || "default").toLowerCase();
+        switch (normalized) {
+          case "boss":
+            return "#ffcf4d";
+          case "worker":
+            return "#4bd69f";
+          case "explorer":
+            return "#f5b74f";
+          case "cloud":
+            return "#98d8ff";
+          case "claude":
+            return "#ffab91";
+          case "cursor":
+            return "#9fd6a4";
+          case "openclaw":
+            return "#7ad0b3";
+          case "default":
+            return "#f2ead7";
+          default:
+            if (normalized.includes("design") || normalized.includes("copy") || normalized.includes("writer")) {
+              return "#ff9a7a";
+            }
+            if (normalized.includes("map") || normalized.includes("research") || normalized.includes("docs")) {
+              return "#8cd5ff";
+            }
+            if (normalized.includes("review") || normalized.includes("qa")) {
+              return "#ffd479";
+            }
+            return "#d7b7ff";
+        }
+      }
+
+      function isBossOfficeCandidate(snapshot, agent) {
+        return isLeadSession(snapshot, agent) && liveChildAgentsFor(snapshot, agent.id).length > 1;
+      }
+
+      function sortedBossOfficeAgents(snapshot, agents) {
+        return [...agents].sort((left, right) => {
+          const childDelta = liveChildAgentsFor(snapshot, right.id).length - liveChildAgentsFor(snapshot, left.id).length;
+          if (childDelta !== 0) {
+            return childDelta;
+          }
+          return compareAgentsForDeskLayout(snapshot, left, right);
+        });
+      }
+
+      function previousSceneSlotId(snapshot, agent) {
+        const sceneState = sceneStateForAgent(snapshot, agent.id);
+        return sceneState && sceneState.slotId ? String(sceneState.slotId) : null;
+      }
+
+      function previousSceneMirrored(snapshot, agent) {
+        const sceneState = sceneStateForAgent(snapshot, agent.id);
+        return sceneState && typeof sceneState.mirrored === "boolean" ? sceneState.mirrored : null;
+      }
+
+      function assignAgentsToOfficeSlots(snapshot, agents, slots) {
+        const sortedAgents = sortedBossOfficeAgents(snapshot, agents);
+        const slotById = new Map(slots.map((slot) => [slot.id, slot]));
+        const assignments = [];
+        const usedSlots = new Set();
+        const remaining = [];
+
+        for (const agent of sortedAgents) {
+          const previousSlotId = previousSceneSlotId(snapshot, agent);
+          if (previousSlotId && slotById.has(previousSlotId) && !usedSlots.has(previousSlotId)) {
+            assignments.push({ slot: slotById.get(previousSlotId), agent });
+            usedSlots.add(previousSlotId);
+            continue;
+          }
+          remaining.push(agent);
+        }
+
+        const freeSlots = slots.filter((slot) => !usedSlots.has(slot.id)).sort((left, right) => left.order - right.order);
+        remaining.forEach((agent, index) => {
+          const slot = freeSlots[index];
+          if (slot) {
+            assignments.push({ slot, agent });
+          }
+        });
+
+        return assignments.sort((left, right) => left.slot.order - right.slot.order);
+      }
+
+      function assignAgentsToDeskSlots(snapshot, agents, slots) {
+        const slotById = new Map(slots.map((slot) => [slot.id, slot]));
+        const cubicles = new Map();
+        slots.forEach((slot) => {
+          const existing = cubicles.get(slot.cubicleId) || { id: slot.cubicleId, slots: [], agents: [] };
+          existing.slots.push(slot);
+          cubicles.set(slot.cubicleId, existing);
+        });
+        cubicles.forEach((cubicle) => {
+          cubicle.slots.sort((left, right) => left.order - right.order);
+        });
+
+        const slotAgents = new Map();
+        const remainingAgents = [];
+
+        for (const agent of [...agents].sort((left, right) => compareAgentsForDeskLayout(snapshot, left, right))) {
+          const previousSlotId = previousSceneSlotId(snapshot, agent);
+          const slot = previousSlotId ? slotById.get(previousSlotId) : null;
+          if (!slot) {
+            remainingAgents.push(agent);
+            continue;
+          }
+          const assigned = slotAgents.get(slot.id) || [];
+          if (assigned.length >= (slot.capacity || 1)) {
+            remainingAgents.push(agent);
+            continue;
+          }
+          assigned.push(agent);
+          slotAgents.set(slot.id, assigned);
+          cubicles.get(slot.cubicleId)?.agents.push(agent);
+        }
+
+        const roleGroups = groupAgentsByRole(remainingAgents);
+        for (const group of roleGroups) {
+          const queue = [...group.agents];
+          const preferredCubicles = [...cubicles.values()].sort((left, right) => {
+            const leftRoles = new Set(left.agents.map((agent) => agentRole(agent)));
+            const rightRoles = new Set(right.agents.map((agent) => agentRole(agent)));
+            const leftMatches = leftRoles.has(group.role) ? 2 : leftRoles.size === 0 ? 1 : 0;
+            const rightMatches = rightRoles.has(group.role) ? 2 : rightRoles.size === 0 ? 1 : 0;
+            if (rightMatches !== leftMatches) {
+              return rightMatches - leftMatches;
+            }
+            return left.slots[0].order - right.slots[0].order;
+          });
+
+          preferredCubicles.forEach((cubicle) => {
+            while (queue.length > 0) {
+              const nextSlot = cubicle.slots.find((slot) => {
+                const assigned = slotAgents.get(slot.id) || [];
+                return assigned.length < (slot.capacity || 1);
+              });
+              if (!nextSlot) {
+                break;
+              }
+              const agent = queue.shift();
+              const assigned = slotAgents.get(nextSlot.id) || [];
+              assigned.push(agent);
+              slotAgents.set(nextSlot.id, assigned);
+              cubicle.agents.push(agent);
+            }
+          });
+        }
+
+        return [...slots]
+          .filter((slot) => (slotAgents.get(slot.id) || []).length > 0)
+          .map((slot) => ({
+            slot,
+            agents: slotAgents.get(slot.id)
+              .slice(0, slot.capacity || 1)
+              .sort((left, right) => {
+                const leftMirrored = previousSceneMirrored(snapshot, left);
+                const rightMirrored = previousSceneMirrored(snapshot, right);
+                if (leftMirrored !== rightMirrored) {
+                  if (leftMirrored === null) return 1;
+                  if (rightMirrored === null) return -1;
+                  return Number(leftMirrored) - Number(rightMirrored);
+                }
+                return compareAgentsForDeskLayout(snapshot, left, right);
+              })
+          }))
+          .sort((left, right) => left.slot.order - right.slot.order);
+      }
+
+      function renderBossRelationshipLines(snapshot, roomId, roomPixelWidth, roomPixelHeight) {
+        const lineEntries = [];
+        for (const agent of snapshot.agents) {
+          if (!isBossOfficeCandidate(snapshot, agent)) {
+            continue;
+          }
+          const bossScene = sceneStateForAgent(snapshot, agent.id);
+          if (!bossScene || bossScene.roomId !== roomId) {
+            continue;
+          }
+          const childStates = childAgentsFor(snapshot, agent.id)
+            .map((child) => ({ child, sceneState: sceneStateForAgent(snapshot, child.id) }))
+            .filter((entry) => entry.sceneState && entry.sceneState.roomId === roomId);
+          if (childStates.length === 0) {
+            continue;
+          }
+          const bossFocusKey = focusAgentKey(snapshot, agent);
+          const startX = Math.round(Number(bossScene.avatarX) + Number(bossScene.avatarWidth || 18) * 0.62);
+          const startY = Math.round(Number(bossScene.avatarY) + Number(bossScene.avatarHeight || 24) * 0.46);
+          for (const entry of childStates) {
+            const childScene = entry.sceneState;
+            const endX = Math.round(Number(childScene.avatarX) + Number(childScene.avatarWidth || 18) * 0.4);
+            const endY = Math.round(Number(childScene.avatarY) + Number(childScene.avatarHeight || 24) * 0.48);
+            const controlOffset = Math.max(18, Math.round((endX - startX) * 0.35));
+            const path = \`M \${startX} \${startY} C \${startX + controlOffset} \${startY}, \${endX - controlOffset} \${endY}, \${endX} \${endY}\`;
+            lineEntries.push(
+              \`<path class="relationship-line" data-focus-line="true" data-focus-boss-key="\${escapeHtml(bossFocusKey)}" d="\${path}" />\`
+            );
+          }
+        }
+        if (lineEntries.length === 0) {
+          return "";
+        }
+        return \`<svg class="relationship-lines" viewBox="0 0 \${roomPixelWidth} \${roomPixelHeight}" preserveAspectRatio="none" aria-hidden="true"><defs><marker id="relationship-arrow-\${escapeHtml(roomId)}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="rgba(255, 221, 120, 0.9)"></path></marker></defs>\${lineEntries.join("").replaceAll('class="relationship-line"', \`class="relationship-line" marker-end="url(#relationship-arrow-\${escapeHtml(roomId)})"\`)}</svg>\`;
+      }
+
+      function avatarForAgent(agent) {
+        const roster = pixelOffice.avatars;
+        return roster[stableHash(\`\${agent.appearance.id}:\${agentRole(agent)}:\${agent.id}\`) % roster.length];
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function relativeLocation(projectRoot, location) {
+        if (!location) return "";
+        if (/^https?:\\/\\//.test(location)) return location;
+        if (location === projectRoot) return ".";
+        if (location.startsWith(projectRoot + "/")) {
+          return location.slice(projectRoot.length + 1);
+        }
+        return location;
+      }
+
+      function wslToWindowsPath(location) {
+        const normalized = String(location || "").trim();
+        if (!normalized.startsWith("/mnt/") || normalized.length < 6) {
+          return normalized;
+        }
+        const drive = normalized[5];
+        const lowerDrive = drive.toLowerCase();
+        if (lowerDrive < "a" || lowerDrive > "z") {
+          return normalized;
+        }
+        const rest = normalized.startsWith("/mnt/" + drive + "/")
+          ? normalized.slice(7)
+          : normalized.length === 6
+            ? ""
+            : null;
+        if (rest === null) {
+          return normalized;
+        }
+        const restWindows = String(rest).replaceAll("/", "\\\\");
+        return restWindows ? drive.toUpperCase() + ":\\\\" + restWindows : drive.toUpperCase() + ":\\\\";
+      }
+
+      function stripDisplayMarkdown(value) {
+        return String(value || "")
+          .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, "$1")
+          .replace(/(^|[\\s(>])(\\*\\*|__)(\\S(?:[\\s\\S]*?\\S)?)\\2(?=[\\s).,!?:;]|$)/g, "$1$3")
+          .replace(/(^|[\\s(>])(\\*|_)(\\S(?:[\\s\\S]*?\\S)?)\\2(?=[\\s).,!?:;]|$)/g, "$1$3")
+          .split(String.fromCharCode(96)).join("")
+          .replace(/^#{1,6}\\s+/gm, "")
+          .replace(/[ \\t]+/g, " ")
+          .trim();
+      }
+
+      function normalizeDisplayText(projectRoot, value) {
+        const normalized = String(value || "").trim();
+        if (!normalized) {
+          return "";
+        }
+        const plainText = stripDisplayMarkdown(normalized);
+        if (!plainText) {
+          return "";
+        }
+        const isPathBoundary = (character) => {
+          if (!character) {
+            return true;
+          }
+          const code = character.charCodeAt(0);
+          return (
+            code === 32 || code === 9 || code === 10 || code === 13 ||
+            code === 34 || code === 39 || code === 40 || code === 41 ||
+            code === 44 || code === 58 || code === 59 || code === 60 ||
+            code === 62 || code === 63 || code === 91 || code === 92 ||
+            code === 93 || code === 123 || code === 124 || code === 125 ||
+            code === 33
+          );
+        };
+        let output = "";
+        let index = 0;
+        while (index < plainText.length) {
+          const next = plainText.indexOf("/mnt/", index);
+          if (next === -1) {
+            output += plainText.slice(index);
+            break;
+          }
+          const previousChar = next > 0 ? plainText[next - 1] : "";
+`;

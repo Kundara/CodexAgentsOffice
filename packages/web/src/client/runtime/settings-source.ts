@@ -1,1 +1,363 @@
-export const CLIENT_RUNTIME_SETTINGS_SOURCE = "      if (screenshotMode) {\n        document.body.classList.add(\"snapshot-mode\");\n      }\n      const state = {\n        fleet: null,\n        localFleet: null,\n        selected: initialProject,\n        view: initialView === \"terminal\" ? \"terminal\" : \"map\",\n        workspaceFullscreen: initialWorkspaceFullscreen,\n        settingsOpen: false,\n        activeOnly: initialActiveOnly,\n        connection: screenshotMode ? \"snapshot\" : \"connecting\",\n        focusedSessionKeys: [],\n        globalSceneSettings: loadGlobalSceneSettings(),\n        furnitureLayoutOverrides: loadFurnitureLayoutOverrides(),\n        integrationSettings: defaultIntegrationSettings(),\n        integrationSettingsPending: false,\n        integrationSettingsError: null,\n        multiplayerSettings: loadMultiplayerSettings(),\n        multiplayerStatus: {\n          state: \"disabled\",\n          detail: \"Shared room sync is off.\"\n        }\n      };\n      let furnitureDragState = null;\n      let events = null;\n      const liveAgentMemory = new Map();\n      let renderedAgentSceneState = new Map();\n      let sceneStateDraft = null;\n      let enteringAgentKeys = new Set();\n      let departingAgents = [];\n      let notifications = [];\n      let notificationPruneTimer = null;\n      let workstationEffectPruneTimer = null;\n      let toastPreviewRun = 0;\n      let toastPreviewTimerIds = [];\n      const workstationEffects = new Map();\n      const seenNotificationKeys = new Set();\n      const recentNotificationTimes = new Map();\n      const recentNotificationFingerprintTimes = new Map();\n      const recentToastLineTimes = new Map();\n      const loadedOfficeAssetUrls = new Set();\n      const loadedOfficeAssetImages = new Map();\n      const officeSceneRenderers = new Map();\n      const NOTIFICATION_TTL_MS = 2400;\n      const MESSAGE_NOTIFICATION_TTL_MS = 4600;\n      const TEXT_MESSAGE_NOTIFICATION_EXTRA_TTL_MS = 1000;\n      const TOAST_FLOAT_ANIMATION_MS = 3300;\n      const TEXT_MESSAGE_TOAST_FLOAT_ANIMATION_MS = 4300;\n      const COMMAND_NOTIFICATION_BASE_TTL_MS = 2600;\n      const COMMAND_NOTIFICATION_LINE_TTL_MS = 1200;\n      const FILE_CHANGE_COMPUTER_FX_MS = 330;\n      const NOTIFICATION_DEDUPE_WINDOW_MS = 1000;\n      const NOTIFICATION_FINGERPRINT_DEDUPE_MS = 4000;\n      const TOAST_LINE_DEDUPE_MS = 45000;\n      const NOTIFICATION_PRIORITY_DEFAULT = 0;\n      const NOTIFICATION_PRIORITY_MESSAGE = 2;\n      const SCENE_RECENT_LEAD_LIMIT = 4;\n      const SESSION_RECENT_LEAD_LIMIT = 10;\n      const RESTING_DORMANT_MS = 15 * 60 * 1000;\n      const DEPARTING_AGENT_TTL_MS = 520;\n      let lastSceneRenderToken = null;\n      let lastFleetSemanticToken = null;\n      const recentLeadDisplayMemory = new Map();\n      const activeRecentLeadReservations = new Map();\n      const recSlotMemory = new Map();\n\n      const projectMetaByRoot = new Map(configuredProjects.map((project) => [project.root, project]));\n      function projectInfo(projectRoot) {\n        if (state.fleet && Array.isArray(state.fleet.projects)) {\n          const liveProject = state.fleet.projects.find((project) => project.projectRoot === projectRoot);\n          if (liveProject && liveProject.projectLabel) {\n            return { root: projectRoot, label: liveProject.projectLabel };\n          }\n        }\n        return projectMetaByRoot.get(projectRoot) || {\n          root: projectRoot,\n          label: projectRoot.split(/[\\\\/]/).filter(Boolean).pop() || projectRoot\n        };\n      }\n\n      function projectLabel(projectRoot) {\n        return projectInfo(projectRoot).label;\n      }\n\n      function stableSceneSlotAssignments(projectRoot, category, agents) {\n        const memoryKey = String(projectRoot) + \"::\" + String(category);\n        const previous = recSlotMemory.get(memoryKey) || new Map();\n        const next = new Map();\n        const assignments = [];\n        const agentById = new Map(agents.map((agent) => [agent.id, agent]));\n        const usedIndexes = new Set();\n\n        for (const [agentId, slotIndex] of previous.entries()) {\n          const agent = agentById.get(agentId);\n          if (!agent || !Number.isFinite(slotIndex) || usedIndexes.has(slotIndex)) {\n            continue;\n          }\n          next.set(agentId, slotIndex);\n          usedIndexes.add(slotIndex);\n          assignments.push({ agent, slotIndex });\n        }\n\n        let nextSlotIndex = 0;\n        for (const agent of agents) {\n          if (next.has(agent.id)) {\n            continue;\n          }\n          while (usedIndexes.has(nextSlotIndex)) {\n            nextSlotIndex += 1;\n          }\n          next.set(agent.id, nextSlotIndex);\n          usedIndexes.add(nextSlotIndex);\n          assignments.push({ agent, slotIndex: nextSlotIndex });\n          nextSlotIndex += 1;\n        }\n\n        recSlotMemory.set(memoryKey, next);\n        return assignments.sort((left, right) => left.slotIndex - right.slotIndex);\n      }\n\n      function agentKey(projectRoot, agent) {\n        return \`\${projectRoot}::\${agent.id}\`;\n      }\n\n      function formatSceneTextScale(value) {\n        return clampSceneTextScale(Number(value)).toFixed(2) + \"x\";\n      }\n\n      function loadGlobalSceneSettings() {\n        try {\n          const raw = window.localStorage.getItem(sceneSettingsStorageKey);\n          if (!raw) {\n            return { ...defaultGlobalSceneSettings };\n          }\n          const parsed = JSON.parse(raw);\n          return {\n            textScale: clampSceneTextScale(Number(parsed && parsed.textScale)),\n            debugTiles: Boolean(parsed && parsed.debugTiles)\n          };\n        } catch {\n          return { ...defaultGlobalSceneSettings };\n        }\n      }\n\n      function saveGlobalSceneSettings() {\n        try {\n          window.localStorage.setItem(sceneSettingsStorageKey, JSON.stringify(state.globalSceneSettings));\n        } catch {\n          // Ignore storage failures; runtime styling can still update in-memory.\n        }\n      }\n\n      function loadFurnitureLayoutOverrides() {\n        try {\n          const raw = window.localStorage.getItem(furnitureLayoutStorageKey);\n          if (!raw) {\n            return {};\n          }\n          const parsed = JSON.parse(raw);\n          return parsed && typeof parsed === \"object\" ? parsed : {};\n        } catch {\n          return {};\n        }\n      }\n\n      function saveFurnitureLayoutOverrides() {\n        try {\n          window.localStorage.setItem(furnitureLayoutStorageKey, JSON.stringify(state.furnitureLayoutOverrides || {}));\n        } catch {}\n      }\n\n      function furnitureColumnOverride(projectRoot, roomId, furnitureId, fallbackColumn) {\n        return Number(\n          state.furnitureLayoutOverrides?.[projectRoot]?.[roomId]?.[furnitureId]\n        ) || fallbackColumn;\n      }\n\n      function setFurnitureColumnOverride(projectRoot, roomId, furnitureId, column) {\n        state.furnitureLayoutOverrides = {\n          ...state.furnitureLayoutOverrides,\n          [projectRoot]: {\n            ...(state.furnitureLayoutOverrides?.[projectRoot] || {}),\n            [roomId]: {\n              ...(state.furnitureLayoutOverrides?.[projectRoot]?.[roomId] || {}),\n              [furnitureId]: column\n            }\n          }\n        };\n        saveFurnitureLayoutOverrides();\n      }\n\n      function applyGlobalSceneSettings() {\n        const textScale = clampSceneTextScale(Number(state.globalSceneSettings && state.globalSceneSettings.textScale));\n        const debugTiles = Boolean(state.globalSceneSettings && state.globalSceneSettings.debugTiles);\n        state.globalSceneSettings = { textScale, debugTiles };\n        document.documentElement.style.setProperty(\"--ui-text-scale\", String(textScale));\n        if (textScaleInput instanceof HTMLInputElement) {\n          textScaleInput.value = String(textScale);\n        }\n        syncTextScalePreview(textScale);\n        if (debugTilesButton instanceof HTMLButtonElement) {\n          debugTilesButton.classList.toggle(\"active\", debugTiles);\n          debugTilesButton.setAttribute(\"aria-pressed\", debugTiles ? \"true\" : \"false\");\n        }\n      }\n\n      function syncTextScalePreview(value) {\n        if (!(textScaleOutput instanceof HTMLOutputElement)) {\n          return;\n        }\n        const nextText = formatSceneTextScale(value);\n        textScaleOutput.value = nextText;\n        textScaleOutput.textContent = nextText;\n      }\n\n      function commitTextScale(value) {\n        state.globalSceneSettings = {\n          ...state.globalSceneSettings,\n          textScale: clampSceneTextScale(Number(value))\n        };\n        applyGlobalSceneSettings();\n        saveGlobalSceneSettings();\n        fitScenes();\n        renderNotifications();\n      }\n\n      function rememberAgentSceneState(snapshot, agent, sceneState) {\n        if (!agent || !sceneState) {\n          return;\n        }\n        const target = sceneStateDraft || renderedAgentSceneState;\n        target.set(agentKey(snapshot.projectRoot, agent), sceneState);\n      }\n\n      function triggerWorkstationFileChangeEffect(entry) {\n        if (!entry || !entry.isFileChange || !entry.key) {\n          return;\n        }\n        const previous = workstationEffects.get(entry.key);\n        const token = Number.isFinite(previous?.token) ? Number(previous.token) + 1 : 1;\n        workstationEffects.set(entry.key, {\n          token,\n          expiresAt: Date.now() + FILE_CHANGE_COMPUTER_FX_MS\n        });\n        scheduleWorkstationEffectPrune();\n      }\n\n      function pruneWorkstationEffects() {\n        const now = Date.now();\n        workstationEffects.forEach((effect, key) => {\n          if (!effect || !Number.isFinite(effect.expiresAt) || effect.expiresAt <= now) {\n            workstationEffects.delete(key);\n          }\n        });\n        scheduleWorkstationEffectPrune();\n      }\n\n      function scheduleWorkstationEffectPrune() {\n        if (workstationEffectPruneTimer) {\n          clearTimeout(workstationEffectPruneTimer);\n          workstationEffectPruneTimer = null;\n        }\n        if (workstationEffects.size === 0) {\n          syncWorkstationEffects();\n          return;\n        }\n        const now = Date.now();\n        const nextExpiry = Math.min(...Array.from(workstationEffects.values()).map((effect) => Number(effect.expiresAt) || now));\n        const delay = Math.max(16, nextExpiry - now);\n        workstationEffectPruneTimer = setTimeout(() => {\n          workstationEffectPruneTimer = null;\n          pruneWorkstationEffects();\n          syncWorkstationEffects();\n        }, delay);\n        syncWorkstationEffects();\n      }\n\n      function syncWorkstationEffects() {\n        const now = Date.now();\n        document.querySelectorAll(\"[data-workstation-computer]\").forEach((element) => {\n          if (!(element instanceof HTMLElement)) {\n            return;\n          }\n          const key = element.dataset.workstationComputer || \"\";\n          const effect = workstationEffects.get(key);\n          const isActive = Boolean(effect && Number(effect.expiresAt) > now);\n          const token = isActive ? String(effect.token) : \"\";\n          if (!isActive) {\n            element.classList.remove(\"file-change-hit\");\n            delete element.dataset.workstationFxToken;\n            return;\n          }\n          if (element.dataset.workstationFxToken !== token) {\n            element.classList.remove(\"file-change-hit\");\n            void element.offsetWidth;\n            element.dataset.workstationFxToken = token;\n          }\n          if (!element.classList.contains(\"file-change-hit\")) {\n            element.classList.add(\"file-change-hit\");\n          }\n        });\n      }\n\n      function roomEntranceLayout(roomPixelWidth, compact, floorTop = null) {\n        const doorScale = compact ? 1.42 : 1.7;\n        const clockScale = compact ? 0.92 : 1.08;\n        const doorHeight = pixelOffice.props.boothDoor.h * doorScale;\n        const centerDoorY = Number.isFinite(floorTop)\n          ? Math.round(floorTop - doorHeight)\n          : (compact ? 26 : 34);\n        return {\n          doorScale,\n          clockScale,\n          centerDoorX: Math.round(roomPixelWidth / 2 - pixelOffice.props.boothDoor.w * doorScale),\n          centerDoorY,\n          entryX: Math.round(roomPixelWidth / 2),\n          entryY: Math.round(centerDoorY + doorHeight + (compact ? 2 : 3))\n        };\n      }\n\n      function agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight) {\n        const startX = Math.round(entrance.entryX - avatarWidth / 2);\n        const startY = Math.round(entrance.entryY - avatarHeight + 2);\n        return {\n          pathX: startX - targetX,\n          pathY: startY - targetY\n        };\n      }\n\n      function sceneStateForAgent(snapshot, agentId) {\n        if (!snapshot || !agentId) {\n          return null;\n        }\n        const key = snapshot.projectRoot + \"::\" + agentId;\n        return (sceneStateDraft && sceneStateDraft.get(key))\n          || renderedAgentSceneState.get(key)\n          || null;\n      }\n\n      function enteringMotionState(snapshot, agent, entrance, targetX, targetY, avatarWidth, avatarHeight) {\n        return {\n          mode: \"entering\",\n          path: entrance\n            ? agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight)\n            : { pathX: 0, pathY: 0 }\n        };\n      }\n\n      function motionShellClass(mode) {\n        return mode ? \`office-avatar-shell \${mode}\` : \"office-avatar-shell\";\n      }\n\n";
+export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
+        document.body.classList.add("snapshot-mode");
+      }
+      const state = {
+        fleet: null,
+        localFleet: null,
+        selected: initialProject,
+        view: initialView === "terminal" ? "terminal" : "map",
+        workspaceFullscreen: initialWorkspaceFullscreen,
+        settingsOpen: false,
+        activeOnly: initialActiveOnly,
+        connection: screenshotMode ? "snapshot" : "connecting",
+        focusedSessionKeys: [],
+        globalSceneSettings: loadGlobalSceneSettings(),
+        furnitureLayoutOverrides: loadFurnitureLayoutOverrides(),
+        integrationSettings: defaultIntegrationSettings(),
+        integrationSettingsPending: false,
+        integrationSettingsError: null,
+        multiplayerSettings: loadMultiplayerSettings(),
+        multiplayerStatus: {
+          state: "disabled",
+          detail: "Shared room sync is off."
+        }
+      };
+      let furnitureDragState = null;
+      let events = null;
+      const liveAgentMemory = new Map();
+      let renderedAgentSceneState = new Map();
+      let sceneStateDraft = null;
+      let enteringAgentKeys = new Set();
+      let departingAgents = [];
+      let notifications = [];
+      let notificationPruneTimer = null;
+      let workstationEffectPruneTimer = null;
+      let toastPreviewRun = 0;
+      let toastPreviewTimerIds = [];
+      const workstationEffects = new Map();
+      const seenNotificationKeys = new Set();
+      const recentNotificationTimes = new Map();
+      const recentNotificationFingerprintTimes = new Map();
+      const recentToastLineTimes = new Map();
+      const loadedOfficeAssetUrls = new Set();
+      const loadedOfficeAssetImages = new Map();
+      const officeSceneRenderers = new Map();
+      const NOTIFICATION_TTL_MS = 2400;
+      const MESSAGE_NOTIFICATION_TTL_MS = 4600;
+      const TEXT_MESSAGE_NOTIFICATION_EXTRA_TTL_MS = 1000;
+      const TOAST_FLOAT_ANIMATION_MS = 3300;
+      const TEXT_MESSAGE_TOAST_FLOAT_ANIMATION_MS = 4300;
+      const COMMAND_NOTIFICATION_BASE_TTL_MS = 2600;
+      const COMMAND_NOTIFICATION_LINE_TTL_MS = 1200;
+      const FILE_CHANGE_COMPUTER_FX_MS = 330;
+      const NOTIFICATION_DEDUPE_WINDOW_MS = 1000;
+      const NOTIFICATION_FINGERPRINT_DEDUPE_MS = 4000;
+      const TOAST_LINE_DEDUPE_MS = 45000;
+      const NOTIFICATION_PRIORITY_DEFAULT = 0;
+      const NOTIFICATION_PRIORITY_MESSAGE = 2;
+      const SCENE_RECENT_LEAD_LIMIT = 4;
+      const SESSION_RECENT_LEAD_LIMIT = 10;
+      const RESTING_DORMANT_MS = 15 * 60 * 1000;
+      const DEPARTING_AGENT_TTL_MS = 520;
+      let lastSceneRenderToken = null;
+      let lastFleetSemanticToken = null;
+      const recentLeadDisplayMemory = new Map();
+      const activeRecentLeadReservations = new Map();
+      const recSlotMemory = new Map();
+
+      const projectMetaByRoot = new Map(configuredProjects.map((project) => [project.root, project]));
+      function projectInfo(projectRoot) {
+        if (state.fleet && Array.isArray(state.fleet.projects)) {
+          const liveProject = state.fleet.projects.find((project) => project.projectRoot === projectRoot);
+          if (liveProject && liveProject.projectLabel) {
+            return { root: projectRoot, label: liveProject.projectLabel };
+          }
+        }
+        return projectMetaByRoot.get(projectRoot) || {
+          root: projectRoot,
+          label: projectRoot.split(/[\\\\/]/).filter(Boolean).pop() || projectRoot
+        };
+      }
+
+      function projectLabel(projectRoot) {
+        return projectInfo(projectRoot).label;
+      }
+
+      function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {
+        const memoryKey = String(projectRoot) + "::" + String(category);
+        const previous = recSlotMemory.get(memoryKey) || new Map();
+        const next = new Map();
+        const assignments = [];
+        const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+        const usedIndexes = new Set();
+        const slotLimit = Number.isFinite(maxSlots) ? Math.max(0, Math.floor(maxSlots)) : null;
+
+        for (const [agentId, slotIndex] of previous.entries()) {
+          const agent = agentById.get(agentId);
+          if (
+            !agent
+            || !Number.isFinite(slotIndex)
+            || usedIndexes.has(slotIndex)
+            || (slotLimit !== null && slotIndex >= slotLimit)
+          ) {
+            continue;
+          }
+          next.set(agentId, slotIndex);
+          usedIndexes.add(slotIndex);
+          assignments.push({ agent, slotIndex });
+        }
+
+        let nextSlotIndex = 0;
+        for (const agent of agents) {
+          if (next.has(agent.id)) {
+            continue;
+          }
+          while (usedIndexes.has(nextSlotIndex)) {
+            nextSlotIndex += 1;
+          }
+          if (slotLimit !== null && nextSlotIndex >= slotLimit) {
+            break;
+          }
+          next.set(agent.id, nextSlotIndex);
+          usedIndexes.add(nextSlotIndex);
+          assignments.push({ agent, slotIndex: nextSlotIndex });
+          nextSlotIndex += 1;
+        }
+
+        recSlotMemory.set(memoryKey, next);
+        return assignments.sort((left, right) => left.slotIndex - right.slotIndex);
+      }
+
+      function agentKey(projectRoot, agent) {
+        return \`\${projectRoot}::\${agent.id}\`;
+      }
+
+      function formatSceneTextScale(value) {
+        return clampSceneTextScale(Number(value)).toFixed(2) + "x";
+      }
+
+      function loadGlobalSceneSettings() {
+        try {
+          const raw = window.localStorage.getItem(sceneSettingsStorageKey);
+          if (!raw) {
+            return { ...defaultGlobalSceneSettings };
+          }
+          const parsed = JSON.parse(raw);
+          return {
+            textScale: clampSceneTextScale(Number(parsed && parsed.textScale)),
+            debugTiles: Boolean(parsed && parsed.debugTiles)
+          };
+        } catch {
+          return { ...defaultGlobalSceneSettings };
+        }
+      }
+
+      function saveGlobalSceneSettings() {
+        try {
+          window.localStorage.setItem(sceneSettingsStorageKey, JSON.stringify(state.globalSceneSettings));
+        } catch {
+          // Ignore storage failures; runtime styling can still update in-memory.
+        }
+      }
+
+      function loadFurnitureLayoutOverrides() {
+        try {
+          const raw = window.localStorage.getItem(furnitureLayoutStorageKey);
+          if (!raw) {
+            return {};
+          }
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch {
+          return {};
+        }
+      }
+
+      function saveFurnitureLayoutOverrides() {
+        try {
+          window.localStorage.setItem(furnitureLayoutStorageKey, JSON.stringify(state.furnitureLayoutOverrides || {}));
+        } catch {}
+      }
+
+      function furnitureColumnOverride(projectRoot, roomId, furnitureId, fallbackColumn) {
+        return Number(
+          state.furnitureLayoutOverrides?.[projectRoot]?.[roomId]?.[furnitureId]
+        ) || fallbackColumn;
+      }
+
+      function setFurnitureColumnOverride(projectRoot, roomId, furnitureId, column) {
+        state.furnitureLayoutOverrides = {
+          ...state.furnitureLayoutOverrides,
+          [projectRoot]: {
+            ...(state.furnitureLayoutOverrides?.[projectRoot] || {}),
+            [roomId]: {
+              ...(state.furnitureLayoutOverrides?.[projectRoot]?.[roomId] || {}),
+              [furnitureId]: column
+            }
+          }
+        };
+        saveFurnitureLayoutOverrides();
+      }
+
+      function applyGlobalSceneSettings() {
+        const textScale = clampSceneTextScale(Number(state.globalSceneSettings && state.globalSceneSettings.textScale));
+        const debugTiles = Boolean(state.globalSceneSettings && state.globalSceneSettings.debugTiles);
+        state.globalSceneSettings = { textScale, debugTiles };
+        document.documentElement.style.setProperty("--ui-text-scale", String(textScale));
+        if (textScaleInput instanceof HTMLInputElement) {
+          textScaleInput.value = String(textScale);
+        }
+        syncTextScalePreview(textScale);
+        if (debugTilesButton instanceof HTMLButtonElement) {
+          debugTilesButton.classList.toggle("active", debugTiles);
+          debugTilesButton.setAttribute("aria-pressed", debugTiles ? "true" : "false");
+        }
+      }
+
+      function syncTextScalePreview(value) {
+        if (!(textScaleOutput instanceof HTMLOutputElement)) {
+          return;
+        }
+        const nextText = formatSceneTextScale(value);
+        textScaleOutput.value = nextText;
+        textScaleOutput.textContent = nextText;
+      }
+
+      function commitTextScale(value) {
+        state.globalSceneSettings = {
+          ...state.globalSceneSettings,
+          textScale: clampSceneTextScale(Number(value))
+        };
+        applyGlobalSceneSettings();
+        saveGlobalSceneSettings();
+        fitScenes();
+        renderNotifications();
+      }
+
+      function rememberAgentSceneState(snapshot, agent, sceneState) {
+        if (!agent || !sceneState) {
+          return;
+        }
+        const target = sceneStateDraft || renderedAgentSceneState;
+        target.set(agentKey(snapshot.projectRoot, agent), sceneState);
+      }
+
+      function triggerWorkstationFileChangeEffect(entry) {
+        if (!entry || !entry.isFileChange || !entry.key) {
+          return;
+        }
+        const previous = workstationEffects.get(entry.key);
+        const token = Number.isFinite(previous?.token) ? Number(previous.token) + 1 : 1;
+        workstationEffects.set(entry.key, {
+          token,
+          expiresAt: Date.now() + FILE_CHANGE_COMPUTER_FX_MS
+        });
+        scheduleWorkstationEffectPrune();
+      }
+
+      function pruneWorkstationEffects() {
+        const now = Date.now();
+        workstationEffects.forEach((effect, key) => {
+          if (!effect || !Number.isFinite(effect.expiresAt) || effect.expiresAt <= now) {
+            workstationEffects.delete(key);
+          }
+        });
+        scheduleWorkstationEffectPrune();
+      }
+
+      function scheduleWorkstationEffectPrune() {
+        if (workstationEffectPruneTimer) {
+          clearTimeout(workstationEffectPruneTimer);
+          workstationEffectPruneTimer = null;
+        }
+        if (workstationEffects.size === 0) {
+          syncWorkstationEffects();
+          return;
+        }
+        const now = Date.now();
+        const nextExpiry = Math.min(...Array.from(workstationEffects.values()).map((effect) => Number(effect.expiresAt) || now));
+        const delay = Math.max(16, nextExpiry - now);
+        workstationEffectPruneTimer = setTimeout(() => {
+          workstationEffectPruneTimer = null;
+          pruneWorkstationEffects();
+          syncWorkstationEffects();
+        }, delay);
+        syncWorkstationEffects();
+      }
+
+      function syncWorkstationEffects() {
+        const now = Date.now();
+        document.querySelectorAll("[data-workstation-computer]").forEach((element) => {
+          if (!(element instanceof HTMLElement)) {
+            return;
+          }
+          const key = element.dataset.workstationComputer || "";
+          const effect = workstationEffects.get(key);
+          const isActive = Boolean(effect && Number(effect.expiresAt) > now);
+          const token = isActive ? String(effect.token) : "";
+          if (!isActive) {
+            element.classList.remove("file-change-hit");
+            delete element.dataset.workstationFxToken;
+            return;
+          }
+          if (element.dataset.workstationFxToken !== token) {
+            element.classList.remove("file-change-hit");
+            void element.offsetWidth;
+            element.dataset.workstationFxToken = token;
+          }
+          if (!element.classList.contains("file-change-hit")) {
+            element.classList.add("file-change-hit");
+          }
+        });
+      }
+
+      function roomEntranceLayout(roomPixelWidth, compact, floorTop = null) {
+        const doorScale = compact ? 1.42 : 1.7;
+        const clockScale = compact ? 0.92 : 1.08;
+        const doorHeight = pixelOffice.props.boothDoor.h * doorScale;
+        const centerDoorY = Number.isFinite(floorTop)
+          ? Math.round(floorTop - doorHeight)
+          : (compact ? 26 : 34);
+        return {
+          doorScale,
+          clockScale,
+          centerDoorX: Math.round(roomPixelWidth / 2 - pixelOffice.props.boothDoor.w * doorScale),
+          centerDoorY,
+          entryX: Math.round(roomPixelWidth / 2),
+          entryY: Math.round(centerDoorY + doorHeight + (compact ? 2 : 3))
+        };
+      }
+
+      function agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight) {
+        const startX = Math.round(entrance.entryX - avatarWidth / 2);
+        const startY = Math.round(entrance.entryY - avatarHeight + 2);
+        return {
+          pathX: startX - targetX,
+          pathY: startY - targetY
+        };
+      }
+
+      function sceneStateForAgent(snapshot, agentId) {
+        if (!snapshot || !agentId) {
+          return null;
+        }
+        const key = snapshot.projectRoot + "::" + agentId;
+        return (sceneStateDraft && sceneStateDraft.get(key))
+          || renderedAgentSceneState.get(key)
+          || null;
+      }
+
+      function enteringMotionState(snapshot, agent, entrance, targetX, targetY, avatarWidth, avatarHeight) {
+        return {
+          mode: "entering",
+          path: entrance
+            ? agentPathDelta(entrance, targetX, targetY, avatarWidth, avatarHeight)
+            : { pathX: 0, pathY: 0 }
+        };
+      }
+
+      function motionShellClass(mode) {
+        return mode ? \`office-avatar-shell \${mode}\` : "office-avatar-shell";
+      }
+
+`;

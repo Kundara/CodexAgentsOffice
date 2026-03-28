@@ -2,13 +2,11 @@
 
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { listSourceFiles } = require("./list-source-files");
 
 const repoRoot = join(__dirname, "..");
-const files = execFileSync("rg", ["--files", "packages"], {
-  cwd: repoRoot,
-  encoding: "utf8"
-}).trim().split("\n").filter((filePath) => /\.(ts|tsx|js|mjs|cjs)$/.test(filePath));
+const files = listSourceFiles(repoRoot, ["packages"], [".ts", ".tsx", ".js", ".mjs", ".cjs"])
+  .map((filePath) => filePath.slice(repoRoot.length + 1));
 
 const violations = [];
 
@@ -36,4 +34,3 @@ if (violations.length > 0) {
   }
   process.exit(1);
 }
-
