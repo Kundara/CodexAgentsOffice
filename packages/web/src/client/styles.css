@@ -1978,10 +1978,10 @@
       }
 
       .tower-floor-title {
-        display: inline-flex;
+        display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
-        gap: 12px;
+        align-items: center;
+        gap: 10px 12px;
         color: var(--text);
         font-size: 22px;
         font-weight: 700;
@@ -1990,6 +1990,32 @@
 
       .tower-floor-title-project {
         color: var(--text);
+      }
+
+      .tower-floor-title.is-remote-only .tower-floor-title-project {
+        opacity: 0.6;
+      }
+
+      .tower-floor-participants {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .tower-floor-participant {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(163, 224, 255, 0.18);
+        background: rgba(6, 22, 29, 0.28);
+        color: rgba(222, 243, 252, 0.82);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
       }
 
       .tower-floor-title-worktree {
@@ -2021,6 +2047,14 @@
         color: #d4ecf6;
       }
 
+      .tower-floor-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
       .tower-floor-note {
         color: rgba(223, 246, 255, 0.72);
         font-size: 11px;
@@ -2030,6 +2064,20 @@
 
       .tower-floor-open {
         align-self: center;
+      }
+
+      .tower-floor-share {
+        min-width: 78px;
+        border-color: rgba(162, 222, 255, 0.18);
+        background: rgba(8, 21, 29, 0.3);
+        color: rgba(208, 233, 244, 0.86);
+      }
+
+      .tower-floor-share.active {
+        border-color: rgba(93, 223, 169, 0.5);
+        background: rgba(30, 107, 79, 0.28);
+        color: #dff9ee;
+        box-shadow: inset 0 0 0 1px rgba(93, 223, 169, 0.16);
       }
 
       .tower-floor-body {
@@ -2229,6 +2277,10 @@
         .tower-floor-trailing {
           justify-content: space-between;
           flex-wrap: wrap;
+        }
+
+        .tower-floor-actions {
+          justify-content: flex-start;
         }
 
         .tower-floor-meta {

@@ -17,6 +17,7 @@ export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
         integrationSettingsPending: false,
         integrationSettingsError: null,
         multiplayerSettings: loadMultiplayerSettings(),
+        multiplayerProjectShares: loadMultiplayerProjectShares(),
         multiplayerStatus: {
           state: "disabled",
           detail: "Shared room sync is off."
@@ -82,6 +83,66 @@ export const CLIENT_RUNTIME_SETTINGS_SOURCE = `      if (screenshotMode) {
 
       function projectLabel(projectRoot) {
         return projectInfo(projectRoot).label;
+      }
+
+      function localProjectRootsForSnapshot(snapshot) {
+        if (!snapshot) {
+          return [];
+        }
+        const localRoots = new Set((state.localFleet?.projects || []).map((project) => project.projectRoot));
+        const candidateRoots = Array.isArray(snapshot.mergedProjectRoots)
+          ? snapshot.mergedProjectRoots
+          : [snapshot.projectRoot];
+        return candidateRoots.filter((projectRoot) => localRoots.has(projectRoot));
+      }
+
+      function snapshotHasLocalProject(snapshot) {
+        return localProjectRootsForSnapshot(snapshot).length > 0;
+      }
+
+      function projectShareToggleRoots(snapshot) {
+        return localProjectRootsForSnapshot(snapshot);
+      }
+
+      function projectShareEnabledForSnapshot(snapshot) {
+        const projectRoots = projectShareToggleRoots(snapshot);
+        if (projectRoots.length === 0) {
+          return true;
+        }
+        return projectRoots.every((projectRoot) => isProjectSharedWithRoom(projectRoot));
+      }
+
+      function shouldRenderProjectShareToggle(snapshot) {
+        return state.multiplayerSettings.enabled === true
+          && hasMultiplayerCredentials(state.multiplayerSettings)
+          && projectShareToggleRoots(snapshot).length > 0;
+      }
+
+      function sharedParticipantLabelsForSnapshot(snapshot) {
+        const labels = [];
+        const seen = new Set();
+        const activeAgents = (Array.isArray(snapshot?.agents) ? snapshot.agents : []).filter((agent) => isBusyAgent(agent));
+        for (const agent of activeAgents) {
+          const label = agent?.network?.peerLabel
+            ? String(agent.network.peerLabel)
+            : (!agent?.network && snapshotHasLocalProject(snapshot) ? sharedLocalParticipantLabel() : "");
+          if (!label || seen.has(label)) {
+            continue;
+          }
+          seen.add(label);
+          labels.push(label);
+        }
+        if (labels.length === 0) {
+          for (const label of Array.isArray(snapshot?.sharedParticipantLabels) ? snapshot.sharedParticipantLabels : []) {
+            const normalized = String(label || "").trim();
+            if (!normalized || seen.has(normalized)) {
+              continue;
+            }
+            seen.add(normalized);
+            labels.push(normalized);
+          }
+        }
+        return labels.sort((left, right) => left.localeCompare(right));
       }
 
       function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {

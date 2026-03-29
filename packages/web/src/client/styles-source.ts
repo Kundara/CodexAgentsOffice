@@ -1677,6 +1677,10 @@ export const CLIENT_STYLES = `
         color: #ffef58;
       }
 
+      .agent-hover-summary-error {
+        color: #ff8f8f;
+      }
+
       .agent-hover-meta {
         margin-top: 1px;
         font-size: 6px;

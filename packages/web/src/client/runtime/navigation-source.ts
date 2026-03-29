@@ -253,15 +253,21 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
         });
       }
 
-      function sceneFootDepth(y, height, bias = 0) {
-        return (1000 + pixelSnap(y) + pixelSnap(height, 1)) * 10 + (Number.isFinite(bias) ? Number(bias) : 0);
+      function sceneFootDepth(y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {
+        const footY = Number(y) + Number(height);
+        const unit = Number.isFinite(tileSize) && tileSize > 0 ? Number(tileSize) : 16;
+        const depthBase = Number.isFinite(depthBaseY) ? Number(depthBaseY) : 0;
+        const relativeFootY = footY - depthBase;
+        const tileRow = Number.isFinite(depthRow) ? Number(depthRow) : Math.floor(relativeFootY / unit);
+        const intraTileY = relativeFootY - tileRow * unit;
+        return (100000 + Math.round(depthBase)) * 1000000 + (1000 + tileRow) * 1000 + Math.round(intraTileY * 10) + (Number.isFinite(bias) ? Number(bias) : 0);
       }
 
-      function applyFootDepth(node, y, height, bias = 0) {
+      function applyFootDepth(node, y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {
         if (!node) {
           return;
         }
-        node.zIndex = sceneFootDepth(y, height, bias);
+        node.zIndex = sceneFootDepth(y, height, bias, tileSize, depthBaseY, depthRow);
       }
 
       function syncOfficeRendererScene(renderer, model) {
@@ -301,6 +307,13 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
         renderer.roomById = roomById;
         renderer.roomNavigation = roomNavigation;
         renderer.reservedAgentTiles = reservedAgentTiles;
+        renderer.debugWorkstationNodes = [];
+        renderer.debugDepthWarnings = new Set();
+        const workstationByKey = new Map(
+          (Array.isArray(model.workstations) ? model.workstations : [])
+            .filter((workstation) => workstation && workstation.key)
+            .map((workstation) => [workstation.key, workstation])
+        );
         const background = new PIXI.Graphics()
           .roundRect(0, 0, model.width, model.height, 14)
           .fill({ color: 0x0b1b2b })
@@ -586,7 +599,10 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
               sprite,
               Number(definition.depthFootY) - snappedHeight,
               snappedHeight,
-              Number.isFinite(definition.depthBias) ? Number(definition.depthBias) : 0
+              Number.isFinite(definition.depthBias) ? Number(definition.depthBias) : 0,
+              model.tile,
+              Number.isFinite(definition.depthBaseY) ? Number(definition.depthBaseY) : 0,
+              Number.isFinite(definition.depthRow) ? Number(definition.depthRow) : null
             );
           } else {
             sprite.zIndex = definition.z || 5;
@@ -611,14 +627,37 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           });
         }
 
+        const STATE_MARKER_SIZE = 11;
+        const STATE_MARKER_Y_OFFSET = 13;
+        const STATE_MARKER_BUBBLE_Y_OFFSET = 20;
+
+        function statusMarkerPosition(agent, markerWidth = STATE_MARKER_SIZE) {
+          return {
+            x: pixelSnap(agent.x + Math.round((agent.width - markerWidth) / 2)),
+            y: pixelSnap(agent.y - (agent.bubble ? STATE_MARKER_BUBBLE_Y_OFFSET : STATE_MARKER_Y_OFFSET))
+          };
+        }
+
+        function avatarRenderMetrics(agent) {
+          const avatarScale = agent && agent.slotId ? 0.86 : 1;
+          const width = pixelSnap(agent.width * avatarScale, 1);
+          const height = pixelSnap(agent.height * avatarScale, 1);
+          return {
+            width,
+            height,
+            offsetX: pixelSnap((agent.width - width) / 2),
+            offsetY: pixelSnap(agent.height - height)
+          };
+        }
+
         function addAvatarNode(agent, zIndex = 12) {
           const avatar = PIXI.Sprite.from(loadedOfficeAssetImages.get(agent.sprite) || agent.sprite);
           const createdNodes = [];
-          const avatarScale = agent && agent.slotId ? 0.86 : 1;
-          const snappedWidth = pixelSnap(agent.width * avatarScale, 1);
-          const snappedHeight = pixelSnap(agent.height * avatarScale, 1);
-          const offsetX = pixelSnap((agent.width - snappedWidth) / 2);
-          const offsetY = pixelSnap(agent.height - snappedHeight);
+          const renderMetrics = avatarRenderMetrics(agent);
+          const snappedWidth = renderMetrics.width;
+          const snappedHeight = renderMetrics.height;
+          const offsetX = renderMetrics.offsetX;
+          const offsetY = renderMetrics.offsetY;
           avatar.x = pixelSnap(agent.x) + offsetX;
           avatar.y = pixelSnap(agent.y) + offsetY;
           avatar.width = snappedWidth;
@@ -633,15 +672,43 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
               avatar,
               Number(agent.depthFootY) - snappedHeight,
               snappedHeight,
-              Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : zIndex
+              Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : zIndex,
+              model.tile,
+              Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+              Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
             );
           } else if (fixedZ !== null) {
             avatar.zIndex = fixedZ;
           } else {
-            applyFootDepth(avatar, avatar.y, snappedHeight, zIndex);
+            applyFootDepth(
+              avatar,
+              avatar.y,
+              snappedHeight,
+              zIndex,
+              model.tile,
+              Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+              Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
+            );
           }
           renderer.root.addChild(avatar);
           createdNodes.push(avatar);
+          let statusMarker = null;
+          const statusMarkerUrl = agent.statusMarkerIconUrl || stateMarkerIconUrlForAgent(agent);
+          if (statusMarkerUrl) {
+            statusMarker = PIXI.Sprite.from(loadedOfficeAssetImages.get(statusMarkerUrl) || statusMarkerUrl);
+            const markerWidth = STATE_MARKER_SIZE;
+            const markerHeight = STATE_MARKER_SIZE;
+            const markerPosition = statusMarkerPosition(agent, markerWidth);
+            statusMarker.x = markerPosition.x;
+            statusMarker.y = markerPosition.y;
+            statusMarker.width = markerWidth;
+            statusMarker.height = markerHeight;
+            statusMarker.zIndex = Number.isFinite(agent.depthFootY)
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 1, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 1 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 1, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
+            renderer.root.addChild(statusMarker);
+            createdNodes.push(statusMarker);
+          }
           let bubbleBox = null;
           let bubbleText = null;
           if (agent.bubble) {
@@ -655,8 +722,8 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
             bubbleBox.x = bubbleX;
             bubbleBox.y = bubbleY;
             bubbleBox.zIndex = Number.isFinite(agent.depthFootY)
-              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 1)
-              : (fixedZ !== null ? fixedZ + 1 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 1));
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 2, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 2 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 2, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
             renderer.root.addChild(bubbleBox);
             createdNodes.push(bubbleBox);
             bubbleText = createPixiText(renderer, agent.bubble, {
@@ -668,18 +735,25 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
             bubbleText.x = bubbleX + Math.round((bubbleWidth - bubbleText.width) / 2);
             bubbleText.y = bubbleY + Math.round((12 - bubbleText.height) / 2) - 1;
             bubbleText.zIndex = Number.isFinite(agent.depthFootY)
-              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 2)
-              : (fixedZ !== null ? fixedZ + 2 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 2));
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 3, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 3 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 3, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
             renderer.root.addChild(bubbleText);
             createdNodes.push(bubbleText);
           }
           return {
             nodes: createdNodes,
             avatar,
+            statusMarker,
             bubbleBox,
             bubbleText,
+            renderWidth: snappedWidth,
+            renderHeight: snappedHeight,
+            renderOffsetX: offsetX,
+            renderOffsetY: offsetY,
             depthBias: Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : (fixedZ !== null ? fixedZ : zIndex),
-            depthFootY: Number.isFinite(agent.depthFootY) ? Number(agent.depthFootY) : null
+            depthFootY: Number.isFinite(agent.depthFootY) ? Number(agent.depthFootY) : null,
+            depthBaseY: Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+            depthRow: Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
           };
         }
 
@@ -687,32 +761,71 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           if (!motionState || !motionState.sprite) {
             return;
           }
-          if (Number.isFinite(motionState.depthFootY)) {
+          const routeLength = Array.isArray(motionState.route) ? motionState.route.length : 0;
+          const settledAtTarget = motionState.exiting !== true
+            && routeLength > 0
+            && motionState.routeIndex >= routeLength;
+          const effectiveDepthFootY = settledAtTarget && Number.isFinite(motionState.settledDepthFootY)
+            ? Number(motionState.settledDepthFootY)
+            : (Number.isFinite(motionState.depthFootY) ? Number(motionState.depthFootY) : null);
+          const effectiveDepthBias = settledAtTarget && Number.isFinite(motionState.settledDepthBias)
+            ? Number(motionState.settledDepthBias)
+            : (Number.isFinite(motionState.depthBias) ? Number(motionState.depthBias) : 0);
+          const effectiveDepthRow = settledAtTarget && Number.isFinite(motionState.settledDepthRow)
+            ? Number(motionState.settledDepthRow)
+            : (Number.isFinite(motionState.depthRow) ? Number(motionState.depthRow) : null);
+          const renderHeight = Number.isFinite(motionState.renderHeight) ? Number(motionState.renderHeight) : Number(motionState.height);
+          const renderTopY = Number.isFinite(motionState.currentY)
+            ? Number(motionState.currentY) + (Number.isFinite(motionState.renderOffsetY) ? Number(motionState.renderOffsetY) : 0)
+            : Number(motionState.sprite.y);
+          if (Number.isFinite(effectiveDepthFootY)) {
             applyFootDepth(
               motionState.sprite,
-              Number(motionState.depthFootY) - motionState.height,
-              motionState.height,
-              Number.isFinite(motionState.depthBias) ? Number(motionState.depthBias) : 0
+              Number(effectiveDepthFootY) - renderHeight,
+              renderHeight,
+              effectiveDepthBias,
+              model.tile,
+              Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+              effectiveDepthRow
             );
+            if (motionState.statusMarker) {
+              motionState.statusMarker.zIndex = sceneFootDepth(
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 1,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
+              );
+            }
             if (motionState.bubbleBox) {
               motionState.bubbleBox.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 1
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 2,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             if (motionState.bubbleText) {
               motionState.bubbleText.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 2
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 3,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             if (motionState.heldItemSprite) {
               motionState.heldItemSprite.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 3
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 4,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             return;
@@ -720,27 +833,102 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           if (Number.isFinite(motionState.fixedZ)) {
             const fixedZ = Number(motionState.fixedZ);
             motionState.sprite.zIndex = fixedZ;
+            if (motionState.statusMarker) {
+              motionState.statusMarker.zIndex = fixedZ + 1;
+            }
             if (motionState.bubbleBox) {
-              motionState.bubbleBox.zIndex = fixedZ + 1;
+              motionState.bubbleBox.zIndex = fixedZ + 2;
             }
             if (motionState.bubbleText) {
-              motionState.bubbleText.zIndex = fixedZ + 2;
+              motionState.bubbleText.zIndex = fixedZ + 3;
             }
             if (motionState.heldItemSprite) {
-              motionState.heldItemSprite.zIndex = fixedZ + 3;
+              motionState.heldItemSprite.zIndex = fixedZ + 4;
             }
             return;
           }
-          const depthBias = Number.isFinite(motionState.depthBias) ? motionState.depthBias : 12;
-          applyFootDepth(motionState.sprite, motionState.currentY, motionState.height, depthBias);
+          const depthBias = effectiveDepthBias;
+          const currentRoom = motionState.roomId ? renderer.roomById?.get(motionState.roomId) || null : null;
+          const movingDepthRow = currentRoom
+            ? officeAvatarFootTile(
+                currentRoom,
+                model.tile,
+                Number(motionState.currentX),
+                Number(motionState.currentY),
+                Number(motionState.width),
+                Number(motionState.height)
+              )?.row
+            : null;
+          applyFootDepth(motionState.sprite, renderTopY, renderHeight, depthBias, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          if (motionState.statusMarker) {
+            applyFootDepth(motionState.statusMarker, renderTopY, renderHeight, depthBias + 1, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          }
           if (motionState.bubbleBox) {
-            applyFootDepth(motionState.bubbleBox, motionState.currentY, motionState.height, depthBias + 1);
+            applyFootDepth(motionState.bubbleBox, renderTopY, renderHeight, depthBias + 2, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
           }
           if (motionState.bubbleText) {
-            applyFootDepth(motionState.bubbleText, motionState.currentY, motionState.height, depthBias + 2);
+            applyFootDepth(motionState.bubbleText, renderTopY, renderHeight, depthBias + 3, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
           }
           if (motionState.heldItemSprite) {
-            applyFootDepth(motionState.heldItemSprite, motionState.currentY, motionState.height, depthBias + 3);
+            applyFootDepth(motionState.heldItemSprite, renderTopY, renderHeight, depthBias + 4, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          }
+          if (
+            state.globalSceneSettings.debugTiles
+            && motionState.roomId
+            && motionState.sprite
+            && Array.isArray(renderer.debugWorkstationNodes)
+          ) {
+            const agentFootY = renderTopY + renderHeight;
+            const agentLeft = Number(motionState.sprite.x) || 0;
+            const agentRight = agentLeft + (Number(motionState.sprite.width) || 0);
+            renderer.debugWorkstationNodes.forEach((entry) => {
+              if (
+                !entry
+                || entry.roomId !== motionState.roomId
+                || !entry.node
+                || !Number.isFinite(entry.pivotY)
+              ) {
+                return;
+              }
+              const workstationLeft = Number.isFinite(entry.boundsX) ? Number(entry.boundsX) : (Number(entry.node.x) || 0);
+              const workstationRight = workstationLeft + (Number.isFinite(entry.boundsWidth) ? Number(entry.boundsWidth) : (Number(entry.node.width) || 0));
+              const overlapsX = agentRight > workstationLeft && agentLeft < workstationRight;
+              if (!overlapsX) {
+                return;
+              }
+              const agentZ = Number(motionState.sprite.zIndex) || 0;
+              const workstationZ = Number(entry.node.zIndex) || 0;
+              if (agentFootY >= Number(entry.pivotY) || agentZ <= workstationZ) {
+                return;
+              }
+              const warningKey = [
+                motionState.key,
+                entry.key || "workstation",
+                Math.round(agentFootY),
+                Math.round(entry.pivotY),
+                Math.round(agentZ),
+                Math.round(workstationZ)
+              ].join(":");
+              if (renderer.debugDepthWarnings.has(warningKey)) {
+                return;
+              }
+              renderer.debugDepthWarnings.add(warningKey);
+              console.debug("scene depth violation", {
+                agent: motionState.key,
+                roomId: motionState.roomId,
+                agentX: Math.round(Number(motionState.currentX) || 0),
+                agentY: Math.round(Number(motionState.currentY) || 0),
+                agentFootY: Math.round(agentFootY),
+                agentZ: Math.round(agentZ),
+                workstation: entry.key || null,
+                workstationPivotY: Math.round(Number(entry.pivotY)),
+                workstationZ: Math.round(workstationZ),
+                workstationBounds: {
+                  x: Math.round(workstationLeft),
+                  width: Math.round(workstationRight - workstationLeft)
+                }
+              });
+            });
           }
         }
 
@@ -778,16 +966,39 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           );
           if (sameTarget) {
             previousState.sprite = avatarVisual.avatar;
+            previousState.statusMarker = avatarVisual.statusMarker;
             previousState.bubbleBox = avatarVisual.bubbleBox;
             previousState.bubbleText = avatarVisual.bubbleText;
              previousState.heldItemSprite = null;
             previousState.anchorNode = renderer.agentHitNodes.get(agentKey) || null;
             previousState.width = agent.width;
             previousState.height = agent.height;
+            previousState.renderWidth = avatarVisual.renderWidth;
+            previousState.renderHeight = avatarVisual.renderHeight;
+            previousState.renderOffsetX = avatarVisual.renderOffsetX;
+            previousState.renderOffsetY = avatarVisual.renderOffsetY;
             previousState.state = agent.state || "idle";
             previousState.spriteUrl = agent.sprite;
-            previousState.depthBias = avatarVisual.depthBias;
-            previousState.depthFootY = avatarVisual.depthFootY;
+            previousState.depthBaseY = avatarVisual.depthBaseY;
+            previousState.depthRow = avatarVisual.depthRow;
+            previousState.settledDepthFootY = Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null;
+            previousState.settledDepthBias = Number.isFinite(avatarVisual.depthBias) ? Number(avatarVisual.depthBias) : null;
+            previousState.settledDepthRow = Number.isFinite(avatarVisual.depthRow) ? Number(avatarVisual.depthRow) : null;
+            const isMoving = (Boolean(previousState && previousState.routeIndex < (previousState.route?.length || 0))
+              || previousState.exiting === true);
+            const movingDepthFootY = isMoving ? null : avatarVisual.depthFootY;
+            const movingDepthBias = isMoving ? null : avatarVisual.depthBias;
+            if (state.globalSceneSettings.debugTiles && isMoving && Number.isFinite(avatarVisual.depthFootY)) {
+              console.debug("scene depth: clearing fixed foot depth for moving agent", {
+                agent: agentKey,
+                state: agent.state,
+                target: { x: agent.x, y: agent.y },
+                current: { x: previousState.currentX, y: previousState.currentY },
+                foot: avatarVisual.depthFootY
+              });
+            }
+            previousState.depthBias = movingDepthBias;
+            previousState.depthFootY = movingDepthFootY;
             previousState.fixedZ = Number.isFinite(agent.z) ? Number(agent.z) : null;
             previousState.targetFlipX = agent.flipX === true;
             previousState.slotId = agent.slotId || previousState.slotId || null;
@@ -847,16 +1058,33 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
               { x: agent.x, y: agent.y }
             )
             : [{ x: agent.x, y: agent.y }];
+          const isMoving = route.length > 1 || options.exiting === true;
+          const movingDepthFootY = isMoving ? null : avatarVisual.depthFootY;
+          const movingDepthBias = isMoving ? null : avatarVisual.depthBias;
+          if (state.globalSceneSettings.debugTiles && isMoving && Number.isFinite(avatarVisual.depthFootY)) {
+            console.debug('scene depth: clearing fixed foot depth for moving agent', {
+              agent: agentKey,
+              state: agent.state,
+              target: { x: agent.x, y: agent.y },
+              current: { x: previousState ? previousState.currentX : agent.x, y: previousState ? previousState.currentY : agent.y },
+              foot: avatarVisual.depthFootY
+            });
+          }
           const motionState = {
             kind: "motion",
             key: agentKey,
             roomId: agent.roomId,
             sprite: avatarVisual.avatar,
+            statusMarker: avatarVisual.statusMarker,
             spriteUrl: agent.sprite,
             bubbleBox: avatarVisual.bubbleBox,
             bubbleText: avatarVisual.bubbleText,
             width: agent.width,
             height: agent.height,
+            renderWidth: avatarVisual.renderWidth,
+            renderHeight: avatarVisual.renderHeight,
+            renderOffsetX: avatarVisual.renderOffsetX,
+            renderOffsetY: avatarVisual.renderOffsetY,
             currentX: previousState
               ? previousState.currentX
               : (route[0]?.x ?? agent.x),
@@ -879,8 +1107,13 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
               ? agent.mirrored
               : (typeof previousState?.mirrored === "boolean" ? previousState.mirrored : null),
             heldItemSprite: null,
-            depthBias: avatarVisual.depthBias,
-            depthFootY: avatarVisual.depthFootY,
+            depthBaseY: avatarVisual.depthBaseY,
+            depthRow: avatarVisual.depthRow,
+            depthBias: movingDepthBias,
+            depthFootY: movingDepthFootY,
+            settledDepthBias: Number.isFinite(avatarVisual.depthBias) ? Number(avatarVisual.depthBias) : null,
+            settledDepthFootY: Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null,
+            settledDepthRow: Number.isFinite(avatarVisual.depthRow) ? Number(avatarVisual.depthRow) : null,
             fixedZ: Number.isFinite(agent.z) ? Number(agent.z) : null,
             autonomy: autonomousResting
               ? (previousState && previousState.autonomy
@@ -972,6 +1205,22 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           labelText.y = pixelSnap(y) - 9;
           labelText.zIndex = 100;
           renderer.root.addChild(labelText);
+        }
+
+        function addDebugPivot(x, y, color) {
+          const pivotX = pixelSnap(x);
+          const pivotY = pixelSnap(y);
+          const pivotHalo = new PIXI.Graphics()
+            .circle(pivotX, pivotY, 4)
+            .fill({ color: 0xffffff, alpha: 0.92 });
+          pivotHalo.zIndex = 101;
+          renderer.root.addChild(pivotHalo);
+          const pivotDot = new PIXI.Graphics()
+            .circle(pivotX, pivotY, 2)
+            .fill({ color, alpha: 1 })
+            .stroke({ color: 0x061019, width: 1, alpha: 0.95 });
+          pivotDot.zIndex = 102;
+          renderer.root.addChild(pivotDot);
         }
 
         model.rooms.forEach((room) => {
@@ -1159,6 +1408,13 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
             0x4dd8ff,
             \`\${workstation.tileWidth}x\${workstation.tileHeight}\`
           );
+          if (Number.isFinite(workstation.pivotX) && Number.isFinite(workstation.pivotY)) {
+            addDebugPivot(
+              workstation.pivotX,
+              workstation.pivotY,
+              0xffb347
+            );
+          }
         });
 
         const currentAgentKeys = new Set();
@@ -1166,10 +1422,22 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
         model.desks.forEach((desk) => {
           const deskNodes = [];
           const enteringRevealNodes = [];
+          const workstationKey = desk.agents[0]?.key || desk.agents[0]?.id || null;
+          const workstationMeta = workstationKey ? workstationByKey.get(workstationKey) || null : null;
           desk.shell.forEach((item) => {
             if (item.kind === "sprite") {
               const node = addSpriteNode(item);
               deskNodes.push(node);
+              if (item.z === 9 && workstationMeta) {
+                renderer.debugWorkstationNodes.push({
+                  key: workstationMeta.key,
+                  roomId: workstationMeta.roomId,
+                  node,
+                  pivotY: workstationMeta.pivotY,
+                  boundsX: workstationMeta.x,
+                  boundsWidth: workstationMeta.width
+                });
+              }
               if (!screenshotMode && item.enteringReveal === true) {
                 enteringRevealNodes.push(node);
               }
@@ -1217,6 +1485,8 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
         model.offices.forEach((office) => {
           const officeNodes = [];
           const enteringRevealNodes = [];
+          const workstationKey = office.agent?.key || office.agent?.id || null;
+          const workstationMeta = workstationKey ? workstationByKey.get(workstationKey) || null : null;
           if (state.globalSceneSettings.debugTiles) {
             addDebugBounds(office.x, office.y, office.width, office.height, 0xff8d4d, tileBoundsLabel(office.width, office.height, model.tile));
           }
@@ -1263,6 +1533,16 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
             if (item.kind === "sprite") {
               const node = addSpriteNode(item);
               officeNodes.push(node);
+              if (item.z === 9 && workstationMeta) {
+                renderer.debugWorkstationNodes.push({
+                  key: workstationMeta.key,
+                  roomId: workstationMeta.roomId,
+                  node,
+                  pivotY: workstationMeta.pivotY,
+                  boundsX: workstationMeta.x,
+                  boundsWidth: workstationMeta.width
+                });
+              }
               if (!screenshotMode && item.enteringReveal === true) {
                 enteringRevealNodes.push(node);
               }
@@ -1335,6 +1615,11 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
           );
           if (state.globalSceneSettings.debugTiles) {
             addDebugBounds(agent.x, agent.y, agent.width, agent.height, 0x9eff6a, tileBoundsLabel(agent.width, agent.height, model.tile));
+            addDebugPivot(
+              Number.isFinite(agent.pivotX) ? agent.pivotX : agent.x + agent.width / 2,
+              Number.isFinite(agent.pivotY) ? agent.pivotY : agent.y + agent.height - 1,
+              0xff5d9e
+            );
           }
           registerFocusNodes(agent.focusKeys, recNodes);
         });
@@ -1376,6 +1661,7 @@ export const CLIENT_RUNTIME_NAVIGATION_SOURCE = `      function officeAvatarPosi
             key,
             roomId: motionState.roomId,
             sprite: ghostVisual.avatar,
+            statusMarker: null,
             bubbleBox: null,
             bubbleText: null,
             width: motionState.width,

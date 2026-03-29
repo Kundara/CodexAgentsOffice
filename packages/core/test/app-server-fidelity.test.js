@@ -219,7 +219,7 @@ test("thread closed marks an ongoing monitored thread stopped immediately", () =
   assert.equal(monitor.stoppedAtByThreadId.has(thread.id), true);
 });
 
-test("notLoaded status marks an ongoing monitored thread stopped immediately", () => {
+test("notLoaded status waits for a short cooldown before stopping an ongoing monitored thread", async () => {
   const monitor = new ProjectLiveMonitor({
     projectRoot: "/tmp/CodexAgentsOffice",
     includeCloud: false
@@ -229,9 +229,28 @@ test("notLoaded status marks an ongoing monitored thread stopped immediately", (
     status: { type: "active" },
     updatedAt: Math.floor(Date.now() / 1000)
   };
+  const dormantNotLoadedThread = {
+    ...thread,
+    status: { type: "notLoaded" },
+    turns: [
+      {
+        ...thread.turns[0],
+        status: "completed",
+        items: [
+          {
+            ...thread.turns[0].items[0],
+            status: "completed"
+          }
+        ]
+      }
+    ]
+  };
 
   monitor.threads.set(thread.id, thread);
   monitor.markThreadLive(thread.id);
+  monitor.client = {
+    readThread: async () => dormantNotLoadedThread
+  };
   monitor.handleAppServerNotification({
     method: "thread/status/changed",
     params: {
@@ -242,8 +261,54 @@ test("notLoaded status marks an ongoing monitored thread stopped immediately", (
     }
   });
 
+  assert.equal(monitor.ongoingThreadIds.has(thread.id), true);
+  assert.equal(monitor.stoppedAtByThreadId.has(thread.id), false);
+
+  await new Promise((resolve) => setTimeout(resolve, 3200));
+
   assert.equal(monitor.ongoingThreadIds.has(thread.id), false);
   assert.equal(monitor.stoppedAtByThreadId.has(thread.id), true);
+});
+
+test("pending notLoaded cooldown suppresses an early stop during reread confirmation", async () => {
+  const monitor = new ProjectLiveMonitor({
+    projectRoot: "/tmp/CodexAgentsOffice",
+    includeCloud: false
+  });
+  const thread = {
+    ...sampleThread(),
+    status: { type: "active" },
+    updatedAt: Math.floor(Date.now() / 1000)
+  };
+  const dormantNotLoadedThread = {
+    ...thread,
+    status: { type: "notLoaded" },
+    turns: [
+      {
+        ...thread.turns[0],
+        status: "completed",
+        items: [
+          {
+            ...thread.turns[0].items[0],
+            status: "completed"
+          }
+        ]
+      }
+    ]
+  };
+
+  monitor.threads.set(thread.id, thread);
+  monitor.markThreadLive(thread.id);
+  monitor.schedulePendingNotLoadedStop(thread.id);
+  monitor.client = {
+    readThread: async () => dormantNotLoadedThread
+  };
+
+  await monitor.refreshThread(thread.id);
+
+  assert.equal(monitor.ongoingThreadIds.has(thread.id), true);
+  assert.equal(monitor.stoppedAtByThreadId.has(thread.id), false);
+  monitor.clearPendingNotLoadedStop(thread.id);
 });
 
 test("tool call server requests become typed tool events", () => {
@@ -471,6 +536,31 @@ test("completed command, file, and tool items settle to done instead of active w
 
     assert.equal(summary.state, "done");
   }
+});
+
+test("failed command items preserve the explicit error detail for blocked hover state", () => {
+  const summary = summariseThread({
+    ...sampleThread(),
+    status: { type: "active", activeFlags: [] },
+    turns: [{
+      id: "turn_1",
+      status: "inProgress",
+      error: null,
+      items: [{
+        type: "commandExecution",
+        command: "curl -sf http://127.0.0.1:4181/api/server-meta",
+        cwd: "/tmp/CodexAgentsOffice",
+        status: "failed",
+        error: {
+          message: "Connection refused"
+        }
+      }]
+    }]
+  });
+
+  assert.equal(summary.state, "blocked");
+  assert.equal(summary.detail, "Connection refused");
+  assert.equal(summary.activityEvent?.title, "curl -sf http://127.0.0.1:4181/api/server-meta");
 });
 
 test("recent command activity does not reactivate a completed thread", () => {
@@ -818,6 +908,40 @@ test("notLoaded threads with an in-progress turn remain current", async () => {
   assert.equal(agent.isCurrent, true);
 });
 
+test("plan items map to planning instead of synthetic thinking", async () => {
+  const planningThread = {
+    ...sampleThread(),
+    status: { type: "notLoaded" },
+    updatedAt: 1,
+    turns: [
+      {
+        id: "turn_1",
+        status: "inProgress",
+        error: null,
+        items: [
+          {
+            type: "plan",
+            explanation: "Compare the state mapping against the app-server events."
+          }
+        ]
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/tmp/CodexAgentsOffice",
+    threads: [planningThread],
+    events: [],
+    ongoingThreadIds: new Set()
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "planning");
+  assert.equal(agent.detail, "Compare the state mapping against the app-server events.");
+  assert.equal(agent.isCurrent, true);
+});
+
 test("fresh spawned notLoaded subagent threads without turns still read as live", async () => {
   const freshSpawnedThread = {
     ...sampleThread(),
@@ -844,8 +968,35 @@ test("fresh spawned notLoaded subagent threads without turns still read as live"
 
   const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
   assert.ok(agent);
-  assert.equal(agent.state, "thinking");
+  assert.equal(agent.state, "planning");
   assert.equal(agent.isOngoing, true);
+  assert.equal(agent.isCurrent, true);
+});
+
+test("in-progress turns without a stronger item signal default to planning", async () => {
+  const activeWithoutItemsThread = {
+    ...sampleThread(),
+    status: { type: "active", activeFlags: [] },
+    turns: [
+      {
+        id: "turn_1",
+        status: "inProgress",
+        error: null,
+        items: []
+      }
+    ]
+  };
+
+  const snapshot = await buildDashboardSnapshotFromState({
+    projectRoot: "/tmp/CodexAgentsOffice",
+    threads: [activeWithoutItemsThread],
+    events: []
+  });
+
+  const agent = snapshot.agents.find((entry) => entry.threadId === "thr_123");
+  assert.ok(agent);
+  assert.equal(agent.state, "planning");
+  assert.equal(agent.detail, "Planning");
   assert.equal(agent.isCurrent, true);
 });
 

@@ -976,7 +976,7 @@ function cursorHookToolState(record: Record<string, unknown>, failed: boolean, f
 
   const mappedState = cursorTranscriptToolState(toolName);
   return {
-    state: mappedState ?? "thinking",
+    state: mappedState ?? "planning",
     detail,
     activityEvent,
     latestMessage: cursorHookString(record, "agent_message"),
@@ -1216,8 +1216,7 @@ function cursorHookPhaseSummary(input: {
       const summary = cursorHookString(input.record, "summary") ?? cursorHookString(input.record, "task");
       const state =
         status === "error" ? "blocked"
-        : status === "aborted" ? "done"
-        : "thinking";
+        : "done";
       return {
         sessionId,
         createdAtMs: updatedAtMs,
@@ -1265,8 +1264,7 @@ function cursorHookPhaseSummary(input: {
       const composerMode = cursorHookString(input.record, "composer_mode");
       const state =
         composerMode === "edit" ? "editing"
-        : composerMode === "ask" ? "thinking"
-        : "thinking";
+        : "planning";
       return {
         sessionId,
         createdAtMs: updatedAtMs,
@@ -1706,7 +1704,7 @@ function cursorTranscriptActivityState(summary: CursorTranscriptSessionSummary, 
     if (summary.latestToolState) {
       return { state: summary.latestToolState, isOngoing: true };
     }
-    return { state: "thinking", isOngoing: true };
+    return { state: "planning", isOngoing: true };
   }
 
   if (ageMs <= CURSOR_LOCAL_DONE_WINDOW_MS) {
@@ -1740,7 +1738,7 @@ function cursorLocalActivityState(input: {
     if (changedFiles > 0 || changedLines > 0) {
       return { state: "editing", isOngoing: true };
     }
-    return { state: "thinking", isOngoing: true };
+    return { state: "planning", isOngoing: true };
   }
 
   if (changedFiles > 0 || changedLines > 0) {

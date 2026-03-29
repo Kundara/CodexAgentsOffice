@@ -532,6 +532,15 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
           return;
         }
 
+        if (action === "toggle-project-share") {
+          try {
+            const projectRoots = JSON.parse(target.dataset.projectRoots || "[]");
+            const enabled = target.getAttribute("aria-pressed") === "true";
+            setProjectRootsSharedWithRoom(projectRoots, !enabled);
+          } catch {}
+          return;
+        }
+
         if (action === "toggle-workspace-focus") {
           toggleWorkspaceFullscreen();
           return;

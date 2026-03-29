@@ -5,6 +5,7 @@ import { readJsonBody, notFound, sendAbsoluteFileAsset, sendHtml, sendJson, send
 import { buildServerMeta } from "./server-metadata";
 import { renderHtml } from "../render/render-html";
 import { renderIconAuditHtml } from "../render/render-icon-audit-html";
+import { renderZOrderAuditHtml } from "../render/render-z-order-audit-html";
 import type { FleetLiveService } from "./fleet-live-service";
 import type { ServerOptions } from "./server-types";
 
@@ -120,6 +121,24 @@ async function handleIconAuditRoute(context: RequestContext): Promise<boolean> {
   }
 
   sendHtml(context.response, renderIconAuditHtml());
+  return true;
+}
+
+async function handleZOrderAuditRoute(context: RequestContext): Promise<boolean> {
+  if (!matchesMethod(context, "GET", "HEAD") || context.url.pathname !== "/z-order-audit") {
+    return false;
+  }
+
+  if (requestMethod(context) === "HEAD") {
+    context.response.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store"
+    });
+    context.response.end();
+    return true;
+  }
+
+  sendHtml(context.response, renderZOrderAuditHtml());
   return true;
 }
 
@@ -247,6 +266,7 @@ const ROUTES: RouteHandler[] = [
   handleVendorRoute,
   handleHomeRoute,
   handleIconAuditRoute,
+  handleZOrderAuditRoute,
   handleFleetRoute,
   handleServerMetaRoute,
   handleMultiplayerStatusRoute,

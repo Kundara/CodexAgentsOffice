@@ -194,12 +194,17 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
         const compact = options.compact === true;
         const titleAttr = escapeHtml(snapshot.projectRoot);
         const projectTitle = projectLabel(snapshot.projectRoot);
+        const participantLabels = sharedParticipantLabelsForSnapshot(snapshot);
+        const participantHtml = participantLabels.length > 0
+          ? \`<div class="tower-floor-participants" title="\${escapeHtml("Active in this workspace: " + participantLabels.join(", "))}">\${participantLabels.map((label) => \`<span class="tower-floor-participant">\${escapeHtml(label)}</span>\`).join("")}</div>\`
+          : "";
+        const remoteOnlyTitleClass = snapshotHasLocalProject(snapshot) ? "" : " is-remote-only";
         const worktreeName = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
           ? worktreeNameForSnapshot(snapshot)
           : "";
         const titleHtml = worktreeName
-          ? \`<div class="tower-floor-title" title="\${titleAttr}"><span class="tower-floor-title-project">\${escapeHtml(projectTitle)}</span><span class="tower-floor-title-worktree"><img class="worktree-inline-icon tower-floor-worktree-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></span></div>\`
-          : \`<div class="tower-floor-title" title="\${titleAttr}">\${escapeHtml(projectTitle)}</div>\`;
+          ? \`<div class="tower-floor-title\${remoteOnlyTitleClass}" title="\${titleAttr}"><span class="tower-floor-title-project">\${escapeHtml(projectTitle)}</span>\${participantHtml}<span class="tower-floor-title-worktree"><img class="worktree-inline-icon tower-floor-worktree-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></span></div>\`
+          : \`<div class="tower-floor-title\${remoteOnlyTitleClass}" title="\${titleAttr}"><span class="tower-floor-title-project">\${escapeHtml(projectTitle)}</span>\${participantHtml}</div>\`;
         const summary = state.view === "map"
           ? (compact ? "Live floor" : "Current workload")
           : \`\${counts.total} agents · \${counts.active} active · \${counts.waiting} waiting · \${counts.blocked} blocked · \${counts.cloud} cloud\`;
@@ -212,10 +217,13 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
             liveOnly: state.activeOnly,
             focusMode: options.focusMode === true
           });
+        const shareToggleHtml = shouldRenderProjectShareToggle(snapshot)
+          ? \`<button class="tower-floor-share\${projectShareEnabledForSnapshot(snapshot) ? " active" : ""}" data-action="toggle-project-share" data-project-roots="\${escapeHtml(JSON.stringify(projectShareToggleRoots(snapshot)))}" aria-pressed="\${projectShareEnabledForSnapshot(snapshot) ? "true" : "false"}" title="\${escapeHtml(projectShareEnabledForSnapshot(snapshot) ? "Shared with the room" : "Not shared with the room")}" type="button">Shared</button>\`
+          : "";
         const actionHtml = options.action
           ? \`<button class="tower-floor-open" data-action="\${escapeHtml(options.action.type)}"\${options.action.projectRoot ? \` data-project-root="\${escapeHtml(options.action.projectRoot)}"\` : ""}>\${escapeHtml(options.action.label)}</button>\`
           : "";
-        return \`<section class="tower-floor\${compact ? " compact" : ""}" data-project-root="\${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">\${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">\${escapeHtml(summary)}</div>\${actionHtml}</div></div><div class="tower-floor-body">\${notes ? \`<div class="tower-floor-note">\${escapeHtml(notes)}</div>\` : ""}\${body}</div></section>\`;
+        return \`<section class="tower-floor\${compact ? " compact" : ""}" data-project-root="\${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">\${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">\${escapeHtml(summary)}</div><div class="tower-floor-actions">\${shareToggleHtml}\${actionHtml}</div></div></div><div class="tower-floor-body">\${notes ? \`<div class="tower-floor-note">\${escapeHtml(notes)}</div>\` : ""}\${body}</div></section>\`;
       }
 
       function renderWorkspaceScroll(projects) {
@@ -266,7 +274,7 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
         const baseMaxX = Math.max(...rooms.map((room) => room.x + room.width), 24);
         const maxY = Math.max(...rooms.map((room) => room.y + room.height), 16);
         const waitingAgents = snapshot.agents
-          .filter((agent) => agent.state === "waiting" && agent.source !== "cloud")
+          .filter((agent) => agent.state === "waiting" && agent.source !== "cloud" && !shouldSeatAtWorkstation(agent))
           .sort(compareAgentsByRecencyStable);
         const allRestingAgents = restingAgentsFor(snapshot, compact);
         const restingAgents = allRestingAgents
@@ -425,6 +433,7 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   lead: false,
                   slotId: entry.slot.id,
                   enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),
+                  depthBaseY: room.floorTop,
                   absoluteX: pod.x + cellX,
                   absoluteY: pod.y
                 }
@@ -444,6 +453,8 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   focusKey: focusAgentKey(snapshot, agent),
                   focusKeys: collectFocusedSessionKeys(snapshot, agent),
                   appearance: agent.appearance,
+                  needsUser: agent.needsUser || null,
+                  statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                   slotId: entry.slot.id,
                   mirrored: seatMirrored,
                   ...visual.avatar,
@@ -499,6 +510,7 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                 lead: true,
                 slotId: entry.slot.id,
                 enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),
+                depthBaseY: room.floorTop,
                 absoluteX: officeX + cellX,
                 absoluteY: officeY
               }
@@ -525,6 +537,8 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                     focusKey: focusAgentKey(snapshot, entry.agent),
                     focusKeys: collectFocusedSessionKeys(snapshot, entry.agent),
                     appearance: entry.agent.appearance,
+                    needsUser: entry.agent.needsUser || null,
+                    statusMarkerIconUrl: stateMarkerIconUrlForAgent(entry.agent),
                     slotId: entry.slot.id,
                     mirrored: false,
                     ...visual.avatar,
@@ -576,11 +590,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                 focusKey: focusAgentKey(snapshot, agent),
                 focusKeys: collectFocusedSessionKeys(snapshot, agent),
                 appearance: agent.appearance,
+                needsUser: agent.needsUser || null,
+                statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                 sprite: avatarForAgent(agent).url,
                 x: roomX + slot.x,
                 y: roomY + slot.y,
                 width: Math.round(avatarForAgent(agent).w * (compact ? 1 : 1.08)),
                 height: Math.round(avatarForAgent(agent).h * (compact ? 1 : 1.08)),
+                depthBaseY: room.floorTop,
                 bubble: "...",
                 flip: slot.flip
               });
@@ -615,11 +632,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                 focusKey: focusAgentKey(snapshot, agent),
                 focusKeys: collectFocusedSessionKeys(snapshot, agent),
                 appearance: agent.appearance,
+                needsUser: agent.needsUser || null,
+                statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                 sprite: avatarForAgent(agent).url,
                 x: roomX + slot.x,
                 y: roomY + slot.y,
                 width: Math.round(avatarForAgent(agent).w * (compact ? 1 : 1.08)),
                 height: Math.round(avatarForAgent(agent).h * (compact ? 1 : 1.08)),
+                depthBaseY: room.floorTop,
                 bubble: null,
                 flip: slot.flip
               });
@@ -811,12 +831,14 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                 if (entry.routeIndex >= route.length && typeof entry.targetFlipX === "boolean") {
                   entry.flipX = entry.targetFlipX;
                 }
-                entry.sprite.x = pixelSnap(entry.currentX);
-                entry.sprite.y = pixelSnap(entry.currentY);
-                const snappedWidth = pixelSnap(entry.width, 1);
+                const renderOffsetX = Number.isFinite(entry.renderOffsetX) ? Number(entry.renderOffsetX) : 0;
+                const renderOffsetY = Number.isFinite(entry.renderOffsetY) ? Number(entry.renderOffsetY) : 0;
+                const renderWidth = Number.isFinite(entry.renderWidth) ? Number(entry.renderWidth) : pixelSnap(entry.width, 1);
+                entry.sprite.x = pixelSnap(entry.currentX + renderOffsetX);
+                entry.sprite.y = pixelSnap(entry.currentY + renderOffsetY);
                 if (entry.flipX) {
                   entry.sprite.scale.x = -Math.abs(entry.sprite.scale.x || 1);
-                  entry.sprite.x = pixelSnap(entry.currentX) + snappedWidth;
+                  entry.sprite.x = pixelSnap(entry.currentX + renderOffsetX) + renderWidth;
                 } else {
                   entry.sprite.scale.x = Math.abs(entry.sprite.scale.x || 1);
                 }
@@ -827,6 +849,11 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   entry.bubbleBox.y = bubbleY;
                   entry.bubbleText.x = bubbleX + Math.round((entry.bubbleBox.width - entry.bubbleText.width) / 2);
                   entry.bubbleText.y = bubbleY + Math.round((entry.bubbleBox.height - entry.bubbleText.height) / 2) - 1;
+                }
+                if (entry.statusMarker) {
+                  const markerWidth = Math.max(8, Math.round(entry.statusMarker.width || 11));
+                  entry.statusMarker.x = pixelSnap(entry.currentX + Math.round((entry.width - markerWidth) / 2));
+                  entry.statusMarker.y = pixelSnap(entry.currentY - (entry.bubbleBox ? 20 : 13));
                 }
                 if (typeof renderer.syncHeldItemSprite === "function") {
                   renderer.syncHeldItemSprite(entry);
@@ -842,6 +869,9 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
                   }
                   if (entry.bubbleText) {
                     entry.bubbleText.alpha = entry.sprite.alpha;
+                  }
+                  if (entry.statusMarker) {
+                    entry.statusMarker.alpha = entry.sprite.alpha;
                   }
                   if (entry.heldItemSprite) {
                     entry.heldItemSprite.alpha = entry.sprite.alpha;
@@ -971,6 +1001,9 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
             if (agent && agent.sprite) {
               urls.add(agent.sprite);
             }
+            if (agent && agent.statusMarkerIconUrl) {
+              urls.add(agent.statusMarkerIconUrl);
+            }
           });
         });
         model.offices.forEach((office) => {
@@ -982,10 +1015,16 @@ export const CLIENT_RUNTIME_SCENE_SOURCE = `      function buildLeadClusters(occ
           if (office.agent && office.agent.sprite) {
             urls.add(office.agent.sprite);
           }
+          if (office.agent && office.agent.statusMarkerIconUrl) {
+            urls.add(office.agent.statusMarkerIconUrl);
+          }
         });
         model.recAgents.forEach((agent) => {
           if (agent && agent.sprite) {
             urls.add(agent.sprite);
+          }
+          if (agent && agent.statusMarkerIconUrl) {
+            urls.add(agent.statusMarkerIconUrl);
           }
         });
         model.facilities.forEach((facility) => {
@@ -1112,6 +1151,10 @@ function roleTint(role) {
           flipX: options.flipX === true,
           enteringReveal: options.enteringReveal === true,
           alpha: options.alpha ?? 1,
+          depthFootY: Number.isFinite(options.depthFootY) ? Math.round(options.depthFootY) : null,
+          depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+          depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,
+          depthBias: Number.isFinite(options.depthBias) ? Number(options.depthBias) : null,
           z
         };
       }

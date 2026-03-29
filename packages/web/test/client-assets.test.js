@@ -4,6 +4,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 
 const { renderHtml } = require("../dist/render-html.js");
+const { renderZOrderAuditHtml } = require("../dist/render-z-order-audit-html.js");
 
 function readClientSource(...segments) {
   return readFileSync(join(__dirname, "../src/client", ...segments), "utf8");
@@ -57,6 +58,20 @@ test("renderHtml includes the global split-worktrees toggle", () => {
   assert.match(html, /Split Worktrees/);
 });
 
+test("z-order audit html exposes the visual workstation overlap harness", () => {
+  const html = renderZOrderAuditHtml();
+
+  assert.match(html, /Z-Order Audit/);
+  assert.match(html, /Motion Sweep/);
+  assert.match(html, /Front Edge/);
+  assert.match(html, /data-sweep/);
+  assert.match(html, /requestAnimationFrame\(tick\);/);
+  assert.match(html, /avatar stays behind workstation/);
+  assert.match(html, /same <code>sceneFootDepth\(\)<\/code> math as the app/);
+  assert.match(html, /Pixi still sorts by <code>zIndex<\/code>/);
+  assert.match(html, /\/z-order-audit/);
+});
+
 test("client bootstrap runs the generated runtime module instead of evaling a source string", () => {
   const indexSource = readClientSource("index.ts");
   const runtimeModuleSource = readClientSource("app-runtime.ts");
@@ -99,18 +114,19 @@ test("client runtime keeps current local desk-live work on a workstation through
   );
 });
 
-test("client runtime keeps active local desks live, leaves waiting in the rec area, and gives current idle/done work a short settle window", () => {
+test("client runtime keeps active local desks live, keeps waiting on-desk, and gives current idle/done work a short settle window", () => {
   const layoutSource = readRuntimeSource("layout-source.ts");
   const seatingSource = readRuntimeSource("seating-source.ts");
 
   assert.doesNotMatch(layoutSource, /if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}/);
+  assert.doesNotMatch(seatingSource, /if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}/);
   assert.match(
     seatingSource,
     /function hasCurrentLocalSeatCooldown\(agent\) {\n\s+const updatedAt = parseAgentUpdatedAt\(agent && agent\.updatedAt\);/
   );
   assert.match(
     seatingSource,
-    /if \(agent\.statusText === "active"\) {\n\s+if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}\n\s+if \(isRuntimeActiveLocalAgent\(agent\)\) {\n\s+return true;\n\s+}\n\s+if \(\(agent\.state === "idle" \|\| agent\.state === "done"\) && hasCurrentLocalSeatCooldown\(agent\)\) {\n\s+return true;\n\s+}\n\s+return agent\.isCurrent === true\n\s+&& agent\.state !== "idle"\n\s+&& agent\.state !== "done";/
+    /if \(agent\.statusText === "active"\) {\n\s+if \(isRuntimeActiveLocalAgent\(agent\)\) {\n\s+return true;\n\s+}\n\s+if \(\(agent\.state === "idle" \|\| agent\.state === "done"\) && hasCurrentLocalSeatCooldown\(agent\)\) {\n\s+return true;\n\s+}\n\s+return agent\.isCurrent === true\n\s+&& agent\.state !== "idle"\n\s+&& agent\.state !== "done";/
   );
 });
 
@@ -150,12 +166,34 @@ test("runtime source keeps running and validating workers seated at their workst
 
   assert.ok(renderSource.includes('if (state === "running" || state === "validating") {'));
   assert.ok(renderSource.includes('if (state === "blocked") {'));
-  assert.ok(renderSource.includes("tileHeight: 1"));
+  assert.ok(renderSource.includes('state === "delegating" || state === "waiting"'));
+  assert.ok(renderSource.includes("tileHeight: 2"));
+});
+
+test("runtime source adds above-head state markers for needs-user, thinking, planning, and blocked-error states", () => {
+  const renderSource = readRuntimeSource("render-source.ts");
+  const navigationSource = readRuntimeSource("navigation-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts");
+
+  assert.ok(renderSource.includes('function stateMarkerIconUrlForAgent(agent) {'));
+  assert.ok(renderSource.includes('function shouldShowThinkingMarker(agent) {'));
+  assert.ok(renderSource.includes('agent.activityEvent && agent.activityEvent.type === "agentMessage"'));
+  assert.ok(renderSource.includes('agent.latestMessage.trim().length > 0'));
+  assert.ok(renderSource.includes('return "/assets/pixel-office/sprites/icons/state/hand.png";'));
+  assert.ok(renderSource.includes('return "/assets/pixel-office/sprites/icons/state/exclamation.png";'));
+  assert.ok(renderSource.includes('return "/assets/pixel-office/sprites/icons/state/clipboard.png";'));
+  assert.ok(renderSource.includes('return "/assets/pixel-office/sprites/icons/state/light.png";'));
+  assert.ok(navigationSource.includes("const STATE_MARKER_SIZE = 11;"));
+  assert.ok(navigationSource.includes("const STATE_MARKER_BUBBLE_Y_OFFSET = 20;"));
+  assert.ok(sceneSource.includes("Math.max(8, Math.round(entry.statusMarker.width || 11))"));
+  assert.ok(navigationSource.includes("const statusMarkerUrl = agent.statusMarkerIconUrl || stateMarkerIconUrlForAgent(agent);"));
+  assert.ok(sceneSource.includes("statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),"));
+  assert.ok(sceneSource.includes("statusMarkerIconUrl: stateMarkerIconUrlForAgent(entry.agent),"));
 });
 
 test("runtime source preserves workstation entering-reveal flags for the Pixi flicker animation", () => {
   const sceneSource = readRuntimeSource("scene-source.ts");
-  const navigationSource = readRuntimeSource("navigation-source.ts");
+  const navigationSource = readRuntimeSource("navigation-source.ts").replace(/\r\n/g, "\n");
 
   assert.ok(sceneSource.includes("enteringReveal: options.enteringReveal === true,"));
   assert.ok(sceneSource.includes("enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),"));
@@ -171,25 +209,120 @@ test("runtime source preserves workstation entering-reveal flags for the Pixi fl
   );
 });
 
+test("blocked failure hover summaries prefer the current error detail over stale latest messages", () => {
+  const renderSource = readRuntimeSource("render-source.ts");
+  const stylesSource = readClientSource("styles-source.ts");
+
+  assert.ok(renderSource.includes("if (isFailureBlockedAgent(agent) && detail) {"));
+  assert.ok(renderSource.includes('return { text: detail, source: "agent", emphasis: "error" };'));
+  assert.ok(renderSource.includes('"agent-hover-summary agent-hover-summary-error"'));
+  assert.ok(stylesSource.includes(".agent-hover-summary-error {"));
+});
+
+test("multiplayer runtime persists per-project sharing and cools remote-only projects for one hour", () => {
+  const bootstrapSource = readRuntimeSource("bootstrap-source.ts");
+  const settingsSource = readRuntimeSource("settings-source.ts");
+  const multiplayerSource = readClientSource("multiplayer-source.ts");
+
+  assert.ok(bootstrapSource.includes('multiplayerProjectShareStorageKey = \\"codex-agents-office:multiplayer-project-shares\\";'));
+  assert.ok(settingsSource.includes("multiplayerProjectShares: loadMultiplayerProjectShares(),"));
+  assert.ok(multiplayerSource.includes("const MULTIPLAYER_REMOTE_PROJECT_COOLDOWN_MS = 60 * 60 * 1000;"));
+  assert.ok(multiplayerSource.includes("function loadMultiplayerProjectShares() {"));
+  assert.ok(multiplayerSource.includes("function setProjectRootsSharedWithRoom(projectRoots, shared) {"));
+  assert.ok(multiplayerSource.includes("function cooledRemoteProjectSnapshot(entry) {"));
+  assert.ok(multiplayerSource.includes("Shared project cooldown · keep remote-only floors visible for up to 1 hour after sharing stops."));
+  assert.ok(multiplayerSource.includes("const sharedProjects = state.localFleet.projects.filter((snapshot) => isProjectSharedWithRoom(snapshot.projectRoot));"));
+});
+
+test("workspace floors show multiplayer participants, grey remote-only titles, and expose a shared toggle", () => {
+  const settingsSource = readRuntimeSource("settings-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts");
+  const uiSource = readRuntimeSource("ui-source.ts");
+  const styles = readClientSource("styles.css");
+
+  assert.ok(settingsSource.includes("function sharedParticipantLabelsForSnapshot(snapshot) {"));
+  assert.ok(sceneSource.includes('class="tower-floor-participants"'));
+  assert.ok(sceneSource.includes('data-action="toggle-project-share"'));
+  assert.ok(sceneSource.includes('const remoteOnlyTitleClass = snapshotHasLocalProject(snapshot) ? "" : " is-remote-only";'));
+  assert.ok(uiSource.includes('if (action === "toggle-project-share") {'));
+  assert.ok(styles.includes(".tower-floor-title.is-remote-only .tower-floor-title-project {"));
+  assert.ok(styles.includes(".tower-floor-participants {"));
+  assert.ok(styles.includes(".tower-floor-share.active {"));
+});
+
 test("navigation source depth-sorts agents and desk shell sprites by feet position instead of fixed layers", () => {
   const navigationSource = readRuntimeSource("navigation-source.ts");
   const sceneSource = readRuntimeSource("scene-source.ts");
   const renderSource = readRuntimeSource("render-source.ts");
 
-  assert.ok(navigationSource.includes("function sceneFootDepth(y, height, bias = 0) {"));
-  assert.ok(navigationSource.includes("function applyFootDepth(node, y, height, bias = 0) {"));
+  assert.ok(navigationSource.includes("function sceneFootDepth(y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {"));
+  assert.ok(navigationSource.includes("const depthBase = Number.isFinite(depthBaseY) ? Number(depthBaseY) : 0;"));
+  assert.ok(navigationSource.includes("const relativeFootY = footY - depthBase;"));
+  assert.ok(navigationSource.includes("const tileRow = Number.isFinite(depthRow) ? Number(depthRow) : Math.floor(relativeFootY / unit);"));
+  assert.ok(navigationSource.includes("const intraTileY = relativeFootY - tileRow * unit;"));
+  assert.ok(navigationSource.includes("return (100000 + Math.round(depthBase)) * 1000000 + (1000 + tileRow) * 1000 + Math.round(intraTileY * 10) + (Number.isFinite(bias) ? Number(bias) : 0);"));
+  assert.ok(navigationSource.includes("function avatarRenderMetrics(agent) {"));
+  assert.ok(navigationSource.includes("renderHeight = Number.isFinite(motionState.renderHeight) ? Number(motionState.renderHeight) : Number(motionState.height);"));
+  assert.ok(navigationSource.includes("renderTopY = Number.isFinite(motionState.currentY)"));
+  assert.ok(navigationSource.includes("function applyFootDepth(node, y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {"));
   assert.ok(navigationSource.includes("if (Number.isFinite(definition.depthFootY)) {"));
   assert.ok(navigationSource.includes("Number(definition.depthFootY) - snappedHeight,"));
   assert.ok(navigationSource.includes("const fixedZ = Number.isFinite(agent.z) ? Number(agent.z) : null;"));
   assert.ok(navigationSource.includes("if (fixedZ !== null) {"));
-  assert.ok(navigationSource.includes("applyFootDepth(avatar, avatar.y, snappedHeight, zIndex);"));
+  assert.ok(navigationSource.includes("Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0"));
   assert.ok(navigationSource.includes("function syncMotionStateDepth(motionState) {"));
+  assert.ok(navigationSource.includes("const settledAtTarget = motionState.exiting !== true"));
+  assert.ok(navigationSource.includes("const effectiveDepthFootY = settledAtTarget && Number.isFinite(motionState.settledDepthFootY)"));
+  assert.ok(navigationSource.includes("previousState.settledDepthFootY = Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null;"));
+  assert.ok(navigationSource.includes("settledDepthFootY: Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null,"));
+  assert.ok(navigationSource.includes("const depthBias = effectiveDepthBias;"));
   assert.ok(sceneSource.includes("renderer.syncMotionStateDepth(entry);"));
+  assert.ok(sceneSource.includes("const renderOffsetX = Number.isFinite(entry.renderOffsetX) ? Number(entry.renderOffsetX) : 0;"));
+  assert.ok(sceneSource.includes("entry.sprite.x = pixelSnap(entry.currentX + renderOffsetX);"));
+  assert.ok(sceneSource.includes("entry.sprite.y = pixelSnap(entry.currentY + renderOffsetY);"));
   assert.ok(renderSource.includes("const deskDepthFootY = absoluteCellY + deskY + deskHeight;"));
-  assert.ok(renderSource.includes("depthBias: -10"));
-  assert.ok(renderSource.includes("depthBias: 10"));
-  assert.ok(renderSource.includes("depthBias: seatedState ? -5 : null"));
+  assert.ok(renderSource.includes("const chairDepthFootY = absoluteCellY + chairY + chairHeight;"));
+  assert.ok(renderSource.includes("const workstationDepthFootY = absoluteCellY + workstationY + workstationHeight;"));
+  assert.ok(renderSource.includes("const workstationOcclusionInset = compact ? 3 : 4;"));
+  assert.ok(renderSource.includes("const workstationFrontDepthFootY = Math.max(deskDepthFootY, workstationDepthFootY) + workstationOcclusionInset;"));
+  assert.ok(renderSource.includes("const workstationBoundsHeight = sceneTile * 2;"));
+  assert.ok(renderSource.includes("const workstationSortFootY = stationBoundsY + workstationBoundsHeight - 1;"));
+  assert.ok(renderSource.includes("const workstationSortRow = Math.floor((workstationSortFootY - depthBaseY) / sceneTile);"));
+  assert.ok(renderSource.includes("depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,"));
+  assert.ok(renderSource.includes("depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,"));
+  assert.ok(renderSource.includes("enteringReveal: options.enteringReveal === true,"));
+  assert.ok(renderSource.includes("const DESK_SHELL_DEPTH_BIAS = 120;"));
+  assert.ok(renderSource.includes("const CHAIR_DEPTH_BIAS = 180;"));
+  assert.ok(renderSource.includes("const SEATED_AVATAR_DEPTH_BIAS = 760;"));
+  assert.ok(renderSource.includes("const WORKSTATION_FRONT_DEPTH_BIAS = 620;"));
+  assert.ok(renderSource.includes("depthFootY: chairDepthFootY,"));
+  assert.ok(renderSource.includes("depthFootY: workstationSortFootY,"));
+  assert.ok(renderSource.includes("depthRow: workstationSortRow,"));
+  assert.ok(renderSource.includes("const mountedWorkstationOccupant = Boolean(agent) && Boolean(options.slotId) && state !== \"blocked\";"));
+  assert.ok(renderSource.includes("depthFootY: mountedWorkstationOccupant ? workstationSortFootY : null"));
+  assert.ok(renderSource.includes("depthRow: mountedWorkstationOccupant ? workstationSortRow : null"));
+  assert.ok(renderSource.includes("depthBias: mountedWorkstationOccupant ? SEATED_AVATAR_DEPTH_BIAS : null"));
+  assert.ok(renderSource.includes("if (state === \"idle\" || state === \"done\") {"));
+  assert.ok(renderSource.includes("x: seatedX,"));
+  assert.ok(renderSource.includes("flip: workstationFlip"));
+  assert.doesNotMatch(renderSource, /return \{ x: sideX, y: baseY, flip: workstationFlip \};/);
+  assert.ok(sceneSource.includes("depthFootY: Number.isFinite(options.depthFootY) ? Math.round(options.depthFootY) : null,"));
+  assert.ok(sceneSource.includes("depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,"));
+  assert.ok(sceneSource.includes("depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,"));
+  assert.ok(sceneSource.includes("depthBias: Number.isFinite(options.depthBias) ? Number(options.depthBias) : null,"));
   assert.ok(renderSource.includes("const seatedState = state === \"editing\""));
+});
+
+test("debug tiles expose visible workstation and avatar pivot markers", () => {
+  const navigationSource = readRuntimeSource("navigation-source.ts");
+  const renderSource = readRuntimeSource("render-source.ts");
+
+  assert.ok(navigationSource.includes("function addDebugPivot(x, y, color) {"));
+  assert.ok(navigationSource.includes(".circle(pivotX, pivotY, 4)"));
+  assert.ok(navigationSource.includes(".circle(pivotX, pivotY, 2)"));
+  assert.ok(renderSource.includes("pivotX: absoluteCellX + Math.round(avatarPose.x + avatarWidth / 2),"));
+  assert.ok(renderSource.includes("pivotY: workstationSortFootY,"));
+  assert.ok(renderSource.includes("pivotWidth: Math.round(workstationWidth)"));
 });
 
 test("workspace focus reuses compact scene geometry and grid-snapped desk starts", () => {
@@ -207,8 +340,8 @@ test("workspace focus reuses compact scene geometry and grid-snapped desk starts
     "desk pod origins should convert the snapped column back into tile pixels"
   );
   assert.ok(
-    renderSource.includes("tileHeight: 1"),
-    "workstation footprint should occupy only the bottom row"
+    renderSource.includes("tileHeight: 2"),
+    "workstation footprint should extend one tile lower while staying top-aligned"
   );
 });
 
@@ -216,7 +349,7 @@ test("workspace focus lets the expanded floor fill the full panel rect", () => {
   const stylesSource = readFileSync(
     join(__dirname, "../src/client/styles.css"),
     "utf8"
-  );
+  ).replace(/\r\n/g, "\n");
 
   assert.match(
     stylesSource,
@@ -328,10 +461,10 @@ test("rec-room roster keeps space for recently visible resting leads that went a
 });
 
 test("runtime source limits visible rec-room resters to recent top-level leads", () => {
-  const sceneSource = readRuntimeSource("scene-source.ts");
+  const sceneSource = readRuntimeSource("scene-source.ts").replace(/\r\n/g, "\n");
 
   assert.ok(sceneSource.includes('const allRestingAgents = restingAgentsFor(snapshot, compact);'));
-  assert.ok(sceneSource.includes('.filter((agent) =>\n            !agent.parentThreadId'));
+  assert.match(sceneSource, /\.filter\(\(agent\) =>\n\s*!agent\.parentThreadId/);
   assert.ok(sceneSource.includes(".slice(0, 4);"));
   assert.ok(sceneSource.includes('const restingAssignments = stableSceneSlotAssignments(snapshot.projectRoot, "resting", restingAgents, 4);'));
 });
@@ -343,8 +476,8 @@ test("runtime source can borrow recent rec-room leads for an empty selected work
   assert.ok(layoutSource.includes("function recentFallbackAgentsForEmptyProject(snapshot, allProjects, limit = SCENE_RECENT_LEAD_LIMIT) {"));
   assert.ok(layoutSource.includes('detail: projectPrefix + " · " + summary,'));
   assert.ok(layoutSource.includes('const fallbackAgents = recentFallbackAgentsForEmptyProject(snapshot, allProjects, recentLeadLimit);'));
-  assert.ok(uiSource.includes('? viewSnapshot(selectedRawSnapshot, SCENE_RECENT_LEAD_LIMIT, rawProjects)'));
-  assert.ok(uiSource.includes('? viewSessionSnapshot(selectedRawSnapshot, SESSION_RECENT_LEAD_LIMIT, rawProjects)'));
+  assert.ok(uiSource.includes('? viewSnapshot(selectedSnapshot, SCENE_RECENT_LEAD_LIMIT, selectableProjects)'));
+  assert.ok(uiSource.includes('? viewSessionSnapshot(selectedSnapshot, SESSION_RECENT_LEAD_LIMIT, selectableProjects)'));
 });
 
 test("runtime source falls back to default rec layout when saved sofa columns overlap", () => {
@@ -408,7 +541,7 @@ test("runtime source keeps current agents in the map scene even when they are be
   assert.ok(layoutSource.includes("const seenAgentIds = new Set();"));
   assert.match(
     seatingSource,
-    /function isLiveSceneAgent\(agent\) {\n\s+if \(!agent \|\| agent\.source === "cloud" \|\| agent\.source === "presence"\) {\n\s+return false;\n\s+}\n\s+return shouldSeatAtWorkstation\(agent\) \|\| agent\.isCurrent === true;\n\s+}/
+    /function isLiveSceneAgent\(agent\) {\n\s+if \(!agent \|\| agent\.source === "cloud" \|\| agent\.source === "presence"\) {\n\s+return false;\n\s+}\n\s+return shouldSeatAtWorkstation\(agent\) \|\| agent\.isCurrent === true(?: \|\| isRuntimeActiveLocalAgent\(agent\))?;\n\s+}/
   );
 });
 
@@ -457,7 +590,7 @@ test("toast renderer keeps the message, file-change, and command toast classes a
 });
 
 test("toast runtime preserves read command summaries and text-message priority", () => {
-  const renderSource = readRuntimeSource("render-source.ts");
+  const renderSource = readRuntimeSource("render-source.ts").replace(/\r\n/g, "\n");
 
   assert.match(
     renderSource,

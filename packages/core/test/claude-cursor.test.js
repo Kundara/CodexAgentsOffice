@@ -161,6 +161,35 @@ test("typed Claude notification hooks surface a recent agent message", () => {
   assert.equal(summary.latestMessage, "Analyzing renderer layout");
 });
 
+test("Cursor generic typed session-start falls back to planning instead of synthetic thinking", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "cursor-local-sessionstart-"));
+  const projectRoot = path.join(tempRoot, "project");
+  const hooksDir = path.join(projectRoot, ".codex-agents", "cursor-hooks");
+  const sessionId = "cursor-hook-sessionstart";
+  const hookFile = path.join(hooksDir, `${sessionId}.jsonl`);
+  const now = Date.now();
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(hooksDir, { recursive: true });
+
+  const hookLines = [
+    JSON.stringify({
+      conversation_id: sessionId,
+      hook_event_name: "sessionStart",
+      timestamp: new Date(now).toISOString(),
+      workspace_roots: [projectRoot],
+      model: "composer-2-fast"
+    })
+  ].join("\n") + "\n";
+
+  await writeFile(hookFile, hookLines);
+
+  const snapshot = await loadCursorLocalProjectSnapshotData(projectRoot);
+  assert.equal(snapshot.agents.length, 1);
+  assert.equal(snapshot.agents[0].confidence, "typed");
+  assert.equal(snapshot.agents[0].state, "planning");
+  assert.equal(snapshot.agents[0].detail, "Session started");
+});
+
 test("stale Claude hook-backed live states decay to done instead of staying ongoing forever", () => {
   const now = Date.now();
   const hookTimestamp = new Date(now - 5 * 60 * 1000).toISOString();

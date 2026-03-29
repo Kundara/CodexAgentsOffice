@@ -30,6 +30,7 @@ export function startClientApp(): void {
       const sceneSettingsStorageKey = "codex-agents-office:scene-settings";
       const furnitureLayoutStorageKey = "codex-agents-office:furniture-layout";
       const multiplayerSettingsStorageKey = "codex-agents-office:multiplayer-settings";
+      const multiplayerProjectShareStorageKey = "codex-agents-office:multiplayer-project-shares";
       const multiplayerPeerIdStorageKey = "codex-agents-office:multiplayer-peer-id";
       const multiplayerDeviceIdStorageKey = "codex-agents-office:multiplayer-device-id";
       const defaultIntegrationSettings = () => ({
@@ -76,6 +77,7 @@ export function startClientApp(): void {
         integrationSettingsPending: false,
         integrationSettingsError: null,
         multiplayerSettings: loadMultiplayerSettings(),
+        multiplayerProjectShares: loadMultiplayerProjectShares(),
         multiplayerStatus: {
           state: "disabled",
           detail: "Shared room sync is off."
@@ -141,6 +143,66 @@ export function startClientApp(): void {
 
       function projectLabel(projectRoot) {
         return projectInfo(projectRoot).label;
+      }
+
+      function localProjectRootsForSnapshot(snapshot) {
+        if (!snapshot) {
+          return [];
+        }
+        const localRoots = new Set((state.localFleet?.projects || []).map((project) => project.projectRoot));
+        const candidateRoots = Array.isArray(snapshot.mergedProjectRoots)
+          ? snapshot.mergedProjectRoots
+          : [snapshot.projectRoot];
+        return candidateRoots.filter((projectRoot) => localRoots.has(projectRoot));
+      }
+
+      function snapshotHasLocalProject(snapshot) {
+        return localProjectRootsForSnapshot(snapshot).length > 0;
+      }
+
+      function projectShareToggleRoots(snapshot) {
+        return localProjectRootsForSnapshot(snapshot);
+      }
+
+      function projectShareEnabledForSnapshot(snapshot) {
+        const projectRoots = projectShareToggleRoots(snapshot);
+        if (projectRoots.length === 0) {
+          return true;
+        }
+        return projectRoots.every((projectRoot) => isProjectSharedWithRoom(projectRoot));
+      }
+
+      function shouldRenderProjectShareToggle(snapshot) {
+        return state.multiplayerSettings.enabled === true
+          && hasMultiplayerCredentials(state.multiplayerSettings)
+          && projectShareToggleRoots(snapshot).length > 0;
+      }
+
+      function sharedParticipantLabelsForSnapshot(snapshot) {
+        const labels = [];
+        const seen = new Set();
+        const activeAgents = (Array.isArray(snapshot?.agents) ? snapshot.agents : []).filter((agent) => isBusyAgent(agent));
+        for (const agent of activeAgents) {
+          const label = agent?.network?.peerLabel
+            ? String(agent.network.peerLabel)
+            : (!agent?.network && snapshotHasLocalProject(snapshot) ? sharedLocalParticipantLabel() : "");
+          if (!label || seen.has(label)) {
+            continue;
+          }
+          seen.add(label);
+          labels.push(label);
+        }
+        if (labels.length === 0) {
+          for (const label of Array.isArray(snapshot?.sharedParticipantLabels) ? snapshot.sharedParticipantLabels : []) {
+            const normalized = String(label || "").trim();
+            if (!normalized || seen.has(normalized)) {
+              continue;
+            }
+            seen.add(normalized);
+            labels.push(normalized);
+          }
+        }
+        return labels.sort((left, right) => left.localeCompare(right));
       }
 
       function stableSceneSlotAssignments(projectRoot, category, agents, maxSlots = null) {
@@ -1791,11 +1853,13 @@ export function startClientApp(): void {
       const multiplayerPeerId = loadMultiplayerPeerId();
       const multiplayerDeviceId = loadMultiplayerDeviceId();
       const multiplayerPeers = new Map();
+      const multiplayerRemoteProjects = new Map();
       let multiplayerSocket = null;
       let multiplayerModulePromise = null;
       let multiplayerBroadcastTimer = null;
       let multiplayerPruneTimer = null;
       const MULTIPLAYER_STALE_MS = 30000;
+      const MULTIPLAYER_REMOTE_PROJECT_COOLDOWN_MS = 60 * 60 * 1000;
       const MULTIPLAYER_BROADCAST_DEBOUNCE_MS = 700;
       const MULTIPLAYER_NICKNAME_MAX_LENGTH = 12;
 
@@ -1839,6 +1903,68 @@ export function startClientApp(): void {
         try {
           window.localStorage.setItem(multiplayerSettingsStorageKey, JSON.stringify(state.multiplayerSettings));
         } catch {}
+      }
+
+      function loadMultiplayerProjectShares() {
+        try {
+          const raw = window.localStorage.getItem(multiplayerProjectShareStorageKey);
+          if (!raw) {
+            return {};
+          }
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") {
+            return {};
+          }
+          const next = {};
+          for (const [projectRoot, shared] of Object.entries(parsed)) {
+            const normalizedRoot = sanitizeMultiplayerField(projectRoot);
+            if (!normalizedRoot || shared !== false) {
+              continue;
+            }
+            next[normalizedRoot] = false;
+          }
+          return next;
+        } catch {
+          return {};
+        }
+      }
+
+      function saveMultiplayerProjectShares() {
+        try {
+          window.localStorage.setItem(
+            multiplayerProjectShareStorageKey,
+            JSON.stringify(state.multiplayerProjectShares || {})
+          );
+        } catch {}
+      }
+
+      function isProjectSharedWithRoom(projectRoot) {
+        const normalizedRoot = sanitizeMultiplayerField(projectRoot);
+        if (!normalizedRoot) {
+          return true;
+        }
+        return state.multiplayerProjectShares?.[normalizedRoot] !== false;
+      }
+
+      function setProjectRootsSharedWithRoom(projectRoots, shared) {
+        const normalizedRoots = Array.from(new Set((Array.isArray(projectRoots) ? projectRoots : [])
+          .map((projectRoot) => sanitizeMultiplayerField(projectRoot))
+          .filter(Boolean)));
+        if (normalizedRoots.length === 0) {
+          return;
+        }
+        const nextShares = { ...(state.multiplayerProjectShares || {}) };
+        for (const projectRoot of normalizedRoots) {
+          if (shared === false) {
+            nextShares[projectRoot] = false;
+          } else {
+            delete nextShares[projectRoot];
+          }
+        }
+        state.multiplayerProjectShares = nextShares;
+        saveMultiplayerProjectShares();
+        render();
+        scheduleMultiplayerBroadcast();
       }
 
       function loadMultiplayerPeerId() {
@@ -1979,6 +2105,58 @@ export function startClientApp(): void {
         return nickname || "Peer " + multiplayerPeerId.slice(0, 6);
       }
 
+      function sharedLocalParticipantLabel() {
+        const nickname = sanitizeMultiplayerNickname(state.multiplayerSettings.nickname);
+        return nickname || "You";
+      }
+
+      function sharedRoomNote(peerCount) {
+        const roomName = state.multiplayerSettings.room;
+        return roomName
+          ? "Shared room " + roomName + " · " + peerCount + " remote peer" + (peerCount === 1 ? "" : "s")
+          : "Shared room connected · " + peerCount + " remote peer" + (peerCount === 1 ? "" : "s");
+      }
+
+      function sharedProjectCooldownNote() {
+        return "Shared project cooldown · keep remote-only floors visible for up to 1 hour after sharing stops.";
+      }
+
+      function ensureSnapshotNotes(snapshot) {
+        if (!Array.isArray(snapshot.notes)) {
+          snapshot.notes = [];
+        }
+        return snapshot.notes;
+      }
+
+      function ensureSnapshotSharedParticipants(snapshot) {
+        if (!Array.isArray(snapshot.sharedParticipantLabels)) {
+          snapshot.sharedParticipantLabels = [];
+        }
+        return snapshot.sharedParticipantLabels;
+      }
+
+      function setSnapshotSharedParticipants(snapshot, participantLabels) {
+        snapshot.sharedParticipantLabels = Array.from(new Set((Array.isArray(participantLabels) ? participantLabels : [])
+          .map((label) => sanitizeMultiplayerNickname(label) || sanitizeMultiplayerField(label))
+          .filter(Boolean)))
+          .sort((left, right) => left.localeCompare(right));
+      }
+
+      function setSnapshotSharedPeerCount(snapshot, peerCount) {
+        const notes = ensureSnapshotNotes(snapshot).filter((note) =>
+          typeof note !== "string"
+          || (!note.startsWith("Shared room ") && !note.startsWith("Shared room connected"))
+        );
+        notes.push(sharedRoomNote(peerCount));
+        snapshot.notes = notes;
+      }
+
+      function setSnapshotCooldownNote(snapshot) {
+        const notes = ensureSnapshotNotes(snapshot).filter((note) => note !== sharedProjectCooldownNote());
+        notes.push(sharedProjectCooldownNote());
+        snapshot.notes = notes;
+      }
+
       function activeSharedPeerCount() {
         const cutoff = Date.now() - MULTIPLAYER_STALE_MS;
         let count = 0;
@@ -2070,6 +2248,45 @@ export function startClientApp(): void {
         };
       }
 
+      function remoteProjectMemoryEntry(snapshot, participantLabels, receivedAt) {
+        return {
+          snapshot: cloneValue(snapshot),
+          participantLabels: Array.from(new Set((Array.isArray(participantLabels) ? participantLabels : []).filter(Boolean))),
+          receivedAt
+        };
+      }
+
+      function cooledRemoteProjectSnapshot(entry) {
+        const cooledAtIso = new Date(entry.receivedAt).toISOString();
+        const snapshot = cloneValue(entry.snapshot);
+        snapshot.agents = (Array.isArray(snapshot.agents) ? snapshot.agents : []).map((agent) => ({
+          ...agent,
+          isCurrent: false,
+          isOngoing: false,
+          needsUser: null,
+          stoppedAt: agent.stoppedAt || cooledAtIso,
+          statusText: agent.source === "local" && agent.statusText === "active" ? "idle" : agent.statusText
+        }));
+        snapshot.generatedAt = cooledAtIso;
+        snapshot.sharedRemoteOnly = true;
+        snapshot.sharedCoolingDown = true;
+        setSnapshotSharedParticipants(snapshot, entry.participantLabels);
+        setSnapshotCooldownNote(snapshot);
+        return snapshot;
+      }
+
+      function pruneRemoteProjectCooldowns() {
+        const cutoff = Date.now() - MULTIPLAYER_REMOTE_PROJECT_COOLDOWN_MS;
+        let changed = false;
+        for (const [projectKey, entry] of multiplayerRemoteProjects.entries()) {
+          if (!entry || entry.receivedAt < cutoff) {
+            multiplayerRemoteProjects.delete(projectKey);
+            changed = true;
+          }
+        }
+        return changed;
+      }
+
       function sharedAgentIdentityKeys(agent) {
         const keys = [];
         if (!agent || typeof agent !== "object") {
@@ -2097,13 +2314,35 @@ export function startClientApp(): void {
         return keys;
       }
 
+      function ensureRemoteSharedBucket(remoteProjectsByKey, remoteSnapshot, peer) {
+        const projectKey = snapshotWorkspaceKey(remoteSnapshot);
+        let bucket = remoteProjectsByKey.get(projectKey);
+        if (!bucket) {
+          const snapshot = cloneValue(remoteSnapshot);
+          snapshot.agents = [];
+          snapshot.events = [];
+          snapshot.sharedRemoteOnly = true;
+          snapshot.sharedCoolingDown = false;
+          setSnapshotSharedParticipants(snapshot, []);
+          bucket = {
+            key: projectKey,
+            snapshot,
+            participantLabels: new Set(),
+            agentIdentityKeys: new Set()
+          };
+          remoteProjectsByKey.set(projectKey, bucket);
+        }
+        bucket.participantLabels.add(peer.peerLabel);
+        return bucket;
+      }
+
       function buildSharedFleet(localFleet) {
         if (!localFleet) {
           return null;
         }
         const mergedFleet = cloneValue(localFleet);
         const localProjectsByKey = new Map(mergedFleet.projects.map((snapshot) => [snapshotWorkspaceKey(snapshot), snapshot]));
-        const roomName = state.multiplayerSettings.room;
+        const remoteProjectsByKey = new Map();
         let sharedPeerCount = 0;
 
         for (const peer of multiplayerPeers.values()) {
@@ -2112,8 +2351,25 @@ export function startClientApp(): void {
           }
           sharedPeerCount += 1;
           for (const remoteSnapshot of peer.projects) {
-            const localSnapshot = localProjectsByKey.get(snapshotWorkspaceKey(remoteSnapshot));
+            const projectKey = snapshotWorkspaceKey(remoteSnapshot);
+            const localSnapshot = localProjectsByKey.get(projectKey);
             if (!localSnapshot) {
+              const bucket = ensureRemoteSharedBucket(remoteProjectsByKey, remoteSnapshot, peer);
+              const mergedEvents = (Array.isArray(remoteSnapshot.events) ? remoteSnapshot.events : [])
+                .map((event) => mergeSharedEvent(bucket.snapshot, remoteSnapshot, event, peer));
+              const mergedAgents = (Array.isArray(remoteSnapshot.agents) ? remoteSnapshot.agents : [])
+                .filter((agent) => {
+                  const identityKeys = sharedAgentIdentityKeys(agent);
+                  return !identityKeys.some((key) => bucket.agentIdentityKeys.has(key));
+                })
+                .map((agent) => {
+                  for (const key of sharedAgentIdentityKeys(agent)) {
+                    bucket.agentIdentityKeys.add(key);
+                  }
+                  return mergeSharedAgent(bucket.snapshot, remoteSnapshot, agent, peer);
+                });
+              bucket.snapshot.agents = bucket.snapshot.agents.concat(mergedAgents);
+              bucket.snapshot.events = bucket.snapshot.events.concat(mergedEvents).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
               continue;
             }
             const localAgentIdentityKeys = collectSharedAgentIdentityKeys(localSnapshot.agents);
@@ -2127,13 +2383,37 @@ export function startClientApp(): void {
             }
             localSnapshot.agents = localSnapshot.agents.concat(mergedAgents);
             localSnapshot.events = localSnapshot.events.concat(mergedEvents).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-            const sharedNote = roomName
-              ? "Shared room " + roomName + " · " + sharedPeerCount + " remote peer" + (sharedPeerCount === 1 ? "" : "s")
-              : "Shared room connected · " + sharedPeerCount + " remote peer" + (sharedPeerCount === 1 ? "" : "s");
-            if (!localSnapshot.notes.includes(sharedNote)) {
-              localSnapshot.notes.push(sharedNote);
-            }
+            const participantLabels = new Set(ensureSnapshotSharedParticipants(localSnapshot));
+            participantLabels.add(peer.peerLabel);
+            setSnapshotSharedParticipants(localSnapshot, [...participantLabels]);
           }
+        }
+
+        for (const snapshot of mergedFleet.projects) {
+          if (Array.isArray(snapshot.sharedParticipantLabels) && snapshot.sharedParticipantLabels.length > 0) {
+            setSnapshotSharedPeerCount(snapshot, sharedPeerCount);
+          }
+        }
+
+        for (const [projectKey, bucket] of remoteProjectsByKey.entries()) {
+          setSnapshotSharedParticipants(bucket.snapshot, [...bucket.participantLabels]);
+          setSnapshotSharedPeerCount(bucket.snapshot, sharedPeerCount);
+          multiplayerRemoteProjects.set(
+            projectKey,
+            remoteProjectMemoryEntry(bucket.snapshot, [...bucket.participantLabels], Date.now())
+          );
+          mergedFleet.projects.push(bucket.snapshot);
+        }
+
+        for (const [projectKey, entry] of multiplayerRemoteProjects.entries()) {
+          if (remoteProjectsByKey.has(projectKey) || localProjectsByKey.has(projectKey)) {
+            continue;
+          }
+          if (Date.now() - entry.receivedAt > MULTIPLAYER_REMOTE_PROJECT_COOLDOWN_MS) {
+            multiplayerRemoteProjects.delete(projectKey);
+            continue;
+          }
+          mergedFleet.projects.push(cooledRemoteProjectSnapshot(entry));
         }
 
         return {
@@ -2188,6 +2468,9 @@ export function startClientApp(): void {
             changed = true;
           }
         }
+        if (pruneRemoteProjectCooldowns()) {
+          changed = true;
+        }
         if (changed) {
           applyFleet(state.localFleet);
         }
@@ -2224,6 +2507,10 @@ export function startClientApp(): void {
           socket.close(1000, "reconfigure");
         }
         multiplayerPeers.clear();
+        if (!options.preserveStatus) {
+          multiplayerRemoteProjects.clear();
+        }
+        pruneRemoteProjectCooldowns();
         applyFleet(state.localFleet);
         if (!options.preserveStatus) {
           setMultiplayerStatus("disabled", "Shared room sync is off.");
@@ -2235,6 +2522,7 @@ export function startClientApp(): void {
           return null;
         }
         const nickname = sanitizeMultiplayerNickname(state.multiplayerSettings.nickname);
+        const sharedProjects = state.localFleet.projects.filter((snapshot) => isProjectSharedWithRoom(snapshot.projectRoot));
         return {
           type: "fleet-sync",
           peerId: multiplayerPeerId,
@@ -2242,7 +2530,7 @@ export function startClientApp(): void {
           peerLabel: nickname || sharedPeerLabel(),
           nickname,
           sentAt: new Date().toISOString(),
-          projects: state.localFleet.projects
+          projects: sharedProjects
         };
       }
 
@@ -3735,8 +4023,7 @@ export function startClientApp(): void {
       function isRuntimeActiveLocalAgent(agent) {
         return agent
           && agent.source === "local"
-          && agent.statusText === "active"
-          && agent.state !== "waiting";
+          && agent.statusText === "active";
       }
 
       function workstationDoneGraceMs(agent) {
@@ -3780,9 +4067,6 @@ export function startClientApp(): void {
             return agent.isOngoing === true || hasCurrentLocalDeskGrace(agent);
           }
           if (agent.statusText === "active") {
-            if (agent.state === "waiting") {
-              return false;
-            }
             if (isRuntimeActiveLocalAgent(agent)) {
               return true;
             }
@@ -3797,7 +4081,7 @@ export function startClientApp(): void {
             return agent.isCurrent === true;
           }
         }
-        if (agent.state === "waiting" || agent.state === "idle" || agent.state === "done") {
+        if (agent.state === "idle" || agent.state === "done") {
           return false;
         }
         if (agent.source === "local") {
@@ -3815,7 +4099,7 @@ export function startClientApp(): void {
       function isFinishedLeadForRec(agent) {
         return isRecentLeadCandidate(agent)
           && !shouldSeatAtWorkstation(agent)
-          && (agent.state === "waiting" || agent.state === "idle" || agent.state === "done");
+          && (agent.state === "idle" || agent.state === "done");
       }
 
       function isLiveSceneAgent(agent) {
@@ -3936,11 +4220,14 @@ export function startClientApp(): void {
       }
 
       function agentHoverSummary(snapshot, agent) {
+        const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail);
+        if (isFailureBlockedAgent(agent) && detail) {
+          return { text: detail, source: "agent", emphasis: "error" };
+        }
         const message = latestAgentMessage(snapshot.projectRoot, agent);
         if (message) {
           return { text: message, source: "agent" };
         }
-        const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail);
         const focus = primaryFocusPath(snapshot, agent);
         const source = agent.activityEvent && agent.activityEvent.type === "userMessage" ? "user" : "agent";
         if (!focus) {
@@ -4072,6 +4359,59 @@ export function startClientApp(): void {
           default:
             return options.isCommand ? null : eventIconUrlForThreadItemType(type);
         }
+      }
+
+      function isNeedsUserMarkerAgent(agent) {
+        if (!agent) {
+          return false;
+        }
+        if (agent.needsUser && (agent.needsUser.kind === "approval" || agent.needsUser.kind === "input")) {
+          return true;
+        }
+        const detail = String(agent.detail || "").trim().toLowerCase();
+        return detail === "waiting on approval" || detail === "waiting on input" || detail === "waiting on user input";
+      }
+
+      function isFailureBlockedAgent(agent) {
+        if (!agent || agent.state !== "blocked" || isNeedsUserMarkerAgent(agent)) {
+          return false;
+        }
+        if (agent.statusText === "systemError") {
+          return true;
+        }
+        if (agent.activityEvent && ["commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall"].includes(agent.activityEvent.type)) {
+          return true;
+        }
+        return false;
+      }
+
+      function shouldShowThinkingMarker(agent) {
+        if (!agent || agent.state !== "thinking") {
+          return false;
+        }
+        if (agent.activityEvent && agent.activityEvent.type === "agentMessage") {
+          return false;
+        }
+        return !(typeof agent.latestMessage === "string" && agent.latestMessage.trim().length > 0);
+      }
+
+      function stateMarkerIconUrlForAgent(agent) {
+        if (!agent) {
+          return null;
+        }
+        if (isNeedsUserMarkerAgent(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/hand.png";
+        }
+        if (isFailureBlockedAgent(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/exclamation.png";
+        }
+        if (agent.state === "planning") {
+          return "/assets/pixel-office/sprites/icons/state/clipboard.png";
+        }
+        if (shouldShowThinkingMarker(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/light.png";
+        }
+        return null;
       }
 
       function splitShellWords(command) {
@@ -4371,9 +4711,11 @@ export function startClientApp(): void {
         const hoverTitle = displayAgentLabel(snapshot, agent);
         const className = options.className || "agent-hover";
         const styleAttr = options.style ? ` style="${escapeHtml(options.style)}"` : "";
-        const summaryClass = summary.source === "user"
-          ? "agent-hover-summary agent-hover-summary-user"
-          : "agent-hover-summary";
+        const summaryClass =
+          summary.emphasis === "error" ? "agent-hover-summary agent-hover-summary-error"
+          : summary.source === "user"
+            ? "agent-hover-summary agent-hover-summary-user"
+            : "agent-hover-summary";
         const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
         const worktreeHtml = worktreeName
           ? `<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></div>`
@@ -4695,14 +5037,21 @@ export function startClientApp(): void {
           width: Math.round(sprite.w * scale),
           height: Math.round(sprite.h * scale),
           flipX: options.flipX === true,
+          enteringReveal: options.enteringReveal === true,
           alpha: options.alpha ?? 1,
           depthFootY: Number.isFinite(options.depthFootY) ? Math.round(options.depthFootY) : null,
+          depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+          depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,
           depthBias: Number.isFinite(options.depthBias) ? Number(options.depthBias) : null,
           z
         };
       }
 
       function buildCubicleCellVisualModel(snapshot, agent, role, x, y, boothWidth, boothHeight, compact, options = {}) {
+        const DESK_SHELL_DEPTH_BIAS = 120;
+        const CHAIR_DEPTH_BIAS = 180;
+        const SEATED_AVATAR_DEPTH_BIAS = 760;
+        const WORKSTATION_FRONT_DEPTH_BIAS = 620;
         const state = agent?.state || "idle";
         const avatar = agent ? avatarForAgent(agent) : null;
         const avatarScale = compact ? 1.25 : 1.5;
@@ -4767,39 +5116,48 @@ export function startClientApp(): void {
           const seatedX = mirrored
             ? clampAvatarX(Math.round(chairX + chairWidth - avatarWidth - seatInset))
             : clampAvatarX(Math.round(chairX + seatInset));
-          if (state === "editing" || state === "thinking" || state === "planning" || state === "scanning" || state === "delegating") {
+          if (state === "editing" || state === "thinking" || state === "planning" || state === "scanning" || state === "delegating" || state === "waiting") {
             return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "running" || state === "validating") {
             return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "blocked") {
-            const workingX = mirrored
-              ? clampAvatarX(sideX + (compact ? 4 : 6))
-              : clampAvatarX(sideX - (compact ? 4 : 6));
-            return { x: workingX, y: baseY, flip: workstationFlip };
+            return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "idle" || state === "done") {
             return {
-              x: Math.max(2, Math.round(centerX - avatarWidth / 2)),
-              y: Math.max(0, baseY + (compact ? 1 : 2)),
-              flip: stableHash(agent.id) % 2 === 0
+              x: seatedX,
+              y: Math.max(0, baseY - (compact ? 1 : 3)),
+              flip: workstationFlip
             };
           }
-          return { x: sideX, y: baseY, flip: workstationFlip };
+          return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
         })();
         const absoluteCellX = Math.round(options.absoluteX ?? x);
         const absoluteCellY = Math.round(options.absoluteY ?? y);
         const deskDepthFootY = absoluteCellY + deskY + deskHeight;
+        const chairDepthFootY = absoluteCellY + chairY + chairHeight;
+        const workstationDepthFootY = absoluteCellY + workstationY + workstationHeight;
+        const workstationOcclusionInset = compact ? 3 : 4;
+        const workstationFrontDepthFootY = Math.max(deskDepthFootY, workstationDepthFootY) + workstationOcclusionInset;
         const seatedState = state === "editing"
-          || state === "thinking"
-          || state === "planning"
-          || state === "scanning"
-          || state === "delegating"
-          || state === "running"
-          || state === "validating";
+            || state === "thinking"
+            || state === "planning"
+            || state === "scanning"
+            || state === "delegating"
+            || state === "waiting"
+            || state === "running"
+            || state === "validating";
+        const mountedWorkstationOccupant = Boolean(agent) && Boolean(options.slotId) && state !== "blocked";
         const stationBoundsX = absoluteCellX + Math.max(0, Math.round((boothWidth - sceneTile * 3) / 2));
         const stationBoundsY = absoluteCellY + Math.max(0, boothHeight - sceneTile);
+        const workstationBoundsHeight = sceneTile * 2;
+        const workstationSortFootY = stationBoundsY + workstationBoundsHeight - 1;
+        const depthBaseY = Number.isFinite(options.depthBaseY) ? Number(options.depthBaseY) : 0;
+        const deskDepthRow = Math.floor((deskDepthFootY - depthBaseY) / sceneTile);
+        const chairDepthRow = Math.floor((chairDepthFootY - depthBaseY) / sceneTile);
+        const workstationSortRow = Math.floor((workstationSortFootY - depthBaseY) / sceneTile);
         const anchorX = absoluteCellX + Math.round(workstationX + workstationWidth * 0.5);
         const anchorY = absoluteCellY + Math.round(boothHeight * 0.72);
         const visual = {
@@ -4807,20 +5165,26 @@ export function startClientApp(): void {
             buildPixiSpriteDef(deskSprite, absoluteCellX + deskX, absoluteCellY + deskY, deskScale, 7, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
+              depthBaseY: options.depthBaseY,
+              depthRow: deskDepthRow,
               depthFootY: deskDepthFootY,
-              depthBias: 0
+              depthBias: DESK_SHELL_DEPTH_BIAS
             }),
             buildPixiSpriteDef(chair, absoluteCellX + chairX, absoluteCellY + chairY, chairScale, 8, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
-              depthFootY: deskDepthFootY,
-              depthBias: -10
+              depthBaseY: options.depthBaseY,
+              depthRow: chairDepthRow,
+              depthFootY: chairDepthFootY,
+              depthBias: CHAIR_DEPTH_BIAS
             }),
             buildPixiSpriteDef(computerSprite, absoluteCellX + workstationX, absoluteCellY + workstationY, workstationScale, 9, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
-              depthFootY: deskDepthFootY,
-              depthBias: 10
+              depthBaseY: options.depthBaseY,
+              depthRow: workstationSortRow,
+              depthFootY: workstationSortFootY,
+              depthBias: WORKSTATION_FRONT_DEPTH_BIAS
             })
           ],
           glow: (agent && isBusyAgent(agent) && state !== "waiting" && state !== "blocked")
@@ -4840,8 +5204,14 @@ export function startClientApp(): void {
                 width: Math.round(avatarWidth),
                 height: Math.round(avatarHeight),
                 flipX: avatarPose.flip === true,
-                depthFootY: seatedState ? deskDepthFootY : null,
-                depthBias: seatedState ? -5 : null,
+                depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+                depthRow: mountedWorkstationOccupant ? workstationSortRow : null,
+                depthFootY: mountedWorkstationOccupant ? workstationSortFootY : null,
+                depthBias: mountedWorkstationOccupant ? SEATED_AVATAR_DEPTH_BIAS : null,
+                pivotX: absoluteCellX + Math.round(avatarPose.x + avatarWidth / 2),
+                pivotY: mountedWorkstationOccupant
+                  ? workstationSortFootY
+                  : absoluteCellY + Math.round(avatarPose.y + avatarHeight - 1),
                 state,
                 appearance: agent.appearance
               }
@@ -4850,9 +5220,12 @@ export function startClientApp(): void {
             x: stationBoundsX,
             y: stationBoundsY,
             width: sceneTile * 3,
-            height: sceneTile,
+            height: workstationBoundsHeight,
             tileWidth: 3,
-            tileHeight: 1
+            tileHeight: 2,
+            pivotX: absoluteCellX + Math.round(workstationX + workstationWidth / 2),
+            pivotY: workstationSortFootY,
+            pivotWidth: Math.round(workstationWidth)
           },
           anchorX,
           anchorY,
@@ -5090,12 +5463,17 @@ export function startClientApp(): void {
         const compact = options.compact === true;
         const titleAttr = escapeHtml(snapshot.projectRoot);
         const projectTitle = projectLabel(snapshot.projectRoot);
+        const participantLabels = sharedParticipantLabelsForSnapshot(snapshot);
+        const participantHtml = participantLabels.length > 0
+          ? `<div class="tower-floor-participants" title="${escapeHtml("Active in this workspace: " + participantLabels.join(", "))}">${participantLabels.map((label) => `<span class="tower-floor-participant">${escapeHtml(label)}</span>`).join("")}</div>`
+          : "";
+        const remoteOnlyTitleClass = snapshotHasLocalProject(snapshot) ? "" : " is-remote-only";
         const worktreeName = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
           ? worktreeNameForSnapshot(snapshot)
           : "";
         const titleHtml = worktreeName
-          ? `<div class="tower-floor-title" title="${titleAttr}"><span class="tower-floor-title-project">${escapeHtml(projectTitle)}</span><span class="tower-floor-title-worktree"><img class="worktree-inline-icon tower-floor-worktree-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></span></div>`
-          : `<div class="tower-floor-title" title="${titleAttr}">${escapeHtml(projectTitle)}</div>`;
+          ? `<div class="tower-floor-title${remoteOnlyTitleClass}" title="${titleAttr}"><span class="tower-floor-title-project">${escapeHtml(projectTitle)}</span>${participantHtml}<span class="tower-floor-title-worktree"><img class="worktree-inline-icon tower-floor-worktree-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></span></div>`
+          : `<div class="tower-floor-title${remoteOnlyTitleClass}" title="${titleAttr}"><span class="tower-floor-title-project">${escapeHtml(projectTitle)}</span>${participantHtml}</div>`;
         const summary = state.view === "map"
           ? (compact ? "Live floor" : "Current workload")
           : `${counts.total} agents · ${counts.active} active · ${counts.waiting} waiting · ${counts.blocked} blocked · ${counts.cloud} cloud`;
@@ -5108,10 +5486,13 @@ export function startClientApp(): void {
             liveOnly: state.activeOnly,
             focusMode: options.focusMode === true
           });
+        const shareToggleHtml = shouldRenderProjectShareToggle(snapshot)
+          ? `<button class="tower-floor-share${projectShareEnabledForSnapshot(snapshot) ? " active" : ""}" data-action="toggle-project-share" data-project-roots="${escapeHtml(JSON.stringify(projectShareToggleRoots(snapshot)))}" aria-pressed="${projectShareEnabledForSnapshot(snapshot) ? "true" : "false"}" title="${escapeHtml(projectShareEnabledForSnapshot(snapshot) ? "Shared with the room" : "Not shared with the room")}" type="button">Shared</button>`
+          : "";
         const actionHtml = options.action
           ? `<button class="tower-floor-open" data-action="${escapeHtml(options.action.type)}"${options.action.projectRoot ? ` data-project-root="${escapeHtml(options.action.projectRoot)}"` : ""}>${escapeHtml(options.action.label)}</button>`
           : "";
-        return `<section class="tower-floor${compact ? " compact" : ""}" data-project-root="${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">${escapeHtml(summary)}</div>${actionHtml}</div></div><div class="tower-floor-body">${notes ? `<div class="tower-floor-note">${escapeHtml(notes)}</div>` : ""}${body}</div></section>`;
+        return `<section class="tower-floor${compact ? " compact" : ""}" data-project-root="${escapeHtml(snapshot.projectRoot)}"><div class="tower-floor-strip"><div class="tower-floor-label">${titleHtml}</div><div class="tower-floor-trailing"><div class="tower-floor-meta">${escapeHtml(summary)}</div><div class="tower-floor-actions">${shareToggleHtml}${actionHtml}</div></div></div><div class="tower-floor-body">${notes ? `<div class="tower-floor-note">${escapeHtml(notes)}</div>` : ""}${body}</div></section>`;
       }
 
       function renderWorkspaceScroll(projects) {
@@ -5162,7 +5543,7 @@ export function startClientApp(): void {
         const baseMaxX = Math.max(...rooms.map((room) => room.x + room.width), 24);
         const maxY = Math.max(...rooms.map((room) => room.y + room.height), 16);
         const waitingAgents = snapshot.agents
-          .filter((agent) => agent.state === "waiting" && agent.source !== "cloud")
+          .filter((agent) => agent.state === "waiting" && agent.source !== "cloud" && !shouldSeatAtWorkstation(agent))
           .sort(compareAgentsByRecencyStable);
         const allRestingAgents = restingAgentsFor(snapshot, compact);
         const restingAgents = allRestingAgents
@@ -5321,6 +5702,7 @@ export function startClientApp(): void {
                   lead: false,
                   slotId: entry.slot.id,
                   enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, agent, entry.slot.id),
+                  depthBaseY: room.floorTop,
                   absoluteX: pod.x + cellX,
                   absoluteY: pod.y
                 }
@@ -5340,6 +5722,8 @@ export function startClientApp(): void {
                   focusKey: focusAgentKey(snapshot, agent),
                   focusKeys: collectFocusedSessionKeys(snapshot, agent),
                   appearance: agent.appearance,
+                  needsUser: agent.needsUser || null,
+                  statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                   slotId: entry.slot.id,
                   mirrored: seatMirrored,
                   ...visual.avatar,
@@ -5395,6 +5779,7 @@ export function startClientApp(): void {
                 lead: true,
                 slotId: entry.slot.id,
                 enteringReveal: shouldRevealWorkstation(snapshot.projectRoot, entry.agent, entry.slot.id),
+                depthBaseY: room.floorTop,
                 absoluteX: officeX + cellX,
                 absoluteY: officeY
               }
@@ -5421,6 +5806,8 @@ export function startClientApp(): void {
                     focusKey: focusAgentKey(snapshot, entry.agent),
                     focusKeys: collectFocusedSessionKeys(snapshot, entry.agent),
                     appearance: entry.agent.appearance,
+                    needsUser: entry.agent.needsUser || null,
+                    statusMarkerIconUrl: stateMarkerIconUrlForAgent(entry.agent),
                     slotId: entry.slot.id,
                     mirrored: false,
                     ...visual.avatar,
@@ -5472,11 +5859,14 @@ export function startClientApp(): void {
                 focusKey: focusAgentKey(snapshot, agent),
                 focusKeys: collectFocusedSessionKeys(snapshot, agent),
                 appearance: agent.appearance,
+                needsUser: agent.needsUser || null,
+                statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                 sprite: avatarForAgent(agent).url,
                 x: roomX + slot.x,
                 y: roomY + slot.y,
                 width: Math.round(avatarForAgent(agent).w * (compact ? 1 : 1.08)),
                 height: Math.round(avatarForAgent(agent).h * (compact ? 1 : 1.08)),
+                depthBaseY: room.floorTop,
                 bubble: "...",
                 flip: slot.flip
               });
@@ -5511,11 +5901,14 @@ export function startClientApp(): void {
                 focusKey: focusAgentKey(snapshot, agent),
                 focusKeys: collectFocusedSessionKeys(snapshot, agent),
                 appearance: agent.appearance,
+                needsUser: agent.needsUser || null,
+                statusMarkerIconUrl: stateMarkerIconUrlForAgent(agent),
                 sprite: avatarForAgent(agent).url,
                 x: roomX + slot.x,
                 y: roomY + slot.y,
                 width: Math.round(avatarForAgent(agent).w * (compact ? 1 : 1.08)),
                 height: Math.round(avatarForAgent(agent).h * (compact ? 1 : 1.08)),
+                depthBaseY: room.floorTop,
                 bubble: null,
                 flip: slot.flip
               });
@@ -5707,12 +6100,14 @@ export function startClientApp(): void {
                 if (entry.routeIndex >= route.length && typeof entry.targetFlipX === "boolean") {
                   entry.flipX = entry.targetFlipX;
                 }
-                entry.sprite.x = pixelSnap(entry.currentX);
-                entry.sprite.y = pixelSnap(entry.currentY);
-                const snappedWidth = pixelSnap(entry.width, 1);
+                const renderOffsetX = Number.isFinite(entry.renderOffsetX) ? Number(entry.renderOffsetX) : 0;
+                const renderOffsetY = Number.isFinite(entry.renderOffsetY) ? Number(entry.renderOffsetY) : 0;
+                const renderWidth = Number.isFinite(entry.renderWidth) ? Number(entry.renderWidth) : pixelSnap(entry.width, 1);
+                entry.sprite.x = pixelSnap(entry.currentX + renderOffsetX);
+                entry.sprite.y = pixelSnap(entry.currentY + renderOffsetY);
                 if (entry.flipX) {
                   entry.sprite.scale.x = -Math.abs(entry.sprite.scale.x || 1);
-                  entry.sprite.x = pixelSnap(entry.currentX) + snappedWidth;
+                  entry.sprite.x = pixelSnap(entry.currentX + renderOffsetX) + renderWidth;
                 } else {
                   entry.sprite.scale.x = Math.abs(entry.sprite.scale.x || 1);
                 }
@@ -5723,6 +6118,11 @@ export function startClientApp(): void {
                   entry.bubbleBox.y = bubbleY;
                   entry.bubbleText.x = bubbleX + Math.round((entry.bubbleBox.width - entry.bubbleText.width) / 2);
                   entry.bubbleText.y = bubbleY + Math.round((entry.bubbleBox.height - entry.bubbleText.height) / 2) - 1;
+                }
+                if (entry.statusMarker) {
+                  const markerWidth = Math.max(8, Math.round(entry.statusMarker.width || 11));
+                  entry.statusMarker.x = pixelSnap(entry.currentX + Math.round((entry.width - markerWidth) / 2));
+                  entry.statusMarker.y = pixelSnap(entry.currentY - (entry.bubbleBox ? 20 : 13));
                 }
                 if (typeof renderer.syncHeldItemSprite === "function") {
                   renderer.syncHeldItemSprite(entry);
@@ -5738,6 +6138,9 @@ export function startClientApp(): void {
                   }
                   if (entry.bubbleText) {
                     entry.bubbleText.alpha = entry.sprite.alpha;
+                  }
+                  if (entry.statusMarker) {
+                    entry.statusMarker.alpha = entry.sprite.alpha;
                   }
                   if (entry.heldItemSprite) {
                     entry.heldItemSprite.alpha = entry.sprite.alpha;
@@ -5867,6 +6270,9 @@ export function startClientApp(): void {
             if (agent && agent.sprite) {
               urls.add(agent.sprite);
             }
+            if (agent && agent.statusMarkerIconUrl) {
+              urls.add(agent.statusMarkerIconUrl);
+            }
           });
         });
         model.offices.forEach((office) => {
@@ -5878,10 +6284,16 @@ export function startClientApp(): void {
           if (office.agent && office.agent.sprite) {
             urls.add(office.agent.sprite);
           }
+          if (office.agent && office.agent.statusMarkerIconUrl) {
+            urls.add(office.agent.statusMarkerIconUrl);
+          }
         });
         model.recAgents.forEach((agent) => {
           if (agent && agent.sprite) {
             urls.add(agent.sprite);
+          }
+          if (agent && agent.statusMarkerIconUrl) {
+            urls.add(agent.statusMarkerIconUrl);
           }
         });
         model.facilities.forEach((facility) => {
@@ -6008,6 +6420,10 @@ function roleTint(role) {
           flipX: options.flipX === true,
           enteringReveal: options.enteringReveal === true,
           alpha: options.alpha ?? 1,
+          depthFootY: Number.isFinite(options.depthFootY) ? Math.round(options.depthFootY) : null,
+          depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+          depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,
+          depthBias: Number.isFinite(options.depthBias) ? Number(options.depthBias) : null,
           z
         };
       }
@@ -6283,15 +6699,21 @@ function roleTint(role) {
         });
       }
 
-      function sceneFootDepth(y, height, bias = 0) {
-        return (1000 + pixelSnap(y) + pixelSnap(height, 1)) * 10 + (Number.isFinite(bias) ? Number(bias) : 0);
+      function sceneFootDepth(y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {
+        const footY = Number(y) + Number(height);
+        const unit = Number.isFinite(tileSize) && tileSize > 0 ? Number(tileSize) : 16;
+        const depthBase = Number.isFinite(depthBaseY) ? Number(depthBaseY) : 0;
+        const relativeFootY = footY - depthBase;
+        const tileRow = Number.isFinite(depthRow) ? Number(depthRow) : Math.floor(relativeFootY / unit);
+        const intraTileY = relativeFootY - tileRow * unit;
+        return (100000 + Math.round(depthBase)) * 1000000 + (1000 + tileRow) * 1000 + Math.round(intraTileY * 10) + (Number.isFinite(bias) ? Number(bias) : 0);
       }
 
-      function applyFootDepth(node, y, height, bias = 0) {
+      function applyFootDepth(node, y, height, bias = 0, tileSize = 16, depthBaseY = 0, depthRow = null) {
         if (!node) {
           return;
         }
-        node.zIndex = sceneFootDepth(y, height, bias);
+        node.zIndex = sceneFootDepth(y, height, bias, tileSize, depthBaseY, depthRow);
       }
 
       function syncOfficeRendererScene(renderer, model) {
@@ -6331,6 +6753,13 @@ function roleTint(role) {
         renderer.roomById = roomById;
         renderer.roomNavigation = roomNavigation;
         renderer.reservedAgentTiles = reservedAgentTiles;
+        renderer.debugWorkstationNodes = [];
+        renderer.debugDepthWarnings = new Set();
+        const workstationByKey = new Map(
+          (Array.isArray(model.workstations) ? model.workstations : [])
+            .filter((workstation) => workstation && workstation.key)
+            .map((workstation) => [workstation.key, workstation])
+        );
         const background = new PIXI.Graphics()
           .roundRect(0, 0, model.width, model.height, 14)
           .fill({ color: 0x0b1b2b })
@@ -6616,7 +7045,10 @@ function roleTint(role) {
               sprite,
               Number(definition.depthFootY) - snappedHeight,
               snappedHeight,
-              Number.isFinite(definition.depthBias) ? Number(definition.depthBias) : 0
+              Number.isFinite(definition.depthBias) ? Number(definition.depthBias) : 0,
+              model.tile,
+              Number.isFinite(definition.depthBaseY) ? Number(definition.depthBaseY) : 0,
+              Number.isFinite(definition.depthRow) ? Number(definition.depthRow) : null
             );
           } else {
             sprite.zIndex = definition.z || 5;
@@ -6641,14 +7073,37 @@ function roleTint(role) {
           });
         }
 
+        const STATE_MARKER_SIZE = 11;
+        const STATE_MARKER_Y_OFFSET = 13;
+        const STATE_MARKER_BUBBLE_Y_OFFSET = 20;
+
+        function statusMarkerPosition(agent, markerWidth = STATE_MARKER_SIZE) {
+          return {
+            x: pixelSnap(agent.x + Math.round((agent.width - markerWidth) / 2)),
+            y: pixelSnap(agent.y - (agent.bubble ? STATE_MARKER_BUBBLE_Y_OFFSET : STATE_MARKER_Y_OFFSET))
+          };
+        }
+
+        function avatarRenderMetrics(agent) {
+          const avatarScale = agent && agent.slotId ? 0.86 : 1;
+          const width = pixelSnap(agent.width * avatarScale, 1);
+          const height = pixelSnap(agent.height * avatarScale, 1);
+          return {
+            width,
+            height,
+            offsetX: pixelSnap((agent.width - width) / 2),
+            offsetY: pixelSnap(agent.height - height)
+          };
+        }
+
         function addAvatarNode(agent, zIndex = 12) {
           const avatar = PIXI.Sprite.from(loadedOfficeAssetImages.get(agent.sprite) || agent.sprite);
           const createdNodes = [];
-          const avatarScale = agent && agent.slotId ? 0.86 : 1;
-          const snappedWidth = pixelSnap(agent.width * avatarScale, 1);
-          const snappedHeight = pixelSnap(agent.height * avatarScale, 1);
-          const offsetX = pixelSnap((agent.width - snappedWidth) / 2);
-          const offsetY = pixelSnap(agent.height - snappedHeight);
+          const renderMetrics = avatarRenderMetrics(agent);
+          const snappedWidth = renderMetrics.width;
+          const snappedHeight = renderMetrics.height;
+          const offsetX = renderMetrics.offsetX;
+          const offsetY = renderMetrics.offsetY;
           avatar.x = pixelSnap(agent.x) + offsetX;
           avatar.y = pixelSnap(agent.y) + offsetY;
           avatar.width = snappedWidth;
@@ -6663,15 +7118,43 @@ function roleTint(role) {
               avatar,
               Number(agent.depthFootY) - snappedHeight,
               snappedHeight,
-              Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : zIndex
+              Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : zIndex,
+              model.tile,
+              Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+              Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
             );
           } else if (fixedZ !== null) {
             avatar.zIndex = fixedZ;
           } else {
-            applyFootDepth(avatar, avatar.y, snappedHeight, zIndex);
+            applyFootDepth(
+              avatar,
+              avatar.y,
+              snappedHeight,
+              zIndex,
+              model.tile,
+              Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+              Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
+            );
           }
           renderer.root.addChild(avatar);
           createdNodes.push(avatar);
+          let statusMarker = null;
+          const statusMarkerUrl = agent.statusMarkerIconUrl || stateMarkerIconUrlForAgent(agent);
+          if (statusMarkerUrl) {
+            statusMarker = PIXI.Sprite.from(loadedOfficeAssetImages.get(statusMarkerUrl) || statusMarkerUrl);
+            const markerWidth = STATE_MARKER_SIZE;
+            const markerHeight = STATE_MARKER_SIZE;
+            const markerPosition = statusMarkerPosition(agent, markerWidth);
+            statusMarker.x = markerPosition.x;
+            statusMarker.y = markerPosition.y;
+            statusMarker.width = markerWidth;
+            statusMarker.height = markerHeight;
+            statusMarker.zIndex = Number.isFinite(agent.depthFootY)
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 1, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 1 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 1, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
+            renderer.root.addChild(statusMarker);
+            createdNodes.push(statusMarker);
+          }
           let bubbleBox = null;
           let bubbleText = null;
           if (agent.bubble) {
@@ -6685,8 +7168,8 @@ function roleTint(role) {
             bubbleBox.x = bubbleX;
             bubbleBox.y = bubbleY;
             bubbleBox.zIndex = Number.isFinite(agent.depthFootY)
-              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 1)
-              : (fixedZ !== null ? fixedZ + 1 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 1));
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 2, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 2 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 2, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
             renderer.root.addChild(bubbleBox);
             createdNodes.push(bubbleBox);
             bubbleText = createPixiText(renderer, agent.bubble, {
@@ -6698,18 +7181,25 @@ function roleTint(role) {
             bubbleText.x = bubbleX + Math.round((bubbleWidth - bubbleText.width) / 2);
             bubbleText.y = bubbleY + Math.round((12 - bubbleText.height) / 2) - 1;
             bubbleText.zIndex = Number.isFinite(agent.depthFootY)
-              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 2)
-              : (fixedZ !== null ? fixedZ + 2 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 2));
+              ? sceneFootDepth(Number(agent.depthFootY) - snappedHeight, snappedHeight, (Number(agent.depthBias) || zIndex) + 3, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null)
+              : (fixedZ !== null ? fixedZ + 3 : sceneFootDepth(avatar.y, snappedHeight, zIndex + 3, model.tile, Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0, Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null));
             renderer.root.addChild(bubbleText);
             createdNodes.push(bubbleText);
           }
           return {
             nodes: createdNodes,
             avatar,
+            statusMarker,
             bubbleBox,
             bubbleText,
+            renderWidth: snappedWidth,
+            renderHeight: snappedHeight,
+            renderOffsetX: offsetX,
+            renderOffsetY: offsetY,
             depthBias: Number.isFinite(agent.depthBias) ? Number(agent.depthBias) : (fixedZ !== null ? fixedZ : zIndex),
-            depthFootY: Number.isFinite(agent.depthFootY) ? Number(agent.depthFootY) : null
+            depthFootY: Number.isFinite(agent.depthFootY) ? Number(agent.depthFootY) : null,
+            depthBaseY: Number.isFinite(agent.depthBaseY) ? Number(agent.depthBaseY) : 0,
+            depthRow: Number.isFinite(agent.depthRow) ? Number(agent.depthRow) : null
           };
         }
 
@@ -6717,32 +7207,71 @@ function roleTint(role) {
           if (!motionState || !motionState.sprite) {
             return;
           }
-          if (Number.isFinite(motionState.depthFootY)) {
+          const routeLength = Array.isArray(motionState.route) ? motionState.route.length : 0;
+          const settledAtTarget = motionState.exiting !== true
+            && routeLength > 0
+            && motionState.routeIndex >= routeLength;
+          const effectiveDepthFootY = settledAtTarget && Number.isFinite(motionState.settledDepthFootY)
+            ? Number(motionState.settledDepthFootY)
+            : (Number.isFinite(motionState.depthFootY) ? Number(motionState.depthFootY) : null);
+          const effectiveDepthBias = settledAtTarget && Number.isFinite(motionState.settledDepthBias)
+            ? Number(motionState.settledDepthBias)
+            : (Number.isFinite(motionState.depthBias) ? Number(motionState.depthBias) : 0);
+          const effectiveDepthRow = settledAtTarget && Number.isFinite(motionState.settledDepthRow)
+            ? Number(motionState.settledDepthRow)
+            : (Number.isFinite(motionState.depthRow) ? Number(motionState.depthRow) : null);
+          const renderHeight = Number.isFinite(motionState.renderHeight) ? Number(motionState.renderHeight) : Number(motionState.height);
+          const renderTopY = Number.isFinite(motionState.currentY)
+            ? Number(motionState.currentY) + (Number.isFinite(motionState.renderOffsetY) ? Number(motionState.renderOffsetY) : 0)
+            : Number(motionState.sprite.y);
+          if (Number.isFinite(effectiveDepthFootY)) {
             applyFootDepth(
               motionState.sprite,
-              Number(motionState.depthFootY) - motionState.height,
-              motionState.height,
-              Number.isFinite(motionState.depthBias) ? Number(motionState.depthBias) : 0
+              Number(effectiveDepthFootY) - renderHeight,
+              renderHeight,
+              effectiveDepthBias,
+              model.tile,
+              Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+              effectiveDepthRow
             );
+            if (motionState.statusMarker) {
+              motionState.statusMarker.zIndex = sceneFootDepth(
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 1,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
+              );
+            }
             if (motionState.bubbleBox) {
               motionState.bubbleBox.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 1
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 2,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             if (motionState.bubbleText) {
               motionState.bubbleText.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 2
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 3,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             if (motionState.heldItemSprite) {
               motionState.heldItemSprite.zIndex = sceneFootDepth(
-                Number(motionState.depthFootY) - motionState.height,
-                motionState.height,
-                (Number(motionState.depthBias) || 0) + 3
+                Number(effectiveDepthFootY) - renderHeight,
+                renderHeight,
+                effectiveDepthBias + 4,
+                model.tile,
+                Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0,
+                effectiveDepthRow
               );
             }
             return;
@@ -6750,27 +7279,102 @@ function roleTint(role) {
           if (Number.isFinite(motionState.fixedZ)) {
             const fixedZ = Number(motionState.fixedZ);
             motionState.sprite.zIndex = fixedZ;
+            if (motionState.statusMarker) {
+              motionState.statusMarker.zIndex = fixedZ + 1;
+            }
             if (motionState.bubbleBox) {
-              motionState.bubbleBox.zIndex = fixedZ + 1;
+              motionState.bubbleBox.zIndex = fixedZ + 2;
             }
             if (motionState.bubbleText) {
-              motionState.bubbleText.zIndex = fixedZ + 2;
+              motionState.bubbleText.zIndex = fixedZ + 3;
             }
             if (motionState.heldItemSprite) {
-              motionState.heldItemSprite.zIndex = fixedZ + 3;
+              motionState.heldItemSprite.zIndex = fixedZ + 4;
             }
             return;
           }
-          const depthBias = Number.isFinite(motionState.depthBias) ? motionState.depthBias : 12;
-          applyFootDepth(motionState.sprite, motionState.currentY, motionState.height, depthBias);
+          const depthBias = effectiveDepthBias;
+          const currentRoom = motionState.roomId ? renderer.roomById?.get(motionState.roomId) || null : null;
+          const movingDepthRow = currentRoom
+            ? officeAvatarFootTile(
+                currentRoom,
+                model.tile,
+                Number(motionState.currentX),
+                Number(motionState.currentY),
+                Number(motionState.width),
+                Number(motionState.height)
+              )?.row
+            : null;
+          applyFootDepth(motionState.sprite, renderTopY, renderHeight, depthBias, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          if (motionState.statusMarker) {
+            applyFootDepth(motionState.statusMarker, renderTopY, renderHeight, depthBias + 1, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          }
           if (motionState.bubbleBox) {
-            applyFootDepth(motionState.bubbleBox, motionState.currentY, motionState.height, depthBias + 1);
+            applyFootDepth(motionState.bubbleBox, renderTopY, renderHeight, depthBias + 2, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
           }
           if (motionState.bubbleText) {
-            applyFootDepth(motionState.bubbleText, motionState.currentY, motionState.height, depthBias + 2);
+            applyFootDepth(motionState.bubbleText, renderTopY, renderHeight, depthBias + 3, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
           }
           if (motionState.heldItemSprite) {
-            applyFootDepth(motionState.heldItemSprite, motionState.currentY, motionState.height, depthBias + 3);
+            applyFootDepth(motionState.heldItemSprite, renderTopY, renderHeight, depthBias + 4, model.tile, Number.isFinite(motionState.depthBaseY) ? Number(motionState.depthBaseY) : 0, movingDepthRow);
+          }
+          if (
+            state.globalSceneSettings.debugTiles
+            && motionState.roomId
+            && motionState.sprite
+            && Array.isArray(renderer.debugWorkstationNodes)
+          ) {
+            const agentFootY = renderTopY + renderHeight;
+            const agentLeft = Number(motionState.sprite.x) || 0;
+            const agentRight = agentLeft + (Number(motionState.sprite.width) || 0);
+            renderer.debugWorkstationNodes.forEach((entry) => {
+              if (
+                !entry
+                || entry.roomId !== motionState.roomId
+                || !entry.node
+                || !Number.isFinite(entry.pivotY)
+              ) {
+                return;
+              }
+              const workstationLeft = Number.isFinite(entry.boundsX) ? Number(entry.boundsX) : (Number(entry.node.x) || 0);
+              const workstationRight = workstationLeft + (Number.isFinite(entry.boundsWidth) ? Number(entry.boundsWidth) : (Number(entry.node.width) || 0));
+              const overlapsX = agentRight > workstationLeft && agentLeft < workstationRight;
+              if (!overlapsX) {
+                return;
+              }
+              const agentZ = Number(motionState.sprite.zIndex) || 0;
+              const workstationZ = Number(entry.node.zIndex) || 0;
+              if (agentFootY >= Number(entry.pivotY) || agentZ <= workstationZ) {
+                return;
+              }
+              const warningKey = [
+                motionState.key,
+                entry.key || "workstation",
+                Math.round(agentFootY),
+                Math.round(entry.pivotY),
+                Math.round(agentZ),
+                Math.round(workstationZ)
+              ].join(":");
+              if (renderer.debugDepthWarnings.has(warningKey)) {
+                return;
+              }
+              renderer.debugDepthWarnings.add(warningKey);
+              console.debug("scene depth violation", {
+                agent: motionState.key,
+                roomId: motionState.roomId,
+                agentX: Math.round(Number(motionState.currentX) || 0),
+                agentY: Math.round(Number(motionState.currentY) || 0),
+                agentFootY: Math.round(agentFootY),
+                agentZ: Math.round(agentZ),
+                workstation: entry.key || null,
+                workstationPivotY: Math.round(Number(entry.pivotY)),
+                workstationZ: Math.round(workstationZ),
+                workstationBounds: {
+                  x: Math.round(workstationLeft),
+                  width: Math.round(workstationRight - workstationLeft)
+                }
+              });
+            });
           }
         }
 
@@ -6808,16 +7412,39 @@ function roleTint(role) {
           );
           if (sameTarget) {
             previousState.sprite = avatarVisual.avatar;
+            previousState.statusMarker = avatarVisual.statusMarker;
             previousState.bubbleBox = avatarVisual.bubbleBox;
             previousState.bubbleText = avatarVisual.bubbleText;
              previousState.heldItemSprite = null;
             previousState.anchorNode = renderer.agentHitNodes.get(agentKey) || null;
             previousState.width = agent.width;
             previousState.height = agent.height;
+            previousState.renderWidth = avatarVisual.renderWidth;
+            previousState.renderHeight = avatarVisual.renderHeight;
+            previousState.renderOffsetX = avatarVisual.renderOffsetX;
+            previousState.renderOffsetY = avatarVisual.renderOffsetY;
             previousState.state = agent.state || "idle";
             previousState.spriteUrl = agent.sprite;
-            previousState.depthBias = avatarVisual.depthBias;
-            previousState.depthFootY = avatarVisual.depthFootY;
+            previousState.depthBaseY = avatarVisual.depthBaseY;
+            previousState.depthRow = avatarVisual.depthRow;
+            previousState.settledDepthFootY = Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null;
+            previousState.settledDepthBias = Number.isFinite(avatarVisual.depthBias) ? Number(avatarVisual.depthBias) : null;
+            previousState.settledDepthRow = Number.isFinite(avatarVisual.depthRow) ? Number(avatarVisual.depthRow) : null;
+            const isMoving = (Boolean(previousState && previousState.routeIndex < (previousState.route?.length || 0))
+              || previousState.exiting === true);
+            const movingDepthFootY = isMoving ? null : avatarVisual.depthFootY;
+            const movingDepthBias = isMoving ? null : avatarVisual.depthBias;
+            if (state.globalSceneSettings.debugTiles && isMoving && Number.isFinite(avatarVisual.depthFootY)) {
+              console.debug("scene depth: clearing fixed foot depth for moving agent", {
+                agent: agentKey,
+                state: agent.state,
+                target: { x: agent.x, y: agent.y },
+                current: { x: previousState.currentX, y: previousState.currentY },
+                foot: avatarVisual.depthFootY
+              });
+            }
+            previousState.depthBias = movingDepthBias;
+            previousState.depthFootY = movingDepthFootY;
             previousState.fixedZ = Number.isFinite(agent.z) ? Number(agent.z) : null;
             previousState.targetFlipX = agent.flipX === true;
             previousState.slotId = agent.slotId || previousState.slotId || null;
@@ -6877,16 +7504,33 @@ function roleTint(role) {
               { x: agent.x, y: agent.y }
             )
             : [{ x: agent.x, y: agent.y }];
+          const isMoving = route.length > 1 || options.exiting === true;
+          const movingDepthFootY = isMoving ? null : avatarVisual.depthFootY;
+          const movingDepthBias = isMoving ? null : avatarVisual.depthBias;
+          if (state.globalSceneSettings.debugTiles && isMoving && Number.isFinite(avatarVisual.depthFootY)) {
+            console.debug('scene depth: clearing fixed foot depth for moving agent', {
+              agent: agentKey,
+              state: agent.state,
+              target: { x: agent.x, y: agent.y },
+              current: { x: previousState ? previousState.currentX : agent.x, y: previousState ? previousState.currentY : agent.y },
+              foot: avatarVisual.depthFootY
+            });
+          }
           const motionState = {
             kind: "motion",
             key: agentKey,
             roomId: agent.roomId,
             sprite: avatarVisual.avatar,
+            statusMarker: avatarVisual.statusMarker,
             spriteUrl: agent.sprite,
             bubbleBox: avatarVisual.bubbleBox,
             bubbleText: avatarVisual.bubbleText,
             width: agent.width,
             height: agent.height,
+            renderWidth: avatarVisual.renderWidth,
+            renderHeight: avatarVisual.renderHeight,
+            renderOffsetX: avatarVisual.renderOffsetX,
+            renderOffsetY: avatarVisual.renderOffsetY,
             currentX: previousState
               ? previousState.currentX
               : (route[0]?.x ?? agent.x),
@@ -6909,8 +7553,13 @@ function roleTint(role) {
               ? agent.mirrored
               : (typeof previousState?.mirrored === "boolean" ? previousState.mirrored : null),
             heldItemSprite: null,
-            depthBias: avatarVisual.depthBias,
-            depthFootY: avatarVisual.depthFootY,
+            depthBaseY: avatarVisual.depthBaseY,
+            depthRow: avatarVisual.depthRow,
+            depthBias: movingDepthBias,
+            depthFootY: movingDepthFootY,
+            settledDepthBias: Number.isFinite(avatarVisual.depthBias) ? Number(avatarVisual.depthBias) : null,
+            settledDepthFootY: Number.isFinite(avatarVisual.depthFootY) ? Number(avatarVisual.depthFootY) : null,
+            settledDepthRow: Number.isFinite(avatarVisual.depthRow) ? Number(avatarVisual.depthRow) : null,
             fixedZ: Number.isFinite(agent.z) ? Number(agent.z) : null,
             autonomy: autonomousResting
               ? (previousState && previousState.autonomy
@@ -7002,6 +7651,22 @@ function roleTint(role) {
           labelText.y = pixelSnap(y) - 9;
           labelText.zIndex = 100;
           renderer.root.addChild(labelText);
+        }
+
+        function addDebugPivot(x, y, color) {
+          const pivotX = pixelSnap(x);
+          const pivotY = pixelSnap(y);
+          const pivotHalo = new PIXI.Graphics()
+            .circle(pivotX, pivotY, 4)
+            .fill({ color: 0xffffff, alpha: 0.92 });
+          pivotHalo.zIndex = 101;
+          renderer.root.addChild(pivotHalo);
+          const pivotDot = new PIXI.Graphics()
+            .circle(pivotX, pivotY, 2)
+            .fill({ color, alpha: 1 })
+            .stroke({ color: 0x061019, width: 1, alpha: 0.95 });
+          pivotDot.zIndex = 102;
+          renderer.root.addChild(pivotDot);
         }
 
         model.rooms.forEach((room) => {
@@ -7189,6 +7854,13 @@ function roleTint(role) {
             0x4dd8ff,
             `${workstation.tileWidth}x${workstation.tileHeight}`
           );
+          if (Number.isFinite(workstation.pivotX) && Number.isFinite(workstation.pivotY)) {
+            addDebugPivot(
+              workstation.pivotX,
+              workstation.pivotY,
+              0xffb347
+            );
+          }
         });
 
         const currentAgentKeys = new Set();
@@ -7196,10 +7868,22 @@ function roleTint(role) {
         model.desks.forEach((desk) => {
           const deskNodes = [];
           const enteringRevealNodes = [];
+          const workstationKey = desk.agents[0]?.key || desk.agents[0]?.id || null;
+          const workstationMeta = workstationKey ? workstationByKey.get(workstationKey) || null : null;
           desk.shell.forEach((item) => {
             if (item.kind === "sprite") {
               const node = addSpriteNode(item);
               deskNodes.push(node);
+              if (item.z === 9 && workstationMeta) {
+                renderer.debugWorkstationNodes.push({
+                  key: workstationMeta.key,
+                  roomId: workstationMeta.roomId,
+                  node,
+                  pivotY: workstationMeta.pivotY,
+                  boundsX: workstationMeta.x,
+                  boundsWidth: workstationMeta.width
+                });
+              }
               if (!screenshotMode && item.enteringReveal === true) {
                 enteringRevealNodes.push(node);
               }
@@ -7247,6 +7931,8 @@ function roleTint(role) {
         model.offices.forEach((office) => {
           const officeNodes = [];
           const enteringRevealNodes = [];
+          const workstationKey = office.agent?.key || office.agent?.id || null;
+          const workstationMeta = workstationKey ? workstationByKey.get(workstationKey) || null : null;
           if (state.globalSceneSettings.debugTiles) {
             addDebugBounds(office.x, office.y, office.width, office.height, 0xff8d4d, tileBoundsLabel(office.width, office.height, model.tile));
           }
@@ -7293,6 +7979,16 @@ function roleTint(role) {
             if (item.kind === "sprite") {
               const node = addSpriteNode(item);
               officeNodes.push(node);
+              if (item.z === 9 && workstationMeta) {
+                renderer.debugWorkstationNodes.push({
+                  key: workstationMeta.key,
+                  roomId: workstationMeta.roomId,
+                  node,
+                  pivotY: workstationMeta.pivotY,
+                  boundsX: workstationMeta.x,
+                  boundsWidth: workstationMeta.width
+                });
+              }
               if (!screenshotMode && item.enteringReveal === true) {
                 enteringRevealNodes.push(node);
               }
@@ -7365,6 +8061,11 @@ function roleTint(role) {
           );
           if (state.globalSceneSettings.debugTiles) {
             addDebugBounds(agent.x, agent.y, agent.width, agent.height, 0x9eff6a, tileBoundsLabel(agent.width, agent.height, model.tile));
+            addDebugPivot(
+              Number.isFinite(agent.pivotX) ? agent.pivotX : agent.x + agent.width / 2,
+              Number.isFinite(agent.pivotY) ? agent.pivotY : agent.y + agent.height - 1,
+              0xff5d9e
+            );
           }
           registerFocusNodes(agent.focusKeys, recNodes);
         });
@@ -7406,6 +8107,7 @@ function roleTint(role) {
             key,
             roomId: motionState.roomId,
             sprite: ghostVisual.avatar,
+            statusMarker: null,
             bubbleBox: null,
             bubbleText: null,
             width: motionState.width,
@@ -8170,6 +8872,15 @@ function focusKeysIntersect(keys, focusedKeys) {
         if (action === "select-project" && target.dataset.projectRoot) {
           setSettingsOpen(false);
           setSelection(target.dataset.projectRoot);
+          return;
+        }
+
+        if (action === "toggle-project-share") {
+          try {
+            const projectRoots = JSON.parse(target.dataset.projectRoots || "[]");
+            const enabled = target.getAttribute("aria-pressed") === "true";
+            setProjectRootsSharedWithRoom(projectRoots, !enabled);
+          } catch {}
           return;
         }
 

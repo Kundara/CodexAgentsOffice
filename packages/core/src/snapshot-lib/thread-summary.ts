@@ -115,6 +115,65 @@ function extractPathsFromText(text: string): string[] {
   return Array.from(new Set(matches));
 }
 
+function summarizePlanItem(item: ThreadItem): string {
+  const explanation = typeof item.explanation === "string" ? item.explanation : null;
+  if (isMeaningfulText(explanation)) {
+    return shortenText(explanation, 88);
+  }
+
+  const summary = typeof item.summary === "string" ? item.summary : null;
+  if (isMeaningfulText(summary)) {
+    return shortenText(summary, 88);
+  }
+
+  const text = typeof item.text === "string" ? item.text : null;
+  if (isMeaningfulText(text)) {
+    return shortenText(text, 88);
+  }
+
+  const plan = Array.isArray(item.plan) ? item.plan : [];
+  const entries = plan
+    .map((entry) => (typeof entry === "object" && entry ? entry as Record<string, unknown> : null))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .map((entry) => ({
+      step: typeof entry.step === "string" ? entry.step : null,
+      status: typeof entry.status === "string" ? entry.status : null
+    }))
+    .filter((entry) => isMeaningfulText(entry.step));
+
+  const current =
+    entries.find((entry) => entry.status === "inProgress")
+    ?? entries.find((entry) => entry.status === "pending")
+    ?? entries.at(-1)
+    ?? null;
+
+  if (!current?.step) {
+    return "Planning";
+  }
+
+  if (current.status === "inProgress") {
+    return shortenText(`Planning: ${current.step}`, 88);
+  }
+  if (current.status === "pending") {
+    return shortenText(`Queued: ${current.step}`, 88);
+  }
+  return shortenText(current.step, 88);
+}
+
+function summarizeFailedItemDetail(item: ThreadItem, fallback: string): string {
+  const errorRecord = typeof item.error === "object" && item.error ? item.error as Record<string, unknown> : null;
+  const errorMessage =
+    (errorRecord && typeof errorRecord.message === "string" ? errorRecord.message : null)
+    || (errorRecord && typeof errorRecord.text === "string" ? errorRecord.text : null)
+    || (typeof item.error_message === "string" ? item.error_message : null)
+    || (typeof item.reason === "string" ? item.reason : null)
+    || (typeof item.message === "string" ? item.message : null);
+  if (isMeaningfulText(errorMessage)) {
+    return shortenText(errorMessage, 88);
+  }
+  return fallback;
+}
+
 function describeAgentMessage(item: ThreadItem): { detail: string; paths: string[] } {
   const candidateText = typeof item.text === "string" ? item.text : null;
   const text = isMeaningfulText(candidateText)
@@ -383,12 +442,12 @@ export function summariseThread(thread: CodexThread): {
     const recentState = ageMs <= DONE_WINDOW_MS ? "done" : "idle";
     return {
       state:
-        thread.status.type === "active" || freshSpawnedDetached ? "thinking"
+        thread.status.type === "active" || freshSpawnedDetached ? "planning"
         : recentState,
       detail:
         preview
         || (thread.status.type === "active" || freshSpawnedDetached
-          ? "Thinking"
+          ? "No turns yet"
           : recentState === "done"
             ? "Finished recently"
             : "Idle"),
@@ -414,11 +473,11 @@ export function summariseThread(thread: CodexThread): {
   if (!item) {
     return {
       state:
-        treatAsInProgress ? "thinking"
+        treatAsInProgress ? "planning"
         : interruptedWithoutFinalAnswer ? (ageMs <= DONE_WINDOW_MS ? "done" : "idle")
         : "idle",
       detail:
-        treatAsInProgress ? "Thinking"
+        treatAsInProgress ? "Planning"
         : interruptedWithoutFinalAnswer ? (ageMs <= DONE_WINDOW_MS ? "Interrupted" : "Idle")
         : "Idle",
       paths: [thread.cwd],
@@ -434,12 +493,14 @@ export function summariseThread(thread: CodexThread): {
         status === "failed" || status === "declined" ? "blocked"
         : !treatAsInProgress && status === "completed" ? settledRecentState
         : "editing";
+      const editingDetail = change.path ? `Editing ${change.path}` : "Editing files";
       return {
         state,
         detail:
-          state === "done" || state === "idle"
+          state === "blocked" ? summarizeFailedItemDetail(item, editingDetail)
+          : state === "done" || state === "idle"
             ? change.path ? `Edited ${change.path}` : "Edited files"
-            : change.path ? `Editing ${change.path}` : "Editing files",
+            : editingDetail,
         paths: change.paths.length > 0 ? change.paths : [thread.cwd],
         activityEvent: {
           type: "fileChange",
@@ -459,7 +520,7 @@ export function summariseThread(thread: CodexThread): {
       if (status === "failed" || status === "declined") {
         return {
           state: "blocked",
-          detail: command,
+          detail: summarizeFailedItemDetail(item, command),
           paths: [cwd],
           activityEvent: {
             type: "commandExecution",
@@ -511,7 +572,7 @@ export function summariseThread(thread: CodexThread): {
           status === "failed" || status === "declined" ? "blocked"
           : !treatAsInProgress && status === "completed" ? settledRecentState
           : "planning",
-        detail: tool,
+        detail: status === "failed" || status === "declined" ? summarizeFailedItemDetail(item, tool) : tool,
         paths: [thread.cwd],
         activityEvent: {
           type: item.type,
@@ -522,6 +583,20 @@ export function summariseThread(thread: CodexThread): {
         }
       };
     }
+    case "plan":
+      return {
+        state:
+          !treatAsInProgress && item.status === "completed" ? settledRecentState : "planning",
+        detail: summarizePlanItem(item),
+        paths: [thread.cwd],
+        activityEvent: {
+          type: "plan",
+          action: "updated",
+          path: thread.cwd,
+          title: summarizePlanItem(item),
+          isImage: false
+        }
+      };
     case "reasoning": {
       const text = typeof item.summary === "string" ? item.summary : typeof item.text === "string" ? item.text : "Reasoning";
       return {
@@ -581,12 +656,12 @@ export function summariseThread(thread: CodexThread): {
     default:
       return {
         state:
-          treatAsInProgress ? "thinking"
+          treatAsInProgress ? "planning"
           : interruptedWithoutFinalAnswer ? (ageMs <= DONE_WINDOW_MS ? "done" : "idle")
           : ageMs <= DONE_WINDOW_MS ? "done"
           : "idle",
         detail:
-          treatAsInProgress ? "Thinking"
+          treatAsInProgress ? "Planning"
           : interruptedWithoutFinalAnswer ? (ageMs <= DONE_WINDOW_MS ? "Interrupted" : "Idle")
           : ageMs <= DONE_WINDOW_MS ? "Finished recently"
           : "Idle",

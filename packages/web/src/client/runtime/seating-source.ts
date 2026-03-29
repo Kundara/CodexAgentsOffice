@@ -6,8 +6,7 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
       function isRuntimeActiveLocalAgent(agent) {
         return agent
           && agent.source === "local"
-          && agent.statusText === "active"
-          && agent.state !== "waiting";
+          && agent.statusText === "active";
       }
 
       function workstationDoneGraceMs(agent) {
@@ -51,9 +50,6 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
             return agent.isOngoing === true || hasCurrentLocalDeskGrace(agent);
           }
           if (agent.statusText === "active") {
-            if (agent.state === "waiting") {
-              return false;
-            }
             if (isRuntimeActiveLocalAgent(agent)) {
               return true;
             }
@@ -68,7 +64,7 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
             return agent.isCurrent === true;
           }
         }
-        if (agent.state === "waiting" || agent.state === "idle" || agent.state === "done") {
+        if (agent.state === "idle" || agent.state === "done") {
           return false;
         }
         if (agent.source === "local") {
@@ -86,7 +82,7 @@ export const CLIENT_RUNTIME_SEATING_SOURCE = `
       function isFinishedLeadForRec(agent) {
         return isRecentLeadCandidate(agent)
           && !shouldSeatAtWorkstation(agent)
-          && (agent.state === "waiting" || agent.state === "idle" || agent.state === "done");
+          && (agent.state === "idle" || agent.state === "done");
       }
 
       function isLiveSceneAgent(agent) {

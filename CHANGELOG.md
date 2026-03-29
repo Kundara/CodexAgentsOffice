@@ -10,6 +10,7 @@ Entries stay under the active version until an explicit version bump is requeste
 ### Added
 
 - Added extra vending-machine drink variants for idle rec-room visits, including soda and juice held items sourced from Alex's CC BY 4.0 `100 pixel food icons pack`, with README attribution for the new asset library.
+- Added per-project shared-room broadcasting controls in the browser floor headers, persisting each local project's `Shared` preference client-side so users can opt specific floors out of PartyKit room sync without leaving the room.
 - Added a shared adapter contract in `packages/core` with a static built-in registry for Codex local/cloud, Claude, Cursor local/cloud, OpenClaw, and presence sources.
 - Added a shared snapshot assembler plus refresh-scheduler/domain helper layers so snapshot assembly, room mapping, and workload-currentness policy are no longer spread across several source-specific call sites.
 - Added a bundled external browser client build under `packages/web/dist/client`, replacing inline HTML delivery of the main browser JS/CSS payloads.
@@ -31,6 +32,13 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Fixed
 
+- Fixed live workstation z-ordering so the assembled client runtime preserves workstation shell depth metadata instead of dropping it through a duplicate sprite factory, which had been forcing desk computers back onto fixed layer `9` and bypassing the row sorter entirely.
+- Fixed seated workstation layering so mounted users now win the same-row tie against their own workstation shell, keeping the avatar visually above the computer while still letting higher-row passersby stay behind the desk.
+- Fixed workstation occupant layering so any avatar mounted on a workstation slot now keeps that front-layer priority even outside the narrow active-seat state set, instead of dropping behind the chair/computer until the state became fully active.
+- Fixed workstation startup posing so idle and done desk occupants now use the same seated mount pose as active workstation users, instead of starting in the old standing pose and only looking correctly mounted once an active desk animation kicked in.
+- Fixed workstation startup posing for blocked and fallback desk states too, so workstation occupants no longer spawn in the side-standing branch before later transitions move them into the seated mount pose.
+- Fixed room-scene z-ordering so moving agents now sort from their current logical foot-tile row while workstation shells and seated avatars sort from the workstation footprint row, keeping higher-row snack-route pass-bys behind desk computers.
+- Fixed workstation occlusion depth so desk computers keep a small extra front-plane inset, preventing passersby from popping over the screen while their feet are still only barely below the desk row.
 - Fixed hover cards and session labels so path-heavy Codex titles/messages are normalized instead of surfacing raw `/mnt/...` workspace paths as the primary visible title.
 - Fixed finished subagent visibility so child sessions keep a longer readable cooldown, take the door-exit path, and then fall out of recent-session UI instead of lingering like ordinary history.
 
@@ -41,6 +49,16 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Changed
 
+- Changed actor placement so normalized `waiting` sessions now stay on-desk instead of moving into the rec strip, and the browser docs/spec now separate universal modes from the renderer's actor behavior states.
+- Changed shared-room rendering so remote-only projects exposed by the room now stay visible as standalone floors, show active participant nicknames in the title bar, grey titles slightly when they are not local, and cool down for 1 hour before disappearing after updates stop.
+- Changed browser state cues so desk actors now get above-head RPGIAB markers for needs-user waits, typed thinking, planning, and blocked error states, layered below the toast system.
+- Changed Codex thread summarization so `plan` items and in-progress turns without stronger evidence map to `planning`, reserving `thinking` for stronger reasoning/commentary/compaction signals.
+- Changed state-marker rendering so the above-head icons now render about one-third smaller, keeping them legible but less visually heavy over the actor sprites.
+- Changed Cursor local typed state fallback so generic active hook/transcript states prefer `planning`, reserving `thinking` for clearer response, reasoning, or compaction evidence.
+- Changed the thinking light marker so it only shows before the first visible assistant message/toast arrives, preventing the light bulb from competing with actual reply text.
+- Changed the blocked failure marker to an exclamation icon so hands stay reserved for human-needed states, and kept it restricted to explicit `systemError` or failed command/file/tool activity.
+- Changed blocked failure hover cards so they prefer the current error detail, making the reason for the exclamation marker visible without opening logs.
+- Changed blocked failure hover summaries to style the current error text in red so the exclamation reason reads as an error state instead of a normal message.
 - Changed browser workload visibility so runtime-active local subagents stay seated/visible even when `isCurrent` momentarily shifts to another related thread update, matching the scene's current-workload-first rules more closely.
 - Changed subagent post-finish handling so finished subagents keep a longer in-scene cooldown before they walk out through the room door, making boss/subagent completion easier to read in the office view.
 - Changed browser agent/session title rendering to normalize repo-local path-heavy labels instead of surfacing raw WSL-style `/mnt/...` paths as the primary visible title.
@@ -92,6 +110,11 @@ Entries stay under the active version until an explicit version bump is requeste
 
 - Fixed worktree floor grouping so the default unsplit tower now collapses Codex worktrees onto one repo floor even when a stale worktree snapshot is missing `projectIdentity`, by falling back to stable repo-origin data and keeping split-only floor badges derived from the worktree path when needed.
 - Fixed Pixi office depth sorting so agents and workstation shell sprites now sort from their on-screen foot position instead of fixed layer numbers, preventing walkers from drawing above desks they are still behind.
+- Fixed Pixi floor-depth precision so moving agents now sort from their continuous foot position instead of a rounded whole-pixel row, and stopped giving walking avatars an extra front-of-scene bias that could let them pop above lower workstations too early.
+- Fixed workstation shell depth anchors so the chair and computer now sort from their own actual bottom edge instead of inheriting the desk panel’s foot depth, which could still leave a visibly lower workstation rendering behind a higher walker.
+- Fixed workstation front-edge depth so the computer now sorts from the lower of its own sprite bottom and the desk front plane, preventing agents in higher screen rows from stepping over a workstation that should still occlude them.
+- Fixed live motion avatar placement so moving desk agents keep their rendered sprite offsets and rendered height while walking, instead of snapping back to the logical unscaled box and drifting out of sync with workstation occlusion depth.
+- Fixed moving desk-agent depth so live sprite motion now keeps using the rendered feet pivot after slot scaling, preventing walkers in higher screen rows from drawing over workstation computers before they actually pass the desk base.
 - Fixed the remaining `cursor.ts` monolith by moving Cursor cloud-agent loading, repo normalization helpers, and local discovery into focused modules, bringing the file back under the repo size guard.
 - Fixed snapshot activity precedence so a recent typed file-change event can override a trailing summary message without reactivating a completed thread, while fresh command-start events still do not wake a finished desk back into running state.
 - Fixed the browser client tests to assert against the real runtime section modules after the runtime patch-assembler removal, so the suite now validates behavior instead of legacy string-rewrite scaffolding.
@@ -99,6 +122,7 @@ Entries stay under the active version until an explicit version bump is requeste
 - Fixed Codex local state classification so completed command, file-change, and tool turns now settle to done/idle instead of remaining `running`/`validating`/`editing`, and recent command/file events no longer reactivate a thread that already finished.
 - Fixed typed Codex `Needs You` handling so approval waits surface as blocked desk work, input waits surface as waiting work, and browser workstation seating now respects those visible states instead of treating every `status.type = active` thread as desk-active.
 - Fixed browser desk motion so `running` and `validating` workers stay in the seated workstation pose, and current local desk-live work now gets a short grace window through transient `status.type = notLoaded` gaps instead of bouncing into the rec area between live updates.
+- Fixed Codex local live-monitor stop detection so `thread/status/changed -> notLoaded` now waits about 3 seconds and confirms with a reread before clearing ongoing desk work, reducing brief unload/reload desk bounce between live messages.
 - Fixed Pixi workstation reveal flicker so newly occupied desks once again carry their `enteringReveal` flags through the assembled scene runtime, and desk returns now blink based on workstation slot transitions instead of only firing for brand-new agent keys.
 - Fixed browser scene continuity so current local threads remain visible in the map while they transition between desk and rec-area placement, and active local `idle`/`done` wobbles now get a short desk settle window instead of making the agent and workstation pop out between updates.
 - Fixed rec-room rendering so only the 4 most recent top-level resting lead sessions occupy the rec seats, preventing older hidden resters and subagents from wrapping onto duplicate sofa coordinates.

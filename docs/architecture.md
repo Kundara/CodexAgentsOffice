@@ -60,7 +60,7 @@ The live browser path now uses a hybrid approach:
 - `thread/list` is discovery-oriented only; ongoing occupancy also follows `thread/read` turn state so a `notLoaded` thread with an in-progress turn still stays live on the floor
 - active `thread/list` rows are always retained in the tracked local-thread set even when they are older than the normal recent-thread cutoff, so a live desktop session is subscribed on startup before its next visible delta
 - active and recent threads are resumed on the observer connection so the app can receive live `turn/*`, `item/*`, approval, input, and `serverRequest/resolved` events
-- observer runtime unload notifications such as `thread/closed` or `thread/status/changed -> notLoaded` are treated as subscription state, not as proof that the underlying thread resolved
+- observer runtime unload notifications such as `thread/closed` or `thread/status/changed -> notLoaded` are treated as subscription state, not as proof that the underlying thread resolved; `notLoaded` now gets a short 3-second confirmation cooldown before the monitor clears ongoing occupancy
 - slow desktop `thread/resume` attaches now happen in the background so the web server does not block initial rendering on them
 - desktop-backed `thread/resume` can still take tens of seconds, so the observer keeps a wider 60-second attach budget before it marks that live path degraded and falls back to read-only behavior
 - watched thread JSONL paths trigger quick re-reads when a local session changes
@@ -68,6 +68,8 @@ The live browser path now uses a hybrid approach:
 - streamed `item/agentMessage/delta` notifications stay enabled on the observer connection so Codex reply toasts can update immediately from the typed live feed
 - non-final commentary messages on interrupted desktop turns are still treated as active work so subscribed agents do not briefly vacate their desk between commentary updates
 - completed process-only items such as `reasoning` or `contextCompaction` now settle out of synthetic `thinking` once the turn is done, so finished desktop threads do not keep reading as active
+- process-neutral live states such as `plan` items or in-progress turns without stronger item evidence now map to `planning`, reserving `thinking` for stronger reasoning/commentary/compaction signals
+- Cursor local typed hooks now follow the same split where possible, so generic session/tool fallback stays `planning` until Cursor emits clearer reply/reasoning-style evidence
 - periodic discovery still runs so newly created sessions appear without a page refresh
 
 In fleet mode, every discovered workspace now keeps a live `ProjectLiveMonitor`. Selection in the UI only changes what is centered in the browser; it does not rebuild the live monitor set.
@@ -106,10 +108,12 @@ Sources:
   - live SSE updates for browser clients
   - all discovered workspaces stay live-monitored at once
   - reserved multiplayer status surface for a future secured sync transport
-  - browser settings can also attach the page to a shared PartyKit room using `host`, `room`, and an optional short `nickname`; remote activity is merged client-side only for workspace names that also exist locally
+  - browser settings can also attach the page to a shared PartyKit room using `host`, `room`, and an optional short `nickname`; once connected, each local floor exposes a persisted `Shared` toggle that controls whether that project is broadcast into the room
+  - remote shared-room activity now merges client-side onto matching local workspaces when possible, and otherwise stays visible as remote-only floors with a 1-hour cooldown before disappearing after updates stop
 - map and terminal-style views through `?view=map|terminal`
 - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area
 - local threads remain seated while the thread is still ongoing, even if they pause between visible events or the latest turn already looks done
+- transient `status.type = notLoaded` unloads now wait about 3 seconds for a confirming reread before a local thread is allowed to lose ongoing occupancy
 - once a top-level thread actually stops, it keeps its workstation for a short 5-second cooldown so the final reply remains readable before it cools into rec-area visibility
 - stale local `notLoaded` sessions no longer occupy desks just because they are still recent; workstation seating now requires true ongoing work or the explicit stop cooldown
 - after that grace window, only recent top-level lead sessions cool down into the rec area; finished subagents despawn instead of idling there
@@ -134,6 +138,7 @@ Sources:
 - global browser settings currently expose text scale plus a persisted worktree split toggle; text scale still applies to hover/toast/map text without changing room or prefab geometry
 - the retained browser map path now uses a persistent Pixi scene host plus HTML anchor overlays for toast positioning, so map updates can mutate scene entities without replacing the scene shell
 - routed avatar movement in the Pixi scene now uses a lightweight grid pathfinder against room occupancy instead of direct straight-line scene tweens
+- floor-depth sorting in the Pixi scene now uses explicit logical rows: moving agents sort from their current foot-tile row, while workstation shells and seated avatars sort from the workstation footprint row, so overlap follows the same "lower floor cell stays in front" rule during pass-bys
 - rec-area idle behavior is scene-config-driven: seated flip cadence, provider-trip rarity, resting walk speed, held-item base size, and global held-item scale all come from `packages/web/src/config/scene-definitions.json`
 - provider furniture definitions now also carry optional visual approach offsets so resting avatars can keep their 1x1 foot tile on the walkable row while still reaching close to the vending machine, cooler, or shelf sprite
 - the current default rec-provider mapping is bookshelf -> `book`, cooler -> `water-bottle`, and vending -> a mixed snack/soda/juice pool
@@ -190,7 +195,7 @@ Snapshot assembly now happens in one place through `SnapshotAssembler`, which me
   - `navigation-source.ts`: navigation grid, avatar routing, scene hit-target focus, terminal/fleet summaries, and the durable "Needs You" queue.
   - `ui-source.ts`: browser render loop, DOM patching, fleet ingestion, and session-card rendering.
 - `packages/web/src/client/multiplayer-source.ts`
-  Holds the browser-side PartyKit room sync overlay, shared-room settings persistence, and remote fleet merge helpers so the realtime room transport stays outside the main renderer script.
+  Holds the browser-side PartyKit room sync overlay, shared-room settings persistence, per-project share preferences, remote-only floor cooldown memory, and remote fleet merge helpers so the realtime room transport stays outside the main renderer script.
 - `packages/party`
   Holds the deployable PartyKit room relay that validates and rebroadcasts the browser `fleet-sync` payloads over shared room sockets.
 - `packages/web/src/client/toast-source.ts`
@@ -258,9 +263,13 @@ Codex exposes enough signal for a more explicit notification model than the curr
 Current mapping:
 
 - `waitingOnApproval`
-  blocked indicator, approval-needed toast, and durable needs-you queue entry
+  blocked standing-on-desk pose, raised-hand marker, approval-needed toast, and durable needs-you queue entry
 - `waitingOnUserInput`
-  waiting indicator, ask-user toast, and durable needs-you queue entry
+  waiting-on-desk pose, raised-hand marker, ask-user toast, and durable needs-you queue entry
+- blocked failures without `needsUser`
+  blocked standing-on-desk pose, exclamation marker only for explicit system or failed activity evidence, and failure toast treatment
+- head markers now render smaller than the original 16px pass so they sit above the sprite more quietly and stay visually secondary to toasts
+- the thinking light is intentionally transient and drops away once the first visible assistant message/toast is present, so speech evidence replaces the generic “still thinking” cue
 - `item/*` command execution
   running / completed / failed command notifications, rendered as a command-prompt style mini window with monospace command text
   one command window toast is kept per agent; new commands append to the bottom, keep the last 3 lines, and extend the visible lifetime
@@ -311,7 +320,8 @@ The active office view currently favors an open station language over enclosed c
 - hovering a boss reveals arrow lines from that office to the related spawned subagents
 - chairs and seated reach points sit slightly outward from the desk so the monitor relationship reads cleanly
 - workstation computers currently use the single complete desk cut, avoiding the broken narrow pseudo-monitor asset
-- waiting and resting agents move to an integrated wall-side rec strip instead of a detached room
+- waiting and resting agents move to an integrated wall-side rec strip instead of a detached room when they are actually off-desk
+- current waiting sessions now stay on-desk, using the same workstation actor lane as other desk work instead of cooling into the rec strip
 - rec-room seating should be keyed by stable agent identity and furniture-relative sofa slots, not recomputed purely from per-render sort order
 - the browser view no longer exposes a current/history toggle; it always shows current agents plus 4 recent lead sessions
 - rec facilities sit on the same raised upper floor band as the wall-side walkway, not in a floating inset
@@ -324,6 +334,7 @@ The active office view currently favors an open station language over enclosed c
 - the current browser renderer is Pixi-first for the office map, with HTML retained only for overlays, controls, and fallback terminal output
 - browser placement rules are intentionally a little stickier than raw workload freshness, because a live local thread should not visually bounce desk -> rec -> desk during short polling gaps
 - Codex-local desk seating now also treats app-server `status.type = "active"` as the decisive occupancy signal, so an active session does not drop into the rec strip just because its summarized state temporarily reads waiting or recently done
+- actor behavior is now explicitly split from universal modes: desk-seated work (`planning`, `scanning`, `thinking`, `editing`, `running`, `validating`, `delegating`, `waiting`), desk-blocked-standing (`blocked`), resting/recent-finished (`done`, `idle`), and non-local/cloud (`cloud`)
 
 ## Secondary Claude support
 

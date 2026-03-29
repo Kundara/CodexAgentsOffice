@@ -107,11 +107,14 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
       }
 
       function agentHoverSummary(snapshot, agent) {
+        const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail);
+        if (isFailureBlockedAgent(agent) && detail) {
+          return { text: detail, source: "agent", emphasis: "error" };
+        }
         const message = latestAgentMessage(snapshot.projectRoot, agent);
         if (message) {
           return { text: message, source: "agent" };
         }
-        const detail = normalizeDisplayText(snapshot.projectRoot, agent.detail);
         const focus = primaryFocusPath(snapshot, agent);
         const source = agent.activityEvent && agent.activityEvent.type === "userMessage" ? "user" : "agent";
         if (!focus) {
@@ -243,6 +246,59 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           default:
             return options.isCommand ? null : eventIconUrlForThreadItemType(type);
         }
+      }
+
+      function isNeedsUserMarkerAgent(agent) {
+        if (!agent) {
+          return false;
+        }
+        if (agent.needsUser && (agent.needsUser.kind === "approval" || agent.needsUser.kind === "input")) {
+          return true;
+        }
+        const detail = String(agent.detail || "").trim().toLowerCase();
+        return detail === "waiting on approval" || detail === "waiting on input" || detail === "waiting on user input";
+      }
+
+      function isFailureBlockedAgent(agent) {
+        if (!agent || agent.state !== "blocked" || isNeedsUserMarkerAgent(agent)) {
+          return false;
+        }
+        if (agent.statusText === "systemError") {
+          return true;
+        }
+        if (agent.activityEvent && ["commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall"].includes(agent.activityEvent.type)) {
+          return true;
+        }
+        return false;
+      }
+
+      function shouldShowThinkingMarker(agent) {
+        if (!agent || agent.state !== "thinking") {
+          return false;
+        }
+        if (agent.activityEvent && agent.activityEvent.type === "agentMessage") {
+          return false;
+        }
+        return !(typeof agent.latestMessage === "string" && agent.latestMessage.trim().length > 0);
+      }
+
+      function stateMarkerIconUrlForAgent(agent) {
+        if (!agent) {
+          return null;
+        }
+        if (isNeedsUserMarkerAgent(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/hand.png";
+        }
+        if (isFailureBlockedAgent(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/exclamation.png";
+        }
+        if (agent.state === "planning") {
+          return "/assets/pixel-office/sprites/icons/state/clipboard.png";
+        }
+        if (shouldShowThinkingMarker(agent)) {
+          return "/assets/pixel-office/sprites/icons/state/light.png";
+        }
+        return null;
       }
 
       function splitShellWords(command) {
@@ -542,9 +598,11 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         const hoverTitle = displayAgentLabel(snapshot, agent);
         const className = options.className || "agent-hover";
         const styleAttr = options.style ? \` style="\${escapeHtml(options.style)}"\` : "";
-        const summaryClass = summary.source === "user"
-          ? "agent-hover-summary agent-hover-summary-user"
-          : "agent-hover-summary";
+        const summaryClass =
+          summary.emphasis === "error" ? "agent-hover-summary agent-hover-summary-error"
+          : summary.source === "user"
+            ? "agent-hover-summary agent-hover-summary-user"
+            : "agent-hover-summary";
         const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
         const worktreeHtml = worktreeName
           ? \`<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></div>\`
@@ -866,14 +924,21 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           width: Math.round(sprite.w * scale),
           height: Math.round(sprite.h * scale),
           flipX: options.flipX === true,
+          enteringReveal: options.enteringReveal === true,
           alpha: options.alpha ?? 1,
           depthFootY: Number.isFinite(options.depthFootY) ? Math.round(options.depthFootY) : null,
+          depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+          depthRow: Number.isFinite(options.depthRow) ? Math.round(options.depthRow) : null,
           depthBias: Number.isFinite(options.depthBias) ? Number(options.depthBias) : null,
           z
         };
       }
 
       function buildCubicleCellVisualModel(snapshot, agent, role, x, y, boothWidth, boothHeight, compact, options = {}) {
+        const DESK_SHELL_DEPTH_BIAS = 120;
+        const CHAIR_DEPTH_BIAS = 180;
+        const SEATED_AVATAR_DEPTH_BIAS = 760;
+        const WORKSTATION_FRONT_DEPTH_BIAS = 620;
         const state = agent?.state || "idle";
         const avatar = agent ? avatarForAgent(agent) : null;
         const avatarScale = compact ? 1.25 : 1.5;
@@ -938,39 +1003,48 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           const seatedX = mirrored
             ? clampAvatarX(Math.round(chairX + chairWidth - avatarWidth - seatInset))
             : clampAvatarX(Math.round(chairX + seatInset));
-          if (state === "editing" || state === "thinking" || state === "planning" || state === "scanning" || state === "delegating") {
+          if (state === "editing" || state === "thinking" || state === "planning" || state === "scanning" || state === "delegating" || state === "waiting") {
             return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "running" || state === "validating") {
             return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "blocked") {
-            const workingX = mirrored
-              ? clampAvatarX(sideX + (compact ? 4 : 6))
-              : clampAvatarX(sideX - (compact ? 4 : 6));
-            return { x: workingX, y: baseY, flip: workstationFlip };
+            return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
           }
           if (state === "idle" || state === "done") {
             return {
-              x: Math.max(2, Math.round(centerX - avatarWidth / 2)),
-              y: Math.max(0, baseY + (compact ? 1 : 2)),
-              flip: stableHash(agent.id) % 2 === 0
+              x: seatedX,
+              y: Math.max(0, baseY - (compact ? 1 : 3)),
+              flip: workstationFlip
             };
           }
-          return { x: sideX, y: baseY, flip: workstationFlip };
+          return { x: seatedX, y: Math.max(0, baseY - (compact ? 1 : 3)), flip: workstationFlip };
         })();
         const absoluteCellX = Math.round(options.absoluteX ?? x);
         const absoluteCellY = Math.round(options.absoluteY ?? y);
         const deskDepthFootY = absoluteCellY + deskY + deskHeight;
+        const chairDepthFootY = absoluteCellY + chairY + chairHeight;
+        const workstationDepthFootY = absoluteCellY + workstationY + workstationHeight;
+        const workstationOcclusionInset = compact ? 3 : 4;
+        const workstationFrontDepthFootY = Math.max(deskDepthFootY, workstationDepthFootY) + workstationOcclusionInset;
         const seatedState = state === "editing"
-          || state === "thinking"
-          || state === "planning"
-          || state === "scanning"
-          || state === "delegating"
-          || state === "running"
-          || state === "validating";
+            || state === "thinking"
+            || state === "planning"
+            || state === "scanning"
+            || state === "delegating"
+            || state === "waiting"
+            || state === "running"
+            || state === "validating";
+        const mountedWorkstationOccupant = Boolean(agent) && Boolean(options.slotId) && state !== "blocked";
         const stationBoundsX = absoluteCellX + Math.max(0, Math.round((boothWidth - sceneTile * 3) / 2));
         const stationBoundsY = absoluteCellY + Math.max(0, boothHeight - sceneTile);
+        const workstationBoundsHeight = sceneTile * 2;
+        const workstationSortFootY = stationBoundsY + workstationBoundsHeight - 1;
+        const depthBaseY = Number.isFinite(options.depthBaseY) ? Number(options.depthBaseY) : 0;
+        const deskDepthRow = Math.floor((deskDepthFootY - depthBaseY) / sceneTile);
+        const chairDepthRow = Math.floor((chairDepthFootY - depthBaseY) / sceneTile);
+        const workstationSortRow = Math.floor((workstationSortFootY - depthBaseY) / sceneTile);
         const anchorX = absoluteCellX + Math.round(workstationX + workstationWidth * 0.5);
         const anchorY = absoluteCellY + Math.round(boothHeight * 0.72);
         const visual = {
@@ -978,20 +1052,26 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
             buildPixiSpriteDef(deskSprite, absoluteCellX + deskX, absoluteCellY + deskY, deskScale, 7, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
+              depthBaseY: options.depthBaseY,
+              depthRow: deskDepthRow,
               depthFootY: deskDepthFootY,
-              depthBias: 0
+              depthBias: DESK_SHELL_DEPTH_BIAS
             }),
             buildPixiSpriteDef(chair, absoluteCellX + chairX, absoluteCellY + chairY, chairScale, 8, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
-              depthFootY: deskDepthFootY,
-              depthBias: -10
+              depthBaseY: options.depthBaseY,
+              depthRow: chairDepthRow,
+              depthFootY: chairDepthFootY,
+              depthBias: CHAIR_DEPTH_BIAS
             }),
             buildPixiSpriteDef(computerSprite, absoluteCellX + workstationX, absoluteCellY + workstationY, workstationScale, 9, {
               flipX: mirrored,
               enteringReveal: options.enteringReveal === true,
-              depthFootY: deskDepthFootY,
-              depthBias: 10
+              depthBaseY: options.depthBaseY,
+              depthRow: workstationSortRow,
+              depthFootY: workstationSortFootY,
+              depthBias: WORKSTATION_FRONT_DEPTH_BIAS
             })
           ],
           glow: (agent && isBusyAgent(agent) && state !== "waiting" && state !== "blocked")
@@ -1011,8 +1091,14 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
                 width: Math.round(avatarWidth),
                 height: Math.round(avatarHeight),
                 flipX: avatarPose.flip === true,
-                depthFootY: seatedState ? deskDepthFootY : null,
-                depthBias: seatedState ? -5 : null,
+                depthBaseY: Number.isFinite(options.depthBaseY) ? Math.round(options.depthBaseY) : null,
+                depthRow: mountedWorkstationOccupant ? workstationSortRow : null,
+                depthFootY: mountedWorkstationOccupant ? workstationSortFootY : null,
+                depthBias: mountedWorkstationOccupant ? SEATED_AVATAR_DEPTH_BIAS : null,
+                pivotX: absoluteCellX + Math.round(avatarPose.x + avatarWidth / 2),
+                pivotY: mountedWorkstationOccupant
+                  ? workstationSortFootY
+                  : absoluteCellY + Math.round(avatarPose.y + avatarHeight - 1),
                 state,
                 appearance: agent.appearance
               }
@@ -1021,9 +1107,12 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
             x: stationBoundsX,
             y: stationBoundsY,
             width: sceneTile * 3,
-            height: sceneTile,
+            height: workstationBoundsHeight,
             tileWidth: 3,
-            tileHeight: 1
+            tileHeight: 2,
+            pivotX: absoluteCellX + Math.round(workstationX + workstationWidth / 2),
+            pivotY: workstationSortFootY,
+            pivotWidth: Math.round(workstationWidth)
           },
           anchorX,
           anchorY,

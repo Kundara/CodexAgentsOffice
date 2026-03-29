@@ -88,6 +88,8 @@ npm run typecheck
 - Git worktrees from the same repo merge onto one floor by default.
 - The browser exposes a global `Split Worktrees` toggle when you want one floor per worktree instead.
 - Single-project focus uses the same compact scene geometry as the tower view.
+- Desk behavior follows normalized modes: working and waiting sessions stay on-desk, blocked failures stand at the desk, done/idle sessions cool into resting visibility, and cloud work stays separate.
+- The office view uses smaller above-head state markers for needs-user waits, planning, pre-message typed thinking moments, and blocked-error states in addition to the toast layer.
 
 ## Optional Integrations
 
@@ -133,6 +135,8 @@ Fields:
 - `Host`: your PartyKit host such as `your-app.partykit.dev`
 - `Room`: a shared room name such as `team/project-name`
 - `Nickname`: an optional short label shown on remote agents
+
+Once connected, each local project floor also gets a persisted `Shared` toggle in its header so you can stop broadcasting that project without leaving the room. Remote-only projects exposed by the room now stay visible even when they are not local to your machine, show active participant nicknames in the floor header, grey the title slightly when you are not involved locally, and cool down for 1 hour before disappearing after sharing stops.
 
 Quick relay flow:
 

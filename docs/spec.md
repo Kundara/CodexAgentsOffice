@@ -51,7 +51,7 @@ All renderers should consume the same normalized snapshot model.
 - A `DashboardSnapshot` represents one tracked workspace and includes `projectRoot`, `projectLabel`, `projectIdentity`, `generatedAt`, `rooms`, `agents`, `cloudTasks`, `events`, and `notes`.
 - A `DashboardAgent` represents one visible session or agent and carries identity, currentness, room placement, state, detail text, latest useful message, resume/open affordances, provenance/confidence, and optional `needsUser` or shared-room `network` metadata.
 - A `DashboardEvent` is the normalized event log used for browser notifications and event-native state surfaces such as approvals, input waits, command/file activity, subagent events, and typed messages.
-- `needsUser` is the durable per-agent approval/input state used by the browser `Needs You` queue and waiting posture.
+- `needsUser` is the durable per-agent approval/input state used by the browser `Needs You` queue and raised-hand desk marker.
 - `network` marks a remote shared-room agent and should preserve peer label and peer host metadata distinctly from local sessions.
 
 Normalized activity states are:
@@ -68,6 +68,28 @@ Normalized activity states are:
 - `done`
 - `idle`
 - `cloud`
+
+Renderer actor states are derived from those universal modes:
+
+- Desk-seated: `planning`, `scanning`, `thinking`, `editing`, `running`, `validating`, `delegating`, `waiting`
+- Desk-blocked-standing: `blocked`
+- Resting/recent-finished: `done`, `idle`
+- Non-local/cloud: `cloud`
+
+Per-mode actor handling:
+
+- `planning` -> desk-seated, clipboard marker above the head
+- `scanning` -> desk-seated
+- `thinking` -> desk-seated, light marker above the head until the first visible assistant message/toast arrives
+- `editing` -> desk-seated
+- `running` -> desk-seated
+- `validating` -> desk-seated
+- `delegating` -> desk-seated
+- `waiting` -> desk-seated; if `needsUser` is set, use the raised-hand marker above the head and keep the session in the durable `Needs You` queue
+- `blocked` -> desk-blocked-standing; use the raised-hand marker for `needsUser` approval/input waits and the exclamation marker only for explicit system/tool/command/file failure blocks
+- `done` -> resting/recent-finished with a short post-stop desk cooldown before cooling off
+- `idle` -> resting/inactive off-desk state
+- `cloud` -> non-local/cloud state
 
 Normalized provenance/confidence rules are:
 
@@ -104,6 +126,7 @@ Current browser settings surfaces are:
 - a debug tile overlay toggle for layout diagnostics
 - machine-local Cursor API key save/clear controls
 - shared-room sync toggle plus `host`, `room`, and short `nickname` fields
+- a per-floor persisted `Shared` toggle for local projects while shared-room sync is enabled, defaulting to on and controlling whether that local project is broadcast into the room
 
 ### Workload placement
 
@@ -111,8 +134,8 @@ Current browser settings surfaces are:
 - Active local Codex work should occupy desks.
 - A local Codex session should stay on a desk whenever app-server still reports `status.type = "active"`, even if its active flags currently mean waiting for approval or user input, or the latest visible item has already reached a recent `done` summary.
 - Active local subagents should remain visible from that same runtime-active signal even if the transient `isCurrent` flag has already moved to a sibling update or the parent thread.
-- Waiting/resting lead sessions belong in the rec area only after the session is no longer active at the app-server/runtime level.
-- A local thread that is still truly ongoing may keep its workstation through short-lived freshness/current signal dips between polls, but stale `notLoaded` locals must not hold desks just because they were recently current.
+- Waiting sessions stay on-desk; only resting lead sessions belong in the rec area after the session is no longer active at the app-server/runtime level.
+- A local thread that is still truly ongoing may keep its workstation through short-lived freshness/current signal dips between polls, and `notLoaded` locals now get a short 3-second confirmation cooldown before the monitor accepts that unload as real.
 - Workstation release should be conservative. Ordinary poll jitter, UI rerenders, debug toggles, or temporary freshness gaps must not pull a still-working agent off a desk.
 - A workstation should only be released when the thread has actually settled into a resting/finished state according to the browser placement rules, with the explicit post-stop cooldown described below.
 - The rec area should keep at most the 4 most recent lead sessions visible;
@@ -139,6 +162,9 @@ Current browser settings surfaces are:
 - Resting agents in the rec area should keep stable sofa/wall-side seats by agent identity instead of being reassigned purely by sorted array index.
 - Z-order should be explicit and deterministic so floor bands, furniture, agents, effects, and toasts stack consistently.
 - Floor-level depth sorting should use each sprite's ground-contact pivot rather than sprite top or center; for avatars this pivot is the feet.
+- Depth ordering should resolve from logical floor rows first, not from ad hoc pixel ties.
+- Moving agents should sort from their current foot-tile row while they walk.
+- Seated avatars and workstation shell sprites should sort from the workstation footprint row they occupy.
 - Lower on-screen foot/base position must sort in front of higher on-screen foot/base position.
 - Agents, chairs, desks, workstations, and other floor props that can visually overlap should follow that same foot/base sorting rule so overlap reads spatially correct.
 - If an agent's feet are still above a workstation or desk base on screen, the workstation/desk must render in front of that agent; once the agent's feet move below that base, the agent must render in front.
@@ -217,8 +243,13 @@ Worktree identity rules:
 
 - Shared-room sync is an optional browser-side overlay, not the primary local transport.
 - Shared-room settings are persisted client-side and should survive browser reloads.
-- Remote workspace activity should only merge into local rendering when the remote workspace name matches a workspace that exists locally.
+- Local project share preferences should be persisted client-side per project root and default to sharing until the user turns a floor off.
+- The browser should broadcast only the local project roots whose `Shared` floor toggle is still on.
+- Remote workspace activity should merge into locally matching workspaces when names match, but remote-only room workspaces should also remain visible as standalone floors when they do not exist locally.
+- Remote-only floors should grey the project-title treatment slightly so “not my workspace” reads as a distinct state without hiding the floor.
+- Each floor header should list the active participant nicknames currently visible in that workspace; when a remote-only floor is cooling down and has no active agents left, it may fall back to the most recent participant labels.
 - Remote shared-room agents should preserve peer labeling and peer-host context so they remain visibly distinct from local sessions.
+- Remote-only shared projects should cool down for 1 hour before disappearing after room updates stop.
 - Screenshot mode should disable shared-room sync.
 - `/api/multiplayer` should expose the current server multiplayer transport status even when the transport is currently disabled.
 
@@ -296,14 +327,23 @@ Worktree identity rules:
 - `waitingOnUserInput` maps to `waiting`.
 - failed command or turn state maps to `blocked`.
 - in-progress turns map to active desk work unless a more specific state exists.
+- `plan` items and in-progress turns without stronger evidence map to `planning`.
+- `thinking` is reserved for stronger signals such as live reasoning, commentary, or context compaction.
+- Secondary adapters should follow the same rule where possible: generic active-but-unspecified state should prefer `planning`, while `thinking` should imply visible reply/reasoning/compaction evidence.
 - recent completed replies map to `done`.
 - old inactive threads map to `idle`.
+- `needsUser` waits keep a raised-hand marker above the actor's head; blocked errors without `needsUser` use the exclamation marker only when the block is backed by explicit system or failed activity evidence.
+- `thinking` uses the light marker above the actor's head only before the first visible assistant message/toast arrives.
+- `planning` uses the clipboard marker above the actor's head.
+- head markers render at a reduced small-icon size so they stay readable without overpowering the sprite or toast layers
+- when the exclamation marker is shown, the hover summary should prefer the current error detail over stale latest-message text
+- blocked failure hover summaries should render that error text in red so it reads as the reason for the `!`, not as ordinary chat
 
 Current-workload rules:
 
 - local threads stay current while the live monitor still considers them ongoing
 - `notLoaded` threads still stay current when `thread/read` shows an in-progress turn
-- observer-owned unload/runtime-idle transitions do not count as a stop by themselves
+- observer-owned unload/runtime-idle transitions do not count as an immediate stop by themselves; `thread/status/changed -> notLoaded` now waits about 3 seconds and a reread confirmation before the monitor drops the thread out of ongoing work
 - once a local top-level thread actually stops, it should keep its workstation for about 5 seconds so the last reply can still be read before cooling into rec-area idle visibility
 - stale local `notLoaded` threads that are no longer ongoing must not keep a workstation just because freshness/currentness still marks them recent
 - completed process-only items such as `plan`, `reasoning`, and `contextCompaction` should settle to `done` while recent, then age to `idle`; they must not leave a finished thread stuck in synthetic `thinking`

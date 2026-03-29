@@ -159,6 +159,7 @@ How we use it:
 - build the normalized `DashboardAgent`
 - infer current state from the last relevant turn item
 - infer ongoing-ness from the latest turn as well as runtime thread status, because `thread/list` / `thread/read` can still report `status.type = notLoaded` for persisted threads that have a current in-progress turn payload
+- debounce `thread/status/changed -> notLoaded` for about 3 seconds and confirm it with a reread before clearing ongoing local work
 - infer subagent parentage and depth
 - generate `resumeCommand`
 - map the session into project rooms using extracted paths
@@ -207,7 +208,9 @@ Representation today:
 - `waitingOnApproval` -> `blocked`
 - `waitingOnUserInput` -> `waiting`
 - `systemError` or failed command/turn -> `blocked`
-- in-progress turn with no better signal -> `thinking`
+- `plan` or in-progress turn with no stronger item signal -> `planning`
+- typed reasoning, commentary, or context-compaction activity -> `thinking`
+- secondary adapters should prefer the same split when they have enough signal: generic active fallback -> `planning`, explicit reply/reasoning/compaction -> `thinking`
 - recent completed answer -> `done`
 - old inactive thread -> `idle`
 
@@ -216,7 +219,7 @@ Current-workload occupancy rules on top of that state:
 - a local thread stays `isCurrent` while the live monitor still considers the thread ongoing, even if the latest turn now reads as `done`
 - browser desk seating now treats local `status = active` as authoritative for occupancy, so active Codex sessions remain on desks even when the summarized state currently reads `waiting`, `blocked`, or recent `done`
 - a `notLoaded` thread still stays `isCurrent` when `thread/read` shows its latest turn is `inProgress`
-- observer-owned unload/runtime-idle transitions such as `thread/closed` or `thread/status/changed -> notLoaded` are not treated as stop signals by themselves; the monitor confirms stops from turn-terminal events plus reread thread state
+- observer-owned unload/runtime-idle transitions such as `thread/closed` or `thread/status/changed -> notLoaded` are not treated as immediate stop signals by themselves; `notLoaded` now waits about 3 seconds and a reread confirmation before the monitor clears ongoing local state
 - local desk occupancy no longer uses a generic freshness fallback for non-idle summaries; if a thread is not ongoing, not waiting on the user, and not inside the stop grace window, it is no longer `isCurrent`
 - once a top-level thread actually stops, it remains current and workstation-seated for about 5 seconds so final reply text can still surface before the lead cools into rec-area visibility
 - stale local `notLoaded` threads no longer keep a workstation just because they are still recent or subscribed; desk seating now requires actual ongoing work or the explicit stop grace
@@ -226,7 +229,7 @@ Current-workload occupancy rules on top of that state:
 In the browser this becomes:
 
 - workstation occupancy
-- waiting / blocked indicators
+- above-head state markers for needs-user waits, planning, pre-message typed thinking, and explicit blocked failures, rendered at a smaller icon size above the actor
 - floating notifications for newly blocked or waiting agents
 - hover and session detail text
 
@@ -697,6 +700,7 @@ How we use it:
 - map official Cursor hook events such as `beforeSubmitPrompt`, `preToolUse`, `postToolUseFailure`, `afterFileEdit`, `afterAgentResponse`, `afterAgentThought`, `sessionStart`, `sessionEnd`, `stop`, `subagentStart`, `subagentStop`, and `preCompact`
 - surface typed local Cursor prompt, file-change, command, MCP, reasoning, and assistant-response events in the shared office model
 - age stale hook-backed live states into `done` and then `idle` instead of leaving a workstation occupied forever
+- map generic active Cursor hook/transcript fallback to `planning` when no stronger reply/reasoning/tool state is present, reserving `thinking` for explicit response/reasoning/compaction signals
 - render hook-backed sessions with `confidence = typed`
 
 ### Cursor cloud project matching
@@ -797,10 +801,10 @@ How normalized fields become visuals:
 | Normalized field | Browser representation |
 | --- | --- |
 | `roomId` | desk placement inside a room |
-| `state` | desk pose, rec-room placement, waiting/blocked bubbles, session labels |
+| `state` | desk pose, state-marker icon, rec-room placement, and session labels |
 | `activityEvent` | floating text notifications and image previews |
 | `events` | event-native command, file, approval, input, subagent, and turn notifications |
-| `needsUser` | durable per-agent approval/input state for queueing and waiting posture |
+| `needsUser` | durable per-agent approval/input state for queueing and raised-hand desk markers |
 | `isCurrent` | default current-workload filtering |
 | `parentThreadId` and `role` | grouping into lead clusters and role pods |
 | `detail` | hover summary and session-card text |
@@ -830,7 +834,7 @@ How it works:
 - `/api/events` streams live fleet updates over SSE
 - `FleetLiveService` owns project monitors and publishes fresh fleet payloads to connected browser clients
 - browser-side rendering starts from `client/index.ts`, executes the generated `app-runtime.ts` module, and then delegates behavior across the focused runtime section files
-- optional PartyKit room sync and shared-room settings persistence live in `multiplayer-source.ts`
+- optional PartyKit room sync, shared-room settings persistence, per-project share preferences, and remote-only floor cooldown handling live in `multiplayer-source.ts`
 
 - server-sent events from `/api/events`
 
@@ -911,6 +915,7 @@ Current representation:
 - stronger event-driven alerts
 - durable cross-project queue of agents waiting on the user
 - anchored blocked/waiting notification text on the responsible agent
+- raised-hand desk markers for approval/input waits, light markers for typed thinking before the first visible assistant message, exclamation markers for explicit failure blocks, and clipboard markers for planning
 
 Missing representation:
 

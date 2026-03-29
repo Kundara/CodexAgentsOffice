@@ -73,6 +73,7 @@ const APP_SERVER_SUBSCRIPTION_TIMEOUT_MS = 60000;
 const CLOUD_NOTE_LEGACY_PREFIX = "Codex cloud list unavailable:";
 const CLOUD_NOTE_PREFIX = "Codex cloud ";
 const STOPPED_THREAD_REMOVAL_BUFFER_MS = 1000;
+const NOT_LOADED_STOP_DEBOUNCE_MS = 3000;
 const DEFAULT_LOCAL_THREAD_LIMIT = 24;
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -109,6 +110,7 @@ export class ProjectLiveMonitor extends EventEmitter {
   private readonly stoppedAtByThreadId = new Map<string, number>();
   private readonly hydratedThreadIds = new Set<string>();
   private readonly threadRemovalTimers = new Map<string, NodeJS.Timeout>();
+  private readonly pendingNotLoadedStopTimers = new Map<string, NodeJS.Timeout>();
   private roomWatcher: FSWatcher | null = null;
   private snapshot: DashboardSnapshot | null = null;
   private cloudTasks: CloudTask[] = [];
@@ -188,6 +190,10 @@ export class ProjectLiveMonitor extends EventEmitter {
       clearTimeout(timer);
     }
     this.threadRemovalTimers.clear();
+    for (const timer of this.pendingNotLoadedStopTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingNotLoadedStopTimers.clear();
     for (const [threadId, watcher] of this.threadWatchers.entries()) {
       watcher.close();
       const path = this.threadPaths.get(threadId);
@@ -525,6 +531,7 @@ export class ProjectLiveMonitor extends EventEmitter {
       clearTimeout(removalTimer);
       this.threadRemovalTimers.delete(threadId);
     }
+    this.clearPendingNotLoadedStop(threadId);
     this.ongoingThreadIds.delete(threadId);
     this.stoppedAtByThreadId.delete(threadId);
     this.hydratedThreadIds.delete(threadId);
@@ -578,17 +585,40 @@ export class ProjectLiveMonitor extends EventEmitter {
         ? asRecord(asRecord(notification.params)?.status)
         : null;
       const statusType = asString(status?.type);
+      if (knownThread && notification.method === "thread/status/changed" && statusType) {
+        const nextStatus =
+          statusType === "active"
+            ? {
+              type: "active" as const,
+              activeFlags: Array.isArray(status?.activeFlags)
+                ? status.activeFlags.filter((flag): flag is string => typeof flag === "string")
+                : knownThread.status.type === "active" ? knownThread.status.activeFlags : undefined
+            }
+            : statusType === "notLoaded" ? { type: "notLoaded" as const }
+            : statusType === "idle" ? { type: "idle" as const }
+            : statusType === "systemError" ? { type: "systemError" as const }
+            : null;
+        if (nextStatus) {
+          this.threads.set(threadId, {
+            ...knownThread,
+            status: nextStatus
+          });
+        }
+      }
       if (shouldMarkThreadLiveFromAppServerNotification(notification.method, statusType)) {
         this.markThreadLive(threadId);
-      } else if (
-        shouldMarkThreadStoppedFromAppServerNotification(notification.method, statusType)
-        || shouldStopDormantThreadAfterAppServerNotification({
+      } else if (shouldMarkThreadStoppedFromAppServerNotification(notification.method, statusType)) {
+        this.markThreadStopped(threadId);
+      } else if (shouldStopDormantThreadAfterAppServerNotification({
           method: notification.method,
           statusType,
           wasOngoing
-        })
-      ) {
-        this.markThreadStopped(threadId);
+        })) {
+        if (notification.method === "thread/status/changed" && statusType === "notLoaded") {
+          this.schedulePendingNotLoadedStop(threadId);
+        } else {
+          this.markThreadStopped(threadId);
+        }
       }
       if (
         notification.method === "thread/closed"
@@ -670,7 +700,11 @@ export class ProjectLiveMonitor extends EventEmitter {
       if (isOngoingThread(thread)) {
         this.markThreadLive(threadId);
       } else if (previousThread && isOngoingThread(previousThread)) {
-        this.markThreadStopped(threadId);
+        const pendingNotLoadedStop =
+          thread.status.type === "notLoaded" && this.pendingNotLoadedStopTimers.has(threadId);
+        if (!pendingNotLoadedStop) {
+          this.markThreadStopped(threadId);
+        }
       }
       const previousMessage = previousThread ? latestThreadAgentMessage(previousThread) : null;
       const nextMessage = latestThreadAgentMessage(thread);
@@ -770,6 +804,7 @@ export class ProjectLiveMonitor extends EventEmitter {
   }
 
   private markThreadLive(threadId: string): void {
+    this.clearPendingNotLoadedStop(threadId);
     this.ongoingThreadIds.add(threadId);
     this.stoppedAtByThreadId.delete(threadId);
     const removalTimer = this.threadRemovalTimers.get(threadId);
@@ -787,6 +822,7 @@ export class ProjectLiveMonitor extends EventEmitter {
       return;
     }
 
+    this.clearPendingNotLoadedStop(threadId);
     this.ongoingThreadIds.delete(threadId);
     this.stoppedAtByThreadId.set(threadId, Date.now());
     const removalTimer = this.threadRemovalTimers.get(threadId);
@@ -798,5 +834,44 @@ export class ProjectLiveMonitor extends EventEmitter {
       this.removeThread(threadId);
       this.scheduleSnapshot();
     }, RECENT_DONE_GRACE_MS + STOPPED_THREAD_REMOVAL_BUFFER_MS));
+  }
+
+  private clearPendingNotLoadedStop(threadId: string): void {
+    const timer = this.pendingNotLoadedStopTimers.get(threadId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.pendingNotLoadedStopTimers.delete(threadId);
+  }
+
+  private schedulePendingNotLoadedStop(threadId: string): void {
+    if (!this.threads.has(threadId)) {
+      return;
+    }
+    this.clearPendingNotLoadedStop(threadId);
+    const timer = setTimeout(() => {
+      this.pendingNotLoadedStopTimers.delete(threadId);
+      void this.confirmDormantNotLoadedThread(threadId);
+    }, NOT_LOADED_STOP_DEBOUNCE_MS);
+    this.pendingNotLoadedStopTimers.set(threadId, timer);
+  }
+
+  private async confirmDormantNotLoadedThread(threadId: string): Promise<void> {
+    if (!this.threads.has(threadId)) {
+      return;
+    }
+
+    await this.refreshThread(threadId);
+    const thread = this.threads.get(threadId) ?? null;
+    if (!thread || isOngoingThread(thread)) {
+      return;
+    }
+    if (thread.status.type !== "notLoaded") {
+      return;
+    }
+
+    this.markThreadStopped(threadId);
+    this.scheduleSnapshot();
   }
 }
