@@ -52,6 +52,7 @@ Entries stay under the active version until an explicit version bump is requeste
 ### Changed
 
 - Changed actor placement so normalized `waiting` sessions now stay on-desk instead of moving into the rec strip, and the browser docs/spec now separate universal modes from the renderer's actor behavior states.
+- Changed the per-floor shared-room `Shared` toggle to update immediately in place instead of waiting for a later workspace rerender, avoiding one-frame office-scene blanking while connected to a room.
 - Changed shared-room rendering so remote-only projects exposed by the room now stay visible as standalone floors, show active participant nicknames in the title bar, grey titles slightly when they are not local, and cool down for 1 hour before disappearing after updates stop.
 - Changed browser state cues so desk actors now get above-head RPGIAB markers for needs-user waits, typed thinking, planning, and blocked error states, layered below the toast system.
 - Changed Codex thread summarization so `plan` items and in-progress turns without stronger evidence map to `planning`, reserving `thinking` for stronger reasoning/commentary/compaction signals.

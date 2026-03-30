@@ -603,7 +603,11 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           : summary.source === "user"
             ? "agent-hover-summary agent-hover-summary-user"
             : "agent-hover-summary";
-        const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
+        const worktreeName = String(
+          agent && agent.network
+            ? (agent.worktreeName || "")
+            : (agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "")
+        ).trim();
         const worktreeHtml = worktreeName
           ? \`<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="\${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>\${escapeHtml(worktreeName)}</span></div>\`
           : "";

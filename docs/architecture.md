@@ -108,7 +108,7 @@ Sources:
   - live SSE updates for browser clients
   - all discovered workspaces stay live-monitored at once
   - reserved multiplayer status surface for a future secured sync transport
-  - browser settings can also attach the page to a shared PartyKit room using `host`, `room`, and an optional short `nickname`; those shared-room credentials now restore from machine-local Agents Office user data on launch, and each local floor exposes a persisted `Shared` toggle that controls whether that project is broadcast into the room
+  - browser settings can also attach the page to a shared PartyKit room using `host`, `room`, and an optional short `nickname`; those shared-room credentials now restore from machine-local Agents Office user data on launch, and each local floor exposes a persisted `Shared` toggle that controls whether that project is broadcast into the room without forcing a floor-shell rebuild
   - remote shared-room activity now merges client-side onto matching local workspaces when possible, and otherwise stays visible as remote-only floors with a 1-hour cooldown before disappearing after updates stop
 - map and terminal-style views through `?view=map|terminal`
 - live agents only on desks, plus the 4 most recent top-level lead sessions resting in the rec area

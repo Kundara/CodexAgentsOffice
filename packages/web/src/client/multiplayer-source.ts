@@ -27,12 +27,19 @@ export const MULTIPLAYER_SCRIPT = `
         );
       }
 
-      function normalizeMultiplayerSettings(settings) {
+      function normalizeMultiplayerSettings(settings, options = {}) {
         const host = sanitizeMultiplayerField(settings && settings.host);
         const room = sanitizeMultiplayerField(settings && settings.room);
         const hasCredentials = Boolean(host && room);
+        const fallbackEnabled = options && typeof options.fallbackEnabled === "boolean"
+          ? options.fallbackEnabled
+          : true;
         return {
-          enabled: Boolean(settings && settings.enabled) && hasCredentials,
+          enabled: hasCredentials && (
+            typeof (settings && settings.enabled) === "boolean"
+              ? Boolean(settings && settings.enabled)
+              : fallbackEnabled
+          ),
           host,
           room,
           nickname: sanitizeMultiplayerNickname(settings && settings.nickname),
@@ -806,7 +813,17 @@ export const MULTIPLAYER_SCRIPT = `
       }
 
       function commitMultiplayerSettings(nextSettings) {
-        const normalized = normalizeMultiplayerSettings(nextSettings);
+        const previousConfigured = Boolean(
+          (state.multiplayerDraft && state.multiplayerDraft.configured)
+          || (state.multiplayerSettings && state.multiplayerSettings.configured)
+        );
+        const fallbackEnabled = previousConfigured
+          ? Boolean(
+            (state.multiplayerDraft && state.multiplayerDraft.enabled)
+            || (state.multiplayerSettings && state.multiplayerSettings.enabled)
+          )
+          : true;
+        const normalized = normalizeMultiplayerSettings(nextSettings, { fallbackEnabled });
         state.multiplayerDraft = {
           enabled: normalized.enabled,
           host: normalized.host,

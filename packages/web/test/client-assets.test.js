@@ -241,7 +241,8 @@ test("multiplayer runtime persists per-project sharing and cools remote-only pro
   assert.ok(settingsSource.includes("multiplayerProjectShares: loadMultiplayerProjectShares(),"));
   assert.ok(settingsSource.includes("multiplayerDraft: { ...defaultIntegrationSettings().multiplayer },"));
   assert.ok(multiplayerSource.includes("const MULTIPLAYER_REMOTE_PROJECT_COOLDOWN_MS = 60 * 60 * 1000;"));
-  assert.ok(multiplayerSource.includes("function normalizeMultiplayerSettings(settings) {"));
+  assert.ok(multiplayerSource.includes("function normalizeMultiplayerSettings(settings, options = {}) {"));
+  assert.ok(multiplayerSource.includes("const fallbackEnabled = options && typeof options.fallbackEnabled === \"boolean\""));
   assert.ok(multiplayerSource.includes("function syncStoredMultiplayerSettings(settings) {"));
   assert.ok(multiplayerSource.includes("function loadMultiplayerProjectShares() {"));
   assert.ok(multiplayerSource.includes("function setProjectRootsSharedWithRoom(projectRoots, shared) {"));
@@ -251,6 +252,8 @@ test("multiplayer runtime persists per-project sharing and cools remote-only pro
   assert.ok(uiSource.includes('applyIntegrationSettingsResponse(await postJson("/api/settings/integrations", {'));
   assert.ok(uiSource.includes('multiplayerHostInput.addEventListener("input", () => {'));
   assert.ok(uiSource.includes('multiplayerSaveButton.addEventListener("click", () => {'));
+  assert.ok(multiplayerSource.includes("const previousConfigured = Boolean("));
+  assert.ok(multiplayerSource.includes("const fallbackEnabled = previousConfigured"));
 });
 
 test("workspace floors show multiplayer participants, grey remote-only titles, and expose a shared toggle", () => {
@@ -444,6 +447,7 @@ test("runtime source merges worktrees by repo and renders worktree badges in hov
   assert.ok(layoutSource.includes("sourceProjectRoot,"));
   assert.ok(renderSource.includes('const worktreeHtml = worktreeName'));
   assert.ok(renderSource.includes('class="agent-hover-worktree"'));
+  assert.ok(renderSource.includes('agent && agent.network'));
   assert.ok(renderSource.includes('class="agent-hover-peer"'));
   assert.ok(renderSource.includes('agent.network.peerRoom ?'));
   assert.ok(!renderSource.includes('" @ " + agent.network.peerHost'));

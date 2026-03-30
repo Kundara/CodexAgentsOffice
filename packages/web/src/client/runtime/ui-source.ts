@@ -48,30 +48,6 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
         }).join("");
       }
 
-      function workspaceFloorChromeToken(snapshot, options = {}) {
-        if (!snapshot) {
-          return "";
-        }
-        const participantToken = sharedParticipantLabelsForSnapshot(snapshot).join("|");
-        const localOwnershipToken = snapshotHasLocalProject(snapshot) ? "local" : "remote";
-        const shareToken = shouldRenderProjectShareToggle(snapshot)
-          ? (projectShareEnabledForSnapshot(snapshot) ? "shared-on" : "shared-off")
-          : "share-hidden";
-        const worktreeToken = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
-          ? worktreeNameForSnapshot(snapshot)
-          : "";
-        return [
-          snapshot.projectRoot,
-          projectLabel(snapshot.projectRoot),
-          participantToken,
-          localOwnershipToken,
-          shareToken,
-          worktreeToken,
-          options.focusMode === true ? "focus" : "default",
-          options.actionType || ""
-        ].join("::");
-      }
-
       function applySessionFocus() {
         const focusedKeys = new Set(state.focusedSessionKeys);
         const hasFocus = focusedKeys.size > 0;
@@ -392,13 +368,8 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
         const counts = fleetCounts({ projects: sessionProjects });
         const nextSceneToken = state.view === "map"
           ? (snapshot
-            ? \`project-shell::\${workspaceFloorChromeToken(snapshot, {
-              focusMode: state.workspaceFullscreen,
-              actionType: "toggle-workspace-focus"
-            })}\`
-            : \`fleet-shell::\${displayedProjects.map((project) => workspaceFloorChromeToken(project, {
-              actionType: "select-project"
-            })).join("||")}\`)
+            ? \`project-shell::\${snapshot.projectRoot}::\${state.workspaceFullscreen ? "focus" : "default"}\`
+            : \`fleet-shell::\${displayedProjects.map((project) => project.projectRoot).join("||")}\`)
           : (snapshot
             ? \`project::\${sceneSnapshotToken(snapshot)}\`
             : \`fleet::\${displayedProjects.map(sceneSnapshotToken).join("||")}\`);
@@ -565,6 +536,9 @@ export const CLIENT_RUNTIME_UI_SOURCE = `      function renderSessions(snapshot)
           try {
             const projectRoots = JSON.parse(target.dataset.projectRoots || "[]");
             const enabled = target.getAttribute("aria-pressed") === "true";
+            target.setAttribute("aria-pressed", enabled ? "false" : "true");
+            target.classList.toggle("active", !enabled);
+            target.title = !enabled ? "Shared with the room" : "Not shared with the room";
             setProjectRootsSharedWithRoom(projectRoots, !enabled);
           } catch {}
           return;

@@ -1886,12 +1886,19 @@ export function startClientApp(): void {
         );
       }
 
-      function normalizeMultiplayerSettings(settings) {
+      function normalizeMultiplayerSettings(settings, options = {}) {
         const host = sanitizeMultiplayerField(settings && settings.host);
         const room = sanitizeMultiplayerField(settings && settings.room);
         const hasCredentials = Boolean(host && room);
+        const fallbackEnabled = options && typeof options.fallbackEnabled === "boolean"
+          ? options.fallbackEnabled
+          : true;
         return {
-          enabled: Boolean(settings && settings.enabled) && hasCredentials,
+          enabled: hasCredentials && (
+            typeof (settings && settings.enabled) === "boolean"
+              ? Boolean(settings && settings.enabled)
+              : fallbackEnabled
+          ),
           host,
           room,
           nickname: sanitizeMultiplayerNickname(settings && settings.nickname),
@@ -2665,7 +2672,17 @@ export function startClientApp(): void {
       }
 
       function commitMultiplayerSettings(nextSettings) {
-        const normalized = normalizeMultiplayerSettings(nextSettings);
+        const previousConfigured = Boolean(
+          (state.multiplayerDraft && state.multiplayerDraft.configured)
+          || (state.multiplayerSettings && state.multiplayerSettings.configured)
+        );
+        const fallbackEnabled = previousConfigured
+          ? Boolean(
+            (state.multiplayerDraft && state.multiplayerDraft.enabled)
+            || (state.multiplayerSettings && state.multiplayerSettings.enabled)
+          )
+          : true;
+        const normalized = normalizeMultiplayerSettings(nextSettings, { fallbackEnabled });
         state.multiplayerDraft = {
           enabled: normalized.enabled,
           host: normalized.host,
@@ -4731,7 +4748,11 @@ export function startClientApp(): void {
           : summary.source === "user"
             ? "agent-hover-summary agent-hover-summary-user"
             : "agent-hover-summary";
-        const worktreeName = String(agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "").trim();
+        const worktreeName = String(
+          agent && agent.network
+            ? (agent.worktreeName || "")
+            : (agent && agent.worktreeName || worktreeNameForSnapshot(snapshot) || "")
+        ).trim();
         const worktreeHtml = worktreeName
           ? `<div class="agent-hover-worktree"><img class="worktree-inline-icon" src="${escapeHtml(worktreeIconUrl())}" alt="" aria-hidden="true" /><span>${escapeHtml(worktreeName)}</span></div>`
           : "";
@@ -8406,30 +8427,6 @@ function focusKeysIntersect(keys, focusedKeys) {
         }).join("");
       }
 
-      function workspaceFloorChromeToken(snapshot, options = {}) {
-        if (!snapshot) {
-          return "";
-        }
-        const participantToken = sharedParticipantLabelsForSnapshot(snapshot).join("|");
-        const localOwnershipToken = snapshotHasLocalProject(snapshot) ? "local" : "remote";
-        const shareToken = shouldRenderProjectShareToggle(snapshot)
-          ? (projectShareEnabledForSnapshot(snapshot) ? "shared-on" : "shared-off")
-          : "share-hidden";
-        const worktreeToken = Boolean(state.globalSceneSettings && state.globalSceneSettings.splitWorktrees)
-          ? worktreeNameForSnapshot(snapshot)
-          : "";
-        return [
-          snapshot.projectRoot,
-          projectLabel(snapshot.projectRoot),
-          participantToken,
-          localOwnershipToken,
-          shareToken,
-          worktreeToken,
-          options.focusMode === true ? "focus" : "default",
-          options.actionType || ""
-        ].join("::");
-      }
-
       function applySessionFocus() {
         const focusedKeys = new Set(state.focusedSessionKeys);
         const hasFocus = focusedKeys.size > 0;
@@ -8750,13 +8747,8 @@ function focusKeysIntersect(keys, focusedKeys) {
         const counts = fleetCounts({ projects: sessionProjects });
         const nextSceneToken = state.view === "map"
           ? (snapshot
-            ? `project-shell::${workspaceFloorChromeToken(snapshot, {
-              focusMode: state.workspaceFullscreen,
-              actionType: "toggle-workspace-focus"
-            })}`
-            : `fleet-shell::${displayedProjects.map((project) => workspaceFloorChromeToken(project, {
-              actionType: "select-project"
-            })).join("||")}`)
+            ? `project-shell::${snapshot.projectRoot}::${state.workspaceFullscreen ? "focus" : "default"}`
+            : `fleet-shell::${displayedProjects.map((project) => project.projectRoot).join("||")}`)
           : (snapshot
             ? `project::${sceneSnapshotToken(snapshot)}`
             : `fleet::${displayedProjects.map(sceneSnapshotToken).join("||")}`);
@@ -8923,6 +8915,9 @@ function focusKeysIntersect(keys, focusedKeys) {
           try {
             const projectRoots = JSON.parse(target.dataset.projectRoots || "[]");
             const enabled = target.getAttribute("aria-pressed") === "true";
+            target.setAttribute("aria-pressed", enabled ? "false" : "true");
+            target.classList.toggle("active", !enabled);
+            target.title = !enabled ? "Shared with the room" : "Not shared with the room";
             setProjectRootsSharedWithRoom(projectRoots, !enabled);
           } catch {}
           return;

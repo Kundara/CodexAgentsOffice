@@ -246,6 +246,7 @@ Worktree identity rules:
 - Shared-room form fields should behave like ordinary inputs while the user is typing; runtime refreshes must not rewrite the draft value under the cursor.
 - Shared-room settings should persist only on explicit save/clear actions or other explicit sharing controls, not on passive input repaint.
 - Local project share preferences should be persisted client-side per project root and default to sharing until the user turns a floor off.
+- Toggling a floor's `Shared` state should update the button immediately in place and must not rebuild or blank the office floor shell.
 - The browser should broadcast only the local project roots whose `Shared` floor toggle is still on.
 - Remote workspace activity should merge into locally matching workspaces when names match, but remote-only room workspaces should also remain visible as standalone floors when they do not exist locally.
 - Remote-only floors should grey the project-title treatment slightly so “not my workspace” reads as a distinct state without hiding the floor.
