@@ -847,6 +847,7 @@ Important detail:
 - the browser still receives refreshed fleet snapshots
 - those snapshots now include normalized `events` derived from raw Codex notifications
 - notification text is generated from both event-native `snapshot.events` and snapshot-diff compatibility paths
+- typed message notifications now prefer the event-native `snapshot.events` path directly, so browser message toasts no longer wait for `latestMessage` or other per-agent summary fields to catch up before they surface
 
 That means the browser is no longer snapshot-diff-only. It can react to real app-server event boundaries while still keeping snapshot diffs as a compatibility layer.
 

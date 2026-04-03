@@ -19,6 +19,8 @@ Entries stay under the active version until an explicit version bump is requeste
 
 ### Fixed
 
+- Fixed browser message toast timing so typed Codex reply events now surface from `snapshot.events` immediately, instead of waiting for per-agent summary fields like `latestMessage` to catch up first.
+- Fixed browser workstation seating so local Codex sessions in a `waiting` state now still count as desk-live during read-only or transient `notLoaded` gaps, preventing in-progress agents from dropping into the rec room between subagent/input waits and the next reply chunk.
 - Fixed shared-room self-duplication so the browser view and VS Code panel now reuse the same machine-local multiplayer device identity, preventing the same user's Codex agents from reappearing as remote peers when both clients join the same room.
 
 ### Docs

@@ -1251,6 +1251,18 @@ export function startClientApp(): void {
         });
       }
 
+      function pruneNotificationsForAgent(entry) {
+        if (!entry) {
+          return;
+        }
+        notifications = notifications.filter((candidate) => {
+          if (!candidate) {
+            return false;
+          }
+          return candidate.projectRoot !== entry.projectRoot || candidate.key !== entry.key;
+        });
+      }
+
       function notificationStackKey(entry) {
         if (!entry || entry.imageUrl) {
           return null;
@@ -1468,7 +1480,7 @@ export function startClientApp(): void {
         }
 
         if (priority >= NOTIFICATION_PRIORITY_MESSAGE) {
-          notifications = [];
+          pruneNotificationsForAgent(entry);
         }
 
         const lastShownAt = recentNotificationTimes.get(entry.semanticKey);
@@ -1612,7 +1624,7 @@ export function startClientApp(): void {
             phase: "updated",
             method: "item/agentMessage/delta",
             title: "Toast preview message",
-            detail: "Toast preview: message icon replaces the type label and clears older toasts."
+            detail: "Toast preview: message icon replaces the type label and clears older toasts for this agent."
           }
         ];
 
@@ -3374,6 +3386,7 @@ export function startClientApp(): void {
           "thinking",
           "planning",
           "delegating",
+          "waiting",
           "blocked"
         ].includes(String(state || "").toLowerCase());
       }
@@ -3387,6 +3400,7 @@ export function startClientApp(): void {
       function isRecentLeadCandidate(agent) {
         return agent.source !== "cloud"
           && agent.source !== "presence"
+          && !agent.network
           && !agent.parentThreadId
           && Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude");
       }
@@ -3447,7 +3461,7 @@ export function startClientApp(): void {
       }
 
       function isRecentSessionCandidate(agent) {
-        if (agent.source === "cloud" || agent.source === "presence") {
+        if (agent.source === "cloud" || agent.source === "presence" || agent.network) {
           return false;
         }
         if (!agent.parentThreadId) {
@@ -4743,7 +4757,7 @@ export function startClientApp(): void {
         const latestMessageChanged = Boolean(agent.latestMessage) && agent.latestMessage !== (previous ? previous.latestMessage : null);
         const typedMessageEvent = latestTypedMessageEvent(snapshot, agent);
 
-        if (latestMessageChanged) {
+        if (latestMessageChanged && !typedMessageEvent) {
           return {
             kindClass: "update",
             label: "",
@@ -4764,7 +4778,7 @@ export function startClientApp(): void {
           return null;
         }
 
-        if (agentHasTypedEvent(snapshot, agent) && !(typedMessageEvent && stateChanged)) {
+        if (agentHasTypedEvent(snapshot, agent)) {
           return null;
         }
 

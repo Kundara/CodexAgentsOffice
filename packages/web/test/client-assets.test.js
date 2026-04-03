@@ -148,6 +148,10 @@ test("client runtime keeps active local desks live, keeps waiting on-desk, and g
   const seatingSource = readRuntimeSource("seating-source.ts");
 
   assert.doesNotMatch(layoutSource, /if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}/);
+  assert.match(
+    layoutSource,
+    /function isDeskLiveLocalState\(state\) {\n\s+return \[\n(?:.*\n)*?\s+"waiting",\n\s+"blocked"\n\s+\]\.includes\(String\(state \|\| ""\)\.toLowerCase\(\)\);/
+  );
   assert.doesNotMatch(seatingSource, /if \(agent\.state === "waiting"\) {\n\s+return false;\n\s+}/);
   assert.match(
     seatingSource,
@@ -682,8 +686,8 @@ test("toast runtime preserves read command summaries and text-message priority",
     /else if \(executable === "ls" \|\| executable === "find" \|\| executable === "tree"\) {\n\s+title =\n\s+pathTokens\.length > 1 \? "Exploring " \+ pathTokens\.length \+ " files"\n\s+: firstPath \? "Explore " \+ cleanReportedPath\(snapshot\.projectRoot, firstPath\)\n\s+: "Explore files";/,
   );
   assert.ok(
-    renderSource.includes("if (latestMessageChanged) {\n          return {"),
-    "latest message changes should still build a notification descriptor"
+    renderSource.includes("if (latestMessageChanged && !typedMessageEvent) {\n          return {"),
+    "latest message fallback should only run when no typed message event is available"
   );
   assert.ok(
     renderSource.includes('isTextMessage: true'),
@@ -692,6 +696,10 @@ test("toast runtime preserves read command summaries and text-message priority",
   assert.ok(
     renderSource.includes('priority: NOTIFICATION_PRIORITY_MESSAGE'),
     "latest message notifications should still use message priority"
+  );
+  assert.ok(
+    renderSource.includes("if (agentHasTypedEvent(snapshot, agent)) {\n          return null;\n        }"),
+    "typed events should suppress the summary-diff notification path so event-native toasts surface first"
   );
 });
 
@@ -704,6 +712,31 @@ test("typed snapshot events still allow message toasts even when the agent is no
   assert.match(
     toastSource,
     /if \(\n?\s*!agent\.isCurrent\n?\s*&& agent\.state !== "waiting"\n?\s*&& agent\.state !== "blocked"\n?\s*&& event\.kind !== "message"\n?\s*&& !\(event\.kind === "tool" && event\.itemType === "webSearch"\)\n?\s*\) \{/,
+  );
+});
+
+test("message toasts only clear older toasts for the same agent", () => {
+  const toastSource = readFileSync(
+    join(__dirname, "../src/client/toast-source.ts"),
+    "utf8"
+  ).replace(/\r\n/g, "\n");
+
+  assert.ok(
+    toastSource.includes("function pruneNotificationsForAgent(entry) {"),
+    "toast runtime should define a same-agent prune helper for message toasts"
+  );
+  assert.match(
+    toastSource,
+    /return candidate\.projectRoot !== entry\.projectRoot \|\| candidate\.key !== entry\.key;/
+  );
+  assert.ok(
+    toastSource.includes("if (priority >= NOTIFICATION_PRIORITY_MESSAGE) {\n          pruneNotificationsForAgent(entry);\n        }"),
+    "message toasts should prune only same-agent toasts before enqueue"
+  );
+  assert.equal(
+    toastSource.includes("if (priority >= NOTIFICATION_PRIORITY_MESSAGE) {\n          notifications = [];\n        }"),
+    false,
+    "message toasts should not clear the global notification list"
   );
 });
 

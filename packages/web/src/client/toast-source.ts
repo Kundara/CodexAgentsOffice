@@ -516,6 +516,18 @@ export const TOAST_SCRIPT = `
         });
       }
 
+      function pruneNotificationsForAgent(entry) {
+        if (!entry) {
+          return;
+        }
+        notifications = notifications.filter((candidate) => {
+          if (!candidate) {
+            return false;
+          }
+          return candidate.projectRoot !== entry.projectRoot || candidate.key !== entry.key;
+        });
+      }
+
       function notificationStackKey(entry) {
         if (!entry || entry.imageUrl) {
           return null;
@@ -733,7 +745,7 @@ export const TOAST_SCRIPT = `
         }
 
         if (priority >= NOTIFICATION_PRIORITY_MESSAGE) {
-          notifications = [];
+          pruneNotificationsForAgent(entry);
         }
 
         const lastShownAt = recentNotificationTimes.get(entry.semanticKey);
@@ -877,7 +889,7 @@ export const TOAST_SCRIPT = `
             phase: "updated",
             method: "item/agentMessage/delta",
             title: "Toast preview message",
-            detail: "Toast preview: message icon replaces the type label and clears older toasts."
+            detail: "Toast preview: message icon replaces the type label and clears older toasts for this agent."
           }
         ];
 

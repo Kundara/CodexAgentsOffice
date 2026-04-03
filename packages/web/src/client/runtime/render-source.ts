@@ -445,7 +445,7 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
         const latestMessageChanged = Boolean(agent.latestMessage) && agent.latestMessage !== (previous ? previous.latestMessage : null);
         const typedMessageEvent = latestTypedMessageEvent(snapshot, agent);
 
-        if (latestMessageChanged) {
+        if (latestMessageChanged && !typedMessageEvent) {
           return {
             kindClass: "update",
             label: "",
@@ -466,7 +466,7 @@ export const CLIENT_RUNTIME_RENDER_SOURCE = `      function cleanReportedPath(pr
           return null;
         }
 
-        if (agentHasTypedEvent(snapshot, agent) && !(typedMessageEvent && stateChanged)) {
+        if (agentHasTypedEvent(snapshot, agent)) {
           return null;
         }
 

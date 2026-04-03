@@ -588,6 +588,7 @@ export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
           "thinking",
           "planning",
           "delegating",
+          "waiting",
           "blocked"
         ].includes(String(state || "").toLowerCase());
       }
@@ -601,6 +602,7 @@ export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
       function isRecentLeadCandidate(agent) {
         return agent.source !== "cloud"
           && agent.source !== "presence"
+          && !agent.network
           && !agent.parentThreadId
           && Boolean(agent.threadId || agent.taskId || agent.url || agent.source === "claude");
       }
@@ -661,7 +663,7 @@ export const CLIENT_RUNTIME_LAYOUT_SOURCE = `
       }
 
       function isRecentSessionCandidate(agent) {
-        if (agent.source === "cloud" || agent.source === "presence") {
+        if (agent.source === "cloud" || agent.source === "presence" || agent.network) {
           return false;
         }
         if (!agent.parentThreadId) {
